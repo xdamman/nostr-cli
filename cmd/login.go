@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
@@ -32,6 +33,9 @@ func init() {
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen)
+	cyan := color.New(color.FgCyan).SprintFunc()
+
 	var nsec, npub string
 	var err error
 
@@ -47,7 +51,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("Generated new keypair")
+		green.Println("Generated new keypair")
 	default:
 		fmt.Print("Enter your nsec (leave blank to generate a new keypair): ")
 		reader := bufio.NewReader(os.Stdin)
@@ -58,7 +62,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Println("Generated new keypair")
+			green.Println("Generated new keypair")
 		} else {
 			nsec = input
 			npub, _, _, err = crypto.NsecToKeys(nsec)
@@ -107,10 +111,10 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		if err == nil && meta != nil {
 			if err := profile.SaveCached(npub, meta); err == nil {
 				if meta.Name != "" {
-					fmt.Printf("Found profile: %s\n", meta.Name)
+					fmt.Printf("%s %s\n", cyan("Found profile:"), meta.Name)
 				}
 				if meta.DisplayName != "" {
-					fmt.Printf("Display name: %s\n", meta.DisplayName)
+					fmt.Printf("%s %s\n", cyan("Display name:"), meta.DisplayName)
 				}
 			}
 		} else {
@@ -119,7 +123,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Printf("✓ Logged in as %s\n", npub)
+	green.Printf("✓ Logged in as %s\n", npub)
 	fmt.Printf("  Profile dir: %s\n", dir)
 	return nil
 }

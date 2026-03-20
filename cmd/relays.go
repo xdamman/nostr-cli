@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 )
@@ -47,12 +48,13 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(relays) == 0 {
-		fmt.Println("No relays configured. Run 'nostr-cli relays add wss://...' to add one.")
+		color.Yellow("No relays configured. Run 'nostr relays add wss://...' to add one.")
 		return nil
 	}
 
+	bold := color.New(color.Bold).SprintFunc()
 	for i, r := range relays {
-		fmt.Printf("%d. %s\n", i+1, r)
+		fmt.Printf("%s %s\n", bold(fmt.Sprintf("%d.", i+1)), r)
 	}
 	return nil
 }
@@ -73,7 +75,7 @@ func runRelaysAdd(cmd *cobra.Command, args []string) error {
 	// Check duplicate
 	for _, r := range relays {
 		if r == url {
-			fmt.Printf("Relay %s is already in the list.\n", url)
+			color.Yellow("Relay %s is already in the list.", url)
 			return nil
 		}
 	}
@@ -83,7 +85,7 @@ func runRelaysAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save relays: %w", err)
 	}
 
-	fmt.Printf("✓ Added %s\n", url)
+	color.Green("✓ Added %s", url)
 	return nil
 }
 
@@ -125,13 +127,13 @@ func runRelaysRm(cmd *cobra.Command, args []string) error {
 	relays = append(relays[:removeIdx], relays[removeIdx+1:]...)
 
 	if len(relays) == 0 {
-		fmt.Println("Warning: removing the last relay. You won't be able to publish or fetch.")
+		color.Yellow("Warning: removing the last relay. You won't be able to publish or fetch.")
 	}
 
 	if err := config.SaveRelays(npub, relays); err != nil {
 		return fmt.Errorf("failed to save relays: %w", err)
 	}
 
-	fmt.Printf("✓ Removed %s\n", removed)
+	color.Green("✓ Removed %s", removed)
 	return nil
 }

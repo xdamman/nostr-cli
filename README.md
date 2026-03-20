@@ -29,15 +29,13 @@ Interacting with Nostr shouldn't require a GUI. `nostr-cli` gives you a fast, sc
 ## Installation
 
 ```bash
+# Install via go (binary will be named nostr-cli)
 go install github.com/xdamman/nostr-cli@latest
-```
 
-Or build from source:
-
-```bash
+# Or build from source as `nostr`
 git clone https://github.com/xdamman/nostr-cli.git
 cd nostr-cli
-go build -o nostr .
+make install   # installs as `nostr` in $GOPATH/bin
 ```
 
 ## Quick Start

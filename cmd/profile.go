@@ -7,14 +7,15 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/profile"
 )
 
 var profileCmd = &cobra.Command{
-	Use:   "profile",
-	Short: "View your profile metadata",
+	Use:   "profile [user]",
+	Short: "View a profile (yours by default, or specify a user)",
 	RunE:  runProfile,
 }
 
@@ -30,11 +31,67 @@ func init() {
 }
 
 func runProfile(cmd *cobra.Command, args []string) error {
+	label := color.New(color.FgCyan).SprintFunc()
+	errColor := color.New(color.FgRed)
+
+	if len(args) > 0 {
+		// User specified a target — look them up, do NOT fall back to current user
+		userArg := strings.TrimPrefix(args[0], "@")
+		return lookupUserProfile(userArg, label, errColor)
+	}
+
+	// No args — show current user's profile
 	npub, err := config.LoadResolvedProfile(profileFlag)
 	if err != nil {
 		return err
 	}
 
+	return showProfile(npub, label)
+}
+
+func lookupUserProfile(user string, label func(a ...interface{}) string, errColor *color.Color) error {
+	// If it looks like an npub, use directly
+	npub := user
+	if !strings.HasPrefix(user, "npub1") {
+		// TODO: resolve username/alias to npub
+		errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
+		os.Exit(1)
+	}
+
+	// Try fetching from relays
+	// Use current user's relays as a starting point
+	activeNpub, _ := config.ActiveProfile()
+	var relays []string
+	if activeNpub != "" {
+		relays, _ = config.LoadRelays(activeNpub)
+	}
+
+	if len(relays) > 0 {
+		ctx := context.Background()
+		meta, err := profile.FetchFromRelays(ctx, npub, relays)
+		if err != nil || meta == nil {
+			errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
+			os.Exit(1)
+		}
+
+		fmt.Printf("%s %s\n", label("npub:"), npub)
+		printColorField(label, "Name", meta.Name)
+		printColorField(label, "Display Name", meta.DisplayName)
+		printColorField(label, "About", meta.About)
+		printColorField(label, "Picture", meta.Picture)
+		printColorField(label, "NIP-05", meta.NIP05)
+		printColorField(label, "Banner", meta.Banner)
+		printColorField(label, "Website", meta.Website)
+		printColorField(label, "Lightning", meta.LUD16)
+		return nil
+	}
+
+	errColor.Fprintf(os.Stderr, "Error: user %q not found (no relays configured)\n", user)
+	os.Exit(1)
+	return nil
+}
+
+func showProfile(npub string, label func(a ...interface{}) string) error {
 	// Try cached first
 	meta, _ := profile.LoadCached(npub)
 
@@ -53,20 +110,22 @@ func runProfile(cmd *cobra.Command, args []string) error {
 		meta = &profile.Metadata{}
 	}
 
-	fmt.Printf("npub:         %s\n", npub)
-	printField("Name", meta.Name)
-	printField("Display Name", meta.DisplayName)
-	printField("About", meta.About)
-	printField("Picture", meta.Picture)
-	printField("NIP-05", meta.NIP05)
-	printField("Banner", meta.Banner)
-	printField("Website", meta.Website)
-	printField("Lightning", meta.LUD16)
+	fmt.Printf("%s %s\n", label("npub:"), npub)
+	printColorField(label, "Name", meta.Name)
+	printColorField(label, "Display Name", meta.DisplayName)
+	printColorField(label, "About", meta.About)
+	printColorField(label, "Picture", meta.Picture)
+	printColorField(label, "NIP-05", meta.NIP05)
+	printColorField(label, "Banner", meta.Banner)
+	printColorField(label, "Website", meta.Website)
+	printColorField(label, "Lightning", meta.LUD16)
 
 	return nil
 }
 
 func runProfileUpdate(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen)
+
 	npub, err := config.LoadResolvedProfile(profileFlag)
 	if err != nil {
 		return err
@@ -103,7 +162,7 @@ func runProfileUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to publish: %w", err)
 	}
 
-	fmt.Println("✓ Profile updated and published")
+	green.Println("✓ Profile updated and published")
 	return nil
 }
 
@@ -121,8 +180,8 @@ func promptField(reader *bufio.Reader, label, current string) string {
 	return input
 }
 
-func printField(label, value string) {
+func printColorField(label func(a ...interface{}) string, name, value string) {
 	if value != "" {
-		fmt.Printf("%-14s%s\n", label+":", value)
+		fmt.Printf("%-14s %s\n", label(name+":"), value)
 	}
 }
