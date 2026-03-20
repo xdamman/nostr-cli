@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -44,21 +47,18 @@ func init() {
 
 func runVersion(cmd *cobra.Command, args []string) {
 	label := color.New(color.FgCyan).SprintFunc()
-	fmt.Printf("nostr-cli %s\n", Version)
+	fmt.Printf("nostr %s\n", Version)
 	fmt.Printf("%s %s\n", label("Commit:"), CommitSHA)
 	fmt.Printf("%s %s\n", label("Date:  "), CommitDate)
 	fmt.Printf("%s %s\n", label("Message:"), CommitMsg)
 }
 
-// ghCommit holds the fields we need from the GitHub commits API.
-type ghCommit struct {
-	SHA    string `json:"sha"`
-	Commit struct {
-		Message string `json:"message"`
-		Author  struct {
-			Date string `json:"date"`
-		} `json:"author"`
-	} `json:"commit"`
+// ghRelease holds the fields we need from the GitHub releases API.
+type ghRelease struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	PublishedAt string `json:"published_at"`
+	Body        string `json:"body"`
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -71,12 +71,11 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Version: %s\n", Version)
 	fmt.Printf("  Commit:  %s\n", CommitSHA)
 	fmt.Printf("  Date:    %s\n", CommitDate)
-	fmt.Printf("  Message: %s\n", CommitMsg)
 
-	// Fetch latest commit from main
+	// Fetch latest release
 	fmt.Println("\nChecking for updates...")
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/xdamman/nostr-cli/commits/main")
+	resp, err := client.Get("https://api.github.com/repos/xdamman/nostr-cli/releases/latest")
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
@@ -86,20 +85,15 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
-	var latest ghCommit
+	var latest ghRelease
 	if err := json.NewDecoder(resp.Body).Decode(&latest); err != nil {
-		return fmt.Errorf("failed to parse commit info: %w", err)
+		return fmt.Errorf("failed to parse release info: %w", err)
 	}
 
-	shortSHA := latest.SHA
-	if len(shortSHA) > 7 {
-		shortSHA = shortSHA[:7]
-	}
-	// Take only the first line of the commit message
-	latestMsg := strings.SplitN(latest.Commit.Message, "\n", 2)[0]
-	latestDate := latest.Commit.Author.Date
+	latestVersion := strings.TrimPrefix(latest.TagName, "v")
+	currentVersion := strings.TrimPrefix(Version, "v")
 
-	if shortSHA == CommitSHA {
+	if latestVersion == currentVersion {
 		green.Println("\nYou're up to date.")
 		return nil
 	}
@@ -107,9 +101,11 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// Show latest version
 	fmt.Println()
 	fmt.Println(label("Latest version:"))
-	fmt.Printf("  Commit:  %s\n", shortSHA)
-	fmt.Printf("  Date:    %s\n", latestDate)
-	fmt.Printf("  Message: %s\n", latestMsg)
+	fmt.Printf("  Version: %s\n", latest.TagName)
+	fmt.Printf("  Date:    %s\n", latest.PublishedAt)
+	if latest.Name != "" {
+		fmt.Printf("  Name:    %s\n", latest.Name)
+	}
 
 	if !updateYesFlag {
 		yellow.Print("\nUpdate to latest version? [Y/n] ")
@@ -122,14 +118,94 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("\nUpdating...")
-	install := exec.Command("go", "install", "github.com/xdamman/nostr-cli@latest")
-	install.Stdout = os.Stdout
-	install.Stderr = os.Stderr
-	if err := install.Run(); err != nil {
-		return fmt.Errorf("update failed: %w", err)
+	fmt.Println("\nDownloading...")
+
+	// Determine OS and arch
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	tarball := fmt.Sprintf("nostr_%s_%s.tar.gz", goos, goarch)
+	downloadURL := fmt.Sprintf("https://github.com/xdamman/nostr-cli/releases/download/%s/%s", latest.TagName, tarball)
+
+	resp, err = client.Get(downloadURL)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download failed: HTTP %d (no binary for %s/%s?)", resp.StatusCode, goos, goarch)
 	}
 
-	green.Println("Updated successfully.")
+	// Extract the binary from the tarball
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to decompress: %w", err)
+	}
+	defer gr.Close()
+
+	newBinary, err := extractTarBinary(gr, "nostr")
+	if err != nil {
+		return fmt.Errorf("failed to extract binary: %w", err)
+	}
+
+	// Find where the current binary lives
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot determine executable path: %w", err)
+	}
+	// Resolve symlinks
+	execPath, err = resolveSymlinks(execPath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve executable path: %w", err)
+	}
+
+	// Write to a temp file next to the binary, then rename (atomic on same FS)
+	tmpPath := execPath + ".tmp"
+	if err := os.WriteFile(tmpPath, newBinary, 0755); err != nil {
+		// Try with sudo hint
+		os.Remove(tmpPath)
+		return fmt.Errorf("cannot write to %s (try running with sudo): %w", execPath, err)
+	}
+
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("cannot replace binary: %w", err)
+	}
+
+	green.Printf("\nUpdated to %s\n", latest.TagName)
 	return nil
+}
+
+// extractTarBinary reads a tar stream and returns the contents of the named file.
+func extractTarBinary(r io.Reader, name string) ([]byte, error) {
+	tr := tar.NewReader(r)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hdr.Name == name || strings.HasSuffix(hdr.Name, "/"+name) {
+			return io.ReadAll(tr)
+		}
+	}
+	return nil, fmt.Errorf("binary %q not found in archive", name)
+}
+
+// resolveSymlinks resolves a path through symlinks to the real file.
+func resolveSymlinks(path string) (string, error) {
+	resolved, err := os.Readlink(path)
+	if err != nil {
+		// Not a symlink
+		return path, nil
+	}
+	if !strings.HasPrefix(resolved, "/") {
+		// Relative symlink — resolve relative to parent dir
+		dir := path[:strings.LastIndex(path, "/")+1]
+		resolved = dir + resolved
+	}
+	return resolveSymlinks(resolved)
 }

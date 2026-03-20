@@ -1,4 +1,4 @@
-# nostr-cli
+# nostr
 
 > A human-friendly command-line interface for the [Nostr](https://nostr.com) protocol.
 
@@ -8,7 +8,7 @@
 
 ## Why?
 
-Interacting with Nostr shouldn't require a GUI. `nostr-cli` gives you a fast, scriptable CLI that works like `git` — manage multiple profiles, switch contexts, and publish events from your terminal.
+Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, scriptable CLI that works like `git` — manage multiple profiles, switch contexts, and publish events from your terminal.
 
 - **Multi-profile support** — switch between identities like git branches
 - **Human-friendly** — use aliases and usernames, not just npubs
@@ -25,17 +25,34 @@ Interacting with Nostr shouldn't require a GUI. `nostr-cli` gives you a fast, sc
 - 🏷️ Create aliases for quick access to contacts
 - 👥 Switch between multiple profiles
 - 📖 Built-in NIP reference viewer
+- 🐚 Interactive shell with feed, posting, and slash commands
 
 ## Installation
 
-```bash
-# Install via go (binary will be named nostr-cli)
-go install github.com/xdamman/nostr-cli@latest
+### Homebrew (macOS / Linux)
 
-# Or build from source as `nostr`
+```bash
+brew install xdamman/tap/nostr
+```
+
+### Shell script (macOS / Linux)
+
+```bash
+curl -sf https://raw.githubusercontent.com/xdamman/nostr-cli/main/install.sh | sh
+```
+
+### From source (requires Go)
+
+```bash
 git clone https://github.com/xdamman/nostr-cli.git
 cd nostr-cli
 make install   # installs as `nostr` in $GOPATH/bin
+```
+
+### Update
+
+```bash
+nostr update
 ```
 
 ## Quick Start
@@ -43,6 +60,9 @@ make install   # installs as `nostr` in $GOPATH/bin
 ```bash
 # Create or import a profile
 nostr login
+
+# Launch the interactive shell (feed + posting + slash commands)
+nostr
 
 # Post a note
 nostr post "Hello Nostr!"
@@ -93,8 +113,19 @@ nostr npub1...
 | Command | Description |
 |---------|-------------|
 | `nostr nip[0-9]+` | View a NIP specification |
+| `nostr version` | Print version info |
+| `nostr update` | Check for updates and self-update |
 
 > **Tip:** Append `--help` to any command for usage details — e.g. `nostr dm --help`
+
+## Interactive Shell
+
+Run `nostr` with no arguments to launch the interactive shell:
+
+- Shows your feed from followed users
+- Type to post a note
+- Slash commands: `/follow`, `/unfollow`, `/dm`, `/profile`, `/switch`, `/alias`, `/aliases`
+- Tab/arrow-key autocomplete for slash commands
 
 ## Configuration
 
@@ -107,7 +138,10 @@ All state lives in `~/.nostr/`:
         ├── nsec              # Private key (chmod 600)
         ├── profile.json      # Kind 0 metadata
         ├── relays.json       # Preferred relay list
-        └── aliases.csv       # Contact aliases
+        ├── aliases.csv       # Contact aliases
+        └── cache/
+            ├── events.jsonl      # Cached events
+            └── profiles.jsonl    # Cached profile metadata
 ```
 
 Each profile is isolated — relays, aliases, and keys are scoped per identity.
@@ -121,6 +155,45 @@ go test ./...
 # Run unit tests only (skip relay integration tests)
 go test -short ./...
 ```
+
+## Releasing
+
+Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions. Pushing a version tag triggers a build that cross-compiles binaries for all platforms and publishes them to GitHub Releases and the Homebrew tap.
+
+### Supported platforms
+
+| OS | Architecture | Notes |
+|----|-------------|-------|
+| macOS | Intel (amd64) | Intel Macs |
+| macOS | Apple Silicon (arm64) | M1/M2/M3/M4 Macs |
+| Linux | x86_64 (amd64) | Standard PCs, servers |
+| Linux | ARM64 (arm64) | Raspberry Pi, Asahi Linux, Snapdragon laptops |
+| Windows | x86_64 (amd64) | Standard PCs |
+| Windows | ARM64 (arm64) | Snapdragon PCs (Surface Pro X, etc.) |
+
+### How to release
+
+```bash
+# 1. Make sure main is clean and tests pass
+git checkout main
+git pull
+go test ./...
+
+# 2. Tag a new version (follow semver)
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+That's it. The GitHub Action will:
+- Cross-compile 6 binaries (3 OS × 2 architectures)
+- Create a GitHub Release with changelogs and downloadable archives
+- Update the Homebrew formula in [xdamman/homebrew-tap](https://github.com/xdamman/homebrew-tap)
+
+Users will then get the new version via `nostr update`, `brew upgrade nostr`, or re-running the install script.
+
+### Version numbers
+
+The version is derived entirely from the git tag — there is no version file to edit. GoReleaser injects the tag into the binary at build time via ldflags.
 
 ## Contributing
 

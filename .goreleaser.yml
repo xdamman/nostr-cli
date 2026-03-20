@@ -1,0 +1,51 @@
+version: 2
+
+project_name: nostr
+
+builds:
+  - binary: nostr
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X '{{.ModulePath}}/cmd.Version={{.Version}}'
+      - -X '{{.ModulePath}}/cmd.CommitSHA={{.ShortCommit}}'
+      - -X '{{.ModulePath}}/cmd.CommitDate={{.Date}}'
+      - -X '{{.ModulePath}}/cmd.CommitMsg={{.Summary}}'
+
+archives:
+  - format: tar.gz
+    name_template: "nostr_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - repository:
+      owner: xdamman
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    name: nostr
+    homepage: https://github.com/xdamman/nostr-cli
+    description: A command-line client for the Nostr protocol
+    install: |
+      bin.install "nostr"
