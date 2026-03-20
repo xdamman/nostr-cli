@@ -129,6 +129,15 @@ func SaveDefaultRelays(npub string) error {
 	return SaveRelays(npub, relays)
 }
 
+// DefaultRelays returns the embedded default relay list.
+func DefaultRelays() []string {
+	var relays []string
+	if err := json.Unmarshal(DefaultRelaysJSON, &relays); err != nil {
+		return nil
+	}
+	return relays
+}
+
 // LoadResolvedProfile returns the npub to use, considering the --profile flag.
 func LoadResolvedProfile(profileFlag string) (string, error) {
 	if profileFlag != "" {
