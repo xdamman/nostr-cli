@@ -11,6 +11,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/cobra"
+	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
@@ -102,6 +103,9 @@ func runPost(cmd *cobra.Command, args []string) error {
 	if err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
 		return err
 	}
+
+	// Cache the event
+	_ = cache.LogEvent(npub, event)
 
 	// Encode nevent
 	nevent, _ := nip19.EncodeEvent(event.ID, relays, pubHex)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/relay"
@@ -76,6 +77,9 @@ func FetchFromRelays(ctx context.Context, npub string, relayURLs []string) (*Met
 		return nil, nil
 	}
 
+	// Cache the fetched event
+	_ = cache.LogEvent(npub, *event)
+
 	var m Metadata
 	if err := json.Unmarshal([]byte(event.Content), &m); err != nil {
 		return nil, fmt.Errorf("invalid kind 0 content: %w", err)
@@ -114,5 +118,11 @@ func PublishMetadata(ctx context.Context, npub string, m *Metadata, relayURLs []
 		return fmt.Errorf("failed to sign event: %w", err)
 	}
 
-	return relay.PublishEvent(ctx, event, relayURLs)
+	if err := relay.PublishEvent(ctx, event, relayURLs); err != nil {
+		return err
+	}
+
+	// Cache the published event
+	_ = cache.LogEvent(npub, event)
+	return nil
 }

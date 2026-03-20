@@ -114,3 +114,52 @@ func FetchEvent(ctx context.Context, filter nostr.Filter, relayURLs []string) (*
 	wg.Wait()
 	return best, nil
 }
+
+// FetchEvents fetches all events matching the filter from relays (deduplicated by ID).
+func FetchEvents(ctx context.Context, filter nostr.Filter, relayURLs []string) ([]*nostr.Event, error) {
+	if len(relayURLs) == 0 {
+		return nil, fmt.Errorf("no relays configured")
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, FetchTimeout)
+	defer cancel()
+
+	var (
+		mu     sync.Mutex
+		result []*nostr.Event
+		seen   = make(map[string]bool)
+		wg     sync.WaitGroup
+	)
+
+	for _, url := range relayURLs {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			connectCtx, connectCancel := context.WithTimeout(fetchCtx, ConnectTimeout)
+			defer connectCancel()
+
+			r, err := nostr.RelayConnect(connectCtx, url)
+			if err != nil {
+				return
+			}
+			defer r.Close()
+
+			events, err := r.QuerySync(fetchCtx, filter)
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			for _, ev := range events {
+				if !seen[ev.ID] {
+					seen[ev.ID] = true
+					result = append(result, ev)
+				}
+			}
+		}(url)
+	}
+
+	wg.Wait()
+	return result, nil
+}
