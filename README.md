@@ -112,13 +112,24 @@ All state lives in `~/.nostr/`:
 
 Each profile is isolated — relays, aliases, and keys are scoped per identity.
 
+## Testing
+
+```bash
+# Run all tests (includes integration tests that hit real relays)
+go test ./...
+
+# Run unit tests only (skip relay integration tests)
+go test -short ./...
+```
+
 ## Contributing
 
 Contributions welcome! Check [docs/ROADMAP.md](docs/ROADMAP.md) for planned features and [docs/COMMANDS.md](docs/COMMANDS.md) for command specs.
 
 1. Fork the repo
 2. Create a feature branch
-3. Submit a PR
+3. Make sure tests pass: `go test ./...`
+4. Submit a PR
 
 ## License
 

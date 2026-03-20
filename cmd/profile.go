@@ -58,36 +58,39 @@ func lookupUserProfile(user string, label func(a ...interface{}) string, errColo
 		os.Exit(1)
 	}
 
-	// Try fetching from relays
-	// Use current user's relays as a starting point
+	// Merge current user's relays with defaults for broader coverage
 	activeNpub, _ := config.ActiveProfile()
 	var relays []string
 	if activeNpub != "" {
 		relays, _ = config.LoadRelays(activeNpub)
 	}
-
-	if len(relays) > 0 {
-		ctx := context.Background()
-		meta, err := profile.FetchFromRelays(ctx, npub, relays)
-		if err != nil || meta == nil {
-			errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
-			os.Exit(1)
+	// Always include default relays when looking up other users
+	seen := make(map[string]bool, len(relays))
+	for _, r := range relays {
+		seen[r] = true
+	}
+	for _, r := range config.DefaultRelays() {
+		if !seen[r] {
+			relays = append(relays, r)
 		}
-
-		fmt.Printf("%s %s\n", label("npub:"), npub)
-		printColorField(label, "Name", meta.Name)
-		printColorField(label, "Display Name", meta.DisplayName)
-		printColorField(label, "About", meta.About)
-		printColorField(label, "Picture", meta.Picture)
-		printColorField(label, "NIP-05", meta.NIP05)
-		printColorField(label, "Banner", meta.Banner)
-		printColorField(label, "Website", meta.Website)
-		printColorField(label, "Lightning", meta.LUD16)
-		return nil
 	}
 
-	errColor.Fprintf(os.Stderr, "Error: user %q not found (no relays configured)\n", user)
-	os.Exit(1)
+	ctx := context.Background()
+	meta, err := profile.FetchFromRelays(ctx, npub, relays)
+	if err != nil || meta == nil {
+		errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
+		os.Exit(1)
+	}
+
+	fmt.Printf("%s %s\n", label("npub:"), npub)
+	printColorField(label, "Name", meta.Name)
+	printColorField(label, "Display Name", meta.DisplayName)
+	printColorField(label, "About", meta.About)
+	printColorField(label, "Picture", meta.Picture)
+	printColorField(label, "NIP-05", meta.NIP05)
+	printColorField(label, "Banner", meta.Banner)
+	printColorField(label, "Website", meta.Website)
+	printColorField(label, "Lightning", meta.LUD16)
 	return nil
 }
 

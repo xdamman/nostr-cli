@@ -4,5 +4,6 @@
   "wss://relay.primal.net",
   "wss://relay.nostr.band",
   "wss://nostr.mom",
-  "wss://relay.mostr.pub"
+  "wss://relay.mostr.pub",
+  "wss://purplepag.es"
 ]
