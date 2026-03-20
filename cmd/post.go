@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -17,7 +18,10 @@ import (
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 )
 
-var postReply string
+var (
+	postReply   string
+	postJSONOut bool
+)
 
 var postCmd = &cobra.Command{
 	Use:   "post [message]",
@@ -28,6 +32,7 @@ var postCmd = &cobra.Command{
 
 func init() {
 	postCmd.Flags().StringVar(&postReply, "reply", "", "Event ID to reply to (hex or note1/nevent)")
+	postCmd.Flags().BoolVar(&postJSONOut, "json", false, "Output signed event as JSON without publishing")
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -90,6 +95,16 @@ func runPost(cmd *cobra.Command, args []string) error {
 	// Sign
 	if err := event.Sign(skHex); err != nil {
 		return fmt.Errorf("failed to sign event: %w", err)
+	}
+
+	// --json: output signed event without publishing
+	if postJSONOut {
+		data, err := json.MarshalIndent(event, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal event: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	// Publish

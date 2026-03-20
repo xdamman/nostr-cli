@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/fatih/color"
+	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 )
@@ -52,9 +56,42 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	bold := color.New(color.Bold).SprintFunc()
+	// Check connectivity for all relays in parallel
+	type relayStatus struct {
+		url       string
+		reachable bool
+	}
+
+	statuses := make([]relayStatus, len(relays))
+	var wg sync.WaitGroup
+
 	for i, r := range relays {
-		fmt.Printf("%s %s\n", bold(fmt.Sprintf("%d.", i+1)), r)
+		statuses[i] = relayStatus{url: r}
+		wg.Add(1)
+		go func(idx int, url string) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			relay, err := nostr.RelayConnect(ctx, url)
+			if err == nil {
+				statuses[idx].reachable = true
+				relay.Close()
+			}
+		}(i, r)
+	}
+
+	wg.Wait()
+
+	bold := color.New(color.Bold).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+
+	for i, s := range statuses {
+		status := red("✗")
+		if s.reachable {
+			status = green("✓")
+		}
+		fmt.Printf("%s %s %s\n", bold(fmt.Sprintf("%d.", i+1)), status, s.url)
 	}
 	return nil
 }

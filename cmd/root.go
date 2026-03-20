@@ -1,13 +1,19 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
-var profileFlag string
+var (
+	profileFlag string
+	noColorFlag bool
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "nostr",
@@ -16,13 +22,113 @@ var rootCmd = &cobra.Command{
 	// Catch-all: treat unknown first arg as user lookup
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Respect --no-color flag and NO_COLOR env var (https://no-color.org/)
+		if noColorFlag || os.Getenv("NO_COLOR") != "" {
+			color.NoColor = true
+		}
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
+			// Check if first arg looks like a NIP reference (nip01, nip-44, NIP01, etc.)
+			if isNIPArg(args[0]) {
+				return fetchAndDisplayNIP(args[0])
+			}
 			return runUserLookup(args)
 		}
 		return cmd.Help()
 	},
 	Args: cobra.ArbitraryArgs,
+}
+
+// colorizeHelp applies color to help output text.
+func colorizeHelp(s string) string {
+	if color.NoColor {
+		return s
+	}
+	cyan := color.New(color.FgCyan, color.Bold).SprintFunc()
+	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+	dimItalic := color.New(color.Faint).SprintFunc()
+
+	sectionHeaders := map[string]bool{
+		"Usage:":               true,
+		"Available Commands:":  true,
+		"Additional Commands:": true,
+		"Flags:":               true,
+		"Global Flags:":        true,
+		"Aliases:":             true,
+		"Examples:":            true,
+	}
+
+	lines := strings.Split(s, "\n")
+	inExamples := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Section headers
+		if sectionHeaders[trimmed] {
+			lines[i] = yellow(line)
+			inExamples = trimmed == "Examples:"
+			continue
+		}
+
+		// Example lines (dim)
+		if inExamples && strings.HasPrefix(line, "  ") {
+			lines[i] = dimItalic(line)
+			continue
+		}
+		if inExamples && trimmed == "" {
+			continue
+		}
+		if inExamples && !strings.HasPrefix(line, " ") {
+			inExamples = false
+		}
+
+		// Colorize flag names (lines with --)
+		if strings.HasPrefix(line, "  ") && strings.Contains(line, "--") {
+			flagRe := regexp.MustCompile(`(--?\S+)`)
+			lines[i] = flagRe.ReplaceAllStringFunc(line, func(match string) string {
+				return green(match)
+			})
+			continue
+		}
+
+		// Usage lines with "nostr" — colorize command name
+		if strings.HasPrefix(trimmed, "nostr ") && i > 0 {
+			prevTrimmed := strings.TrimSpace(lines[i-1])
+			if prevTrimmed == "" || sectionHeaders[prevTrimmed+":"] || strings.HasSuffix(prevTrimmed, ":") {
+				lines[i] = "  " + cyan(trimmed)
+			}
+			continue
+		}
+
+		// Command list entries: "  command   description"
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && len(trimmed) > 0 {
+			parts := strings.SplitN(trimmed, " ", 2)
+			if len(parts) == 2 {
+				cmdName := parts[0]
+				rest := strings.TrimLeft(parts[1], " ")
+				if len(cmdName) > 0 && !strings.HasPrefix(cmdName, "-") && len(cmdName) < 20 {
+					padding := strings.TrimPrefix(line, "  "+cmdName)
+					paddingBeforeDesc := strings.TrimSuffix(padding, rest)
+					lines[i] = "  " + cyan(cmdName) + paddingBeforeDesc + rest
+				}
+			}
+		}
+
+		// "Use ..." footer line
+		if strings.HasPrefix(trimmed, "Use \"nostr") {
+			lines[i] = dimItalic(line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// isNIPArg checks if an argument looks like a NIP reference (nip01, nip-44, NIP01, etc.)
+func isNIPArg(s string) bool {
+	re := regexp.MustCompile(`(?i)^nip[- ]?\d+$`)
+	return re.MatchString(s)
 }
 
 func Execute() {
@@ -32,6 +138,12 @@ func Execute() {
 		// If the error is about unknown command, try user lookup
 		errStr := err.Error()
 		if len(os.Args) > 1 && (contains(errStr, "unknown command") || contains(errStr, "unknown flag")) {
+			// Try NIP lookup first
+			if isNIPArg(os.Args[1]) {
+				if nipErr := fetchAndDisplayNIP(os.Args[1]); nipErr == nil {
+					return
+				}
+			}
 			if lookupErr := runUserLookup(os.Args[1:]); lookupErr == nil {
 				return
 			}
@@ -56,4 +168,11 @@ func searchString(s, substr string) bool {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub of the profile to use (default: active profile)")
+	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
+
+	// Set custom help function to colorize output
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		usage := cmd.UsageString()
+		fmt.Print(colorizeHelp(usage))
+	})
 }

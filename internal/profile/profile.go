@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/xdamman/nostr-cli/internal/cache"
@@ -41,6 +42,24 @@ func LoadCached(npub string) (*Metadata, error) {
 		return nil, fmt.Errorf("invalid profile.json: %w", err)
 	}
 	return &m, nil
+}
+
+// LoadCachedWithTime is like LoadCached but also used for cache freshness checks.
+func LoadCachedWithTime(npub string) (*Metadata, error) {
+	return LoadCached(npub)
+}
+
+// IsCacheFresh returns true if the profile.json was modified less than 1 hour ago.
+func IsCacheFresh(npub string) bool {
+	dir, err := config.ProfileDir(npub)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dir, "profile.json"))
+	if err != nil {
+		return false
+	}
+	return time.Since(info.ModTime()) < time.Hour
 }
 
 // SaveCached writes the profile metadata to profile.json.

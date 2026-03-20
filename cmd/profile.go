@@ -3,15 +3,23 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
+	"github.com/xdamman/nostr-cli/internal/crypto"
+	"github.com/xdamman/nostr-cli/internal/nip05"
 	"github.com/xdamman/nostr-cli/internal/profile"
+	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
+	"github.com/xdamman/nostr-cli/internal/resolve"
 )
+
+var profileJSONFlag bool
 
 var profileCmd = &cobra.Command{
 	Use:   "profile [user]",
@@ -26,6 +34,7 @@ var profileUpdateCmd = &cobra.Command{
 }
 
 func init() {
+	profileCmd.Flags().BoolVar(&profileJSONFlag, "json", false, "Output raw kind 0 event as JSON")
 	profileCmd.AddCommand(profileUpdateCmd)
 	rootCmd.AddCommand(profileCmd)
 }
@@ -46,20 +55,38 @@ func runProfile(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if profileJSONFlag {
+		return showProfileJSON(npub)
+	}
+
 	return showProfile(npub, label)
 }
 
 func lookupUserProfile(user string, label func(a ...interface{}) string, errColor *color.Color) error {
-	// If it looks like an npub, use directly
+	// Try to resolve the user
+	activeNpub, _ := config.ActiveProfile()
+
 	npub := user
 	if !strings.HasPrefix(user, "npub1") {
-		// TODO: resolve username/alias to npub
-		errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
-		os.Exit(1)
+		// Try resolve via alias/nip05
+		if activeNpub != "" {
+			resolved, err := resolve.ResolveToNpub(activeNpub, user)
+			if err != nil {
+				errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
+				os.Exit(1)
+			}
+			npub = resolved
+		} else {
+			errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
+			os.Exit(1)
+		}
+	}
+
+	if profileJSONFlag {
+		return showProfileJSON(npub)
 	}
 
 	// Merge current user's relays with defaults for broader coverage
-	activeNpub, _ := config.ActiveProfile()
 	var relays []string
 	if activeNpub != "" {
 		relays, _ = config.LoadRelays(activeNpub)
@@ -82,21 +109,105 @@ func lookupUserProfile(user string, label func(a ...interface{}) string, errColo
 		os.Exit(1)
 	}
 
+	pubHex, _ := crypto.NpubToHex(npub)
 	fmt.Printf("%s %s\n", label("npub:"), npub)
 	printColorField(label, "Name", meta.Name)
 	printColorField(label, "Display Name", meta.DisplayName)
 	printColorField(label, "About", meta.About)
 	printColorField(label, "Picture", meta.Picture)
-	printColorField(label, "NIP-05", meta.NIP05)
+	printNIP05Field(label, meta.NIP05, pubHex)
 	printColorField(label, "Banner", meta.Banner)
 	printColorField(label, "Website", meta.Website)
 	printColorField(label, "Lightning", meta.LUD16)
 	return nil
 }
 
+// showProfileJSON fetches the raw kind 0 event and prints it as pretty JSON.
+func showProfileJSON(npub string) error {
+	activeNpub, _ := config.ActiveProfile()
+	var relays []string
+	if activeNpub != "" {
+		relays, _ = config.LoadRelays(activeNpub)
+	}
+	// Also try the target npub's relays
+	targetRelays, _ := config.LoadRelays(npub)
+	for _, r := range targetRelays {
+		found := false
+		for _, existing := range relays {
+			if existing == r {
+				found = true
+				break
+			}
+		}
+		if !found {
+			relays = append(relays, r)
+		}
+	}
+	// Include default relays
+	seen := make(map[string]bool, len(relays))
+	for _, r := range relays {
+		seen[r] = true
+	}
+	for _, r := range config.DefaultRelays() {
+		if !seen[r] {
+			relays = append(relays, r)
+		}
+	}
+
+	if len(relays) == 0 {
+		return fmt.Errorf("no relays configured")
+	}
+
+	pubHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	filter := nostr.Filter{
+		Authors: []string{pubHex},
+		Kinds:   []int{nostr.KindProfileMetadata},
+		Limit:   1,
+	}
+
+	event, err := internalRelay.FetchEvent(ctx, filter, relays)
+	if err != nil {
+		return fmt.Errorf("failed to fetch profile: %w", err)
+	}
+	if event == nil {
+		return fmt.Errorf("profile not found")
+	}
+
+	data, err := json.MarshalIndent(event, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
 func showProfile(npub string, label func(a ...interface{}) string) error {
-	// Try cached first
-	meta, _ := profile.LoadCached(npub)
+	dim := color.New(color.Faint)
+
+	// Profile caching: check cache first
+	meta, cachedErr := profile.LoadCachedWithTime(npub)
+	showedCached := false
+
+	if cachedErr == nil && meta != nil && profile.IsCacheFresh(npub) {
+		// Cache is fresh (< 1 hour), show it with indicator
+		showedCached = true
+		pubHex, _ := crypto.NpubToHex(npub)
+		fmt.Printf("%s %s\n", label("npub:"), npub)
+		printColorField(label, "Name", meta.Name)
+		printColorField(label, "Display Name", meta.DisplayName)
+		printColorField(label, "About", meta.About)
+		printColorField(label, "Picture", meta.Picture)
+		printNIP05Field(label, meta.NIP05, pubHex)
+		printColorField(label, "Banner", meta.Banner)
+		printColorField(label, "Website", meta.Website)
+		printColorField(label, "Lightning", meta.LUD16)
+		dim.Println("  (cached)")
+	}
 
 	// Fetch fresh from relays
 	relays, relayErr := config.LoadRelays(npub)
@@ -106,22 +217,42 @@ func showProfile(npub string, label func(a ...interface{}) string) error {
 		if err == nil && fresh != nil {
 			meta = fresh
 			_ = profile.SaveCached(npub, meta)
+
+			if !showedCached {
+				pubHex, _ := crypto.NpubToHex(npub)
+				fmt.Printf("%s %s\n", label("npub:"), npub)
+				printColorField(label, "Name", meta.Name)
+				printColorField(label, "Display Name", meta.DisplayName)
+				printColorField(label, "About", meta.About)
+				printColorField(label, "Picture", meta.Picture)
+				printNIP05Field(label, meta.NIP05, pubHex)
+				printColorField(label, "Banner", meta.Banner)
+				printColorField(label, "Website", meta.Website)
+				printColorField(label, "Lightning", meta.LUD16)
+			}
+			return nil
 		}
 	}
 
-	if meta == nil {
-		meta = &profile.Metadata{}
+	// If we didn't show cached and couldn't fetch, show whatever we have
+	if !showedCached {
+		if meta == nil {
+			meta = &profile.Metadata{}
+		}
+		pubHex, _ := crypto.NpubToHex(npub)
+		fmt.Printf("%s %s\n", label("npub:"), npub)
+		printColorField(label, "Name", meta.Name)
+		printColorField(label, "Display Name", meta.DisplayName)
+		printColorField(label, "About", meta.About)
+		printColorField(label, "Picture", meta.Picture)
+		printNIP05Field(label, meta.NIP05, pubHex)
+		printColorField(label, "Banner", meta.Banner)
+		printColorField(label, "Website", meta.Website)
+		printColorField(label, "Lightning", meta.LUD16)
+		if cachedErr == nil {
+			dim.Println("  (from cache - relays unreachable)")
+		}
 	}
-
-	fmt.Printf("%s %s\n", label("npub:"), npub)
-	printColorField(label, "Name", meta.Name)
-	printColorField(label, "Display Name", meta.DisplayName)
-	printColorField(label, "About", meta.About)
-	printColorField(label, "Picture", meta.Picture)
-	printColorField(label, "NIP-05", meta.NIP05)
-	printColorField(label, "Banner", meta.Banner)
-	printColorField(label, "Website", meta.Website)
-	printColorField(label, "Lightning", meta.LUD16)
 
 	return nil
 }
@@ -186,5 +317,21 @@ func promptField(reader *bufio.Reader, label, current string) string {
 func printColorField(label func(a ...interface{}) string, name, value string) {
 	if value != "" {
 		fmt.Printf("%-14s %s\n", label(name+":"), value)
+	}
+}
+
+// printNIP05Field prints the NIP-05 field with verification status.
+func printNIP05Field(label func(a ...interface{}) string, nip05Addr string, pubHex string) {
+	if nip05Addr == "" {
+		return
+	}
+	green := color.New(color.FgGreen).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+
+	verified := nip05.Verify(nip05Addr, pubHex)
+	if verified {
+		fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, green("✓"))
+	} else {
+		fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, red("✗"))
 	}
 }
