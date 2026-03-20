@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	"github.com/xdamman/nostr-cli/internal/resolve"
+	"golang.org/x/term"
 )
 
 var switchCmd = &cobra.Command{
 	Use:   "switch [npub|alias]",
 	Short: "Switch active profile",
-	Long:  "Switch to a different profile. Without arguments, lists all available profiles.",
+	Long:  "Switch to a different profile. Without arguments, select interactively.",
 	RunE:  runSwitch,
 }
 
@@ -23,27 +25,73 @@ func init() {
 	rootCmd.AddCommand(switchCmd)
 }
 
+type profileEntry struct {
+	npub string
+	name string
+}
+
 func runSwitch(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
-	cyan := color.New(color.FgCyan).SprintFunc()
-	bold := color.New(color.Bold).SprintFunc()
-
 	activeNpub, _ := config.ActiveProfile()
 
-	if len(args) == 0 {
-		return listProfiles(activeNpub, cyan, bold)
+	if len(args) > 0 {
+		return switchToTarget(args[0], activeNpub, green)
 	}
 
-	// Resolve target
-	targetNpub := args[0]
+	// Interactive selection
+	entries, err := listSwitchableProfiles()
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Println("No profiles found. Run 'nostr login' to create one.")
+		return nil
+	}
+
+	// Find the index of the active profile
+	selected := 0
+	for i, e := range entries {
+		if e.npub == activeNpub {
+			selected = i
+			break
+		}
+	}
+
+	chosen, err := interactiveSelect(entries, selected)
+	if err != nil {
+		return err
+	}
+	if chosen < 0 {
+		return nil // user cancelled
+	}
+
+	target := entries[chosen]
+	if target.npub == activeNpub {
+		fmt.Println("Already on this profile.")
+		return nil
+	}
+
+	if err := config.SetActiveProfile(target.npub); err != nil {
+		return err
+	}
+
+	if target.name != "" {
+		green.Printf("Switched to %s (%s)\n", target.name, target.npub)
+	} else {
+		green.Printf("Switched to %s\n", target.npub)
+	}
+	return nil
+}
+
+func switchToTarget(arg string, activeNpub string, green *color.Color) error {
+	targetNpub := arg
 	if activeNpub != "" {
-		resolved, err := resolve.ResolveToNpub(activeNpub, args[0])
+		resolved, err := resolve.ResolveToNpub(activeNpub, arg)
 		if err == nil {
 			targetNpub = resolved
 		}
 	}
 
-	// Check profile exists
 	dir, err := config.ProfileDir(targetNpub)
 	if err != nil {
 		return err
@@ -57,67 +105,170 @@ func runSwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	meta, _ := profile.LoadCached(targetNpub)
-	name := ""
-	if meta != nil && meta.Name != "" {
-		name = meta.Name
-	} else if meta != nil && meta.DisplayName != "" {
-		name = meta.DisplayName
-	}
-
+	name := profileName(meta)
 	if name != "" {
-		green.Printf("✓ Switched to %s (%s)\n", name, targetNpub)
+		green.Printf("Switched to %s (%s)\n", name, targetNpub)
 	} else {
-		green.Printf("✓ Switched to %s\n", targetNpub)
+		green.Printf("Switched to %s\n", targetNpub)
 	}
 	return nil
 }
 
-func listProfiles(activeNpub string, cyan, bold func(a ...interface{}) string) error {
+func listSwitchableProfiles() ([]profileEntry, error) {
 	base, err := config.BaseDir()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	profilesDir := filepath.Join(base, "profiles")
-	entries, err := os.ReadDir(profilesDir)
+	dirEntries, err := os.ReadDir(profilesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Println("No profiles found. Run 'nostr login' to create one.")
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
-	if len(entries) == 0 {
-		fmt.Println("No profiles found. Run 'nostr login' to create one.")
-		return nil
-	}
-
-	fmt.Println("Available profiles:")
-	fmt.Println()
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	var entries []profileEntry
+	for _, de := range dirEntries {
+		// Skip symlinks (aliases) — only show real profile dirs
+		if de.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		npub := entry.Name()
-		active := ""
-		if npub == activeNpub {
-			active = " " + bold("(active)")
+		if !de.IsDir() {
+			continue
 		}
-
+		npub := de.Name()
+		if !strings.HasPrefix(npub, "npub1") {
+			continue
+		}
+		// Only include profiles that have an nsec (owned identities)
+		if !config.HasNsec(npub) {
+			continue
+		}
 		meta, _ := profile.LoadCached(npub)
-		name := ""
-		if meta != nil && meta.Name != "" {
-			name = meta.Name
-		} else if meta != nil && meta.DisplayName != "" {
-			name = meta.DisplayName
+		entries = append(entries, profileEntry{npub: npub, name: profileName(meta)})
+	}
+	return entries, nil
+}
+
+func profileName(meta *profile.Metadata) string {
+	if meta == nil {
+		return ""
+	}
+	if meta.Name != "" {
+		return meta.Name
+	}
+	return meta.DisplayName
+}
+
+func interactiveSelect(entries []profileEntry, selected int) (int, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		// Not a terminal — fall back to listing
+		cyan := color.New(color.FgCyan).SprintFunc()
+		bold := color.New(color.Bold).SprintFunc()
+		activeNpub, _ := config.ActiveProfile()
+		fmt.Println("Available profiles:")
+		for i, e := range entries {
+			active := ""
+			if e.npub == activeNpub {
+				active = " " + bold("(active)")
+			}
+			if e.name != "" {
+				fmt.Printf("  %d. %s %s%s\n", i+1, cyan(e.name), e.npub, active)
+			} else {
+				fmt.Printf("  %d. %s%s\n", i+1, e.npub, active)
+			}
+		}
+		fmt.Println()
+		fmt.Println("Run 'nostr login' to add a new identity.")
+		return -1, nil
+	}
+
+	// Put terminal in raw mode
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return -1, err
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+
+	render := func() {
+		// Move cursor to start and clear
+		fmt.Print("\r\033[J") // clear from cursor to end of screen
+		fmt.Print("Select a profile (arrow keys to move, enter to select, q to cancel):\r\n\r\n")
+		for i, e := range entries {
+			label := e.npub
+			if e.name != "" {
+				label = fmt.Sprintf("%s (%s)", cyan(e.name), e.npub[:20]+"...")
+			}
+			if i == selected {
+				fmt.Printf("  > %s\r\n", label)
+			} else {
+				fmt.Printf("    %s\r\n", dim(entryLabel(e)))
+			}
+		}
+		fmt.Printf("\r\n  %s\r\n", dim("Run 'nostr login' to add a new identity."))
+	}
+
+	render()
+
+	buf := make([]byte, 3)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if err != nil {
+			return -1, err
 		}
 
-		if name != "" {
-			fmt.Printf("  %s %s%s\n", cyan(name), npub, active)
-		} else {
-			fmt.Printf("  %s%s\n", npub, active)
+		if n == 1 {
+			switch buf[0] {
+			case 13: // enter
+				// Move past the rendered menu before returning
+				fmt.Print("\r\033[J")
+				return selected, nil
+			case 'q', 27: // q or bare escape (no arrow sequence)
+				if n == 1 && buf[0] == 27 {
+					// Could be start of escape sequence — but if n==1, it's just Esc
+					fmt.Print("\r\033[J")
+					return -1, nil
+				}
+				fmt.Print("\r\033[J")
+				return -1, nil
+			case 'k': // vim up
+				if selected > 0 {
+					selected--
+				}
+			case 'j': // vim down
+				if selected < len(entries)-1 {
+					selected++
+				}
+			}
 		}
+		if n == 3 && buf[0] == 27 && buf[1] == '[' {
+			switch buf[2] {
+			case 'A': // up arrow
+				if selected > 0 {
+					selected--
+				}
+			case 'B': // down arrow
+				if selected < len(entries)-1 {
+					selected++
+				}
+			}
+		}
+
+		// Re-render: move cursor up to overwrite
+		lines := len(entries) + 4 // header + entries + footer
+		fmt.Printf("\033[%dA", lines)
+		render()
 	}
-	return nil
+}
+
+func entryLabel(e profileEntry) string {
+	if e.name != "" {
+		return fmt.Sprintf("%s (%s...)", e.name, e.npub[:20])
+	}
+	return e.npub
 }

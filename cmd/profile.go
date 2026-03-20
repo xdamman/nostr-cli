@@ -278,6 +278,7 @@ func runProfileUpdate(cmd *cobra.Command, args []string) error {
 	meta.About = promptField(reader, "About", meta.About)
 	meta.Picture = promptField(reader, "Picture URL", meta.Picture)
 	meta.NIP05 = promptField(reader, "NIP-05", meta.NIP05)
+	meta.Website = promptField(reader, "Website", meta.Website)
 
 	// Save locally
 	if err := profile.SaveCached(npub, meta); err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/resolve"
+	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
 var followCmd = &cobra.Command{
@@ -57,14 +58,17 @@ func runFollow(cmd *cobra.Command, args []string) error {
 		yellow.Println("⚠ Following yourself")
 	}
 
-	// Fetch current contact list
 	relays, err := config.LoadRelays(npub)
 	if err != nil {
 		return err
 	}
 
+	targetNpub, _ := nip19.EncodePublicKey(targetHex)
+
+	sp := ui.NewSpinner("Fetching contact list...")
 	ctx := context.Background()
 	contacts, err := fetchContactList(ctx, myHex, relays)
+	sp.Stop()
 	if err != nil {
 		return err
 	}
@@ -72,7 +76,6 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	// Check if already following
 	for _, tag := range contacts.Tags {
 		if len(tag) >= 2 && tag[0] == "p" && tag[1] == targetHex {
-			targetNpub, _ := nip19.EncodePublicKey(targetHex)
 			yellow.Printf("Already following %s\n", targetNpub)
 			return nil
 		}
@@ -84,7 +87,6 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	contacts.ID = ""
 	contacts.Sig = ""
 
-	// Sign and publish
 	nsec, err := config.LoadNsec(npub)
 	if err != nil {
 		return err
@@ -98,13 +100,15 @@ func runFollow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
-	if err := internalRelay.PublishEvent(ctx, *contacts, relays); err != nil {
+	sp = ui.NewSpinner("Publishing...")
+	err = internalRelay.PublishEvent(ctx, *contacts, relays)
+	sp.Stop()
+	if err != nil {
 		return err
 	}
 
 	_ = cache.LogEvent(npub, *contacts)
 
-	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 	green.Printf("✓ Now following %s\n", targetNpub)
 	return nil
 }
@@ -133,8 +137,12 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	targetNpub, _ := nip19.EncodePublicKey(targetHex)
+
+	sp := ui.NewSpinner("Fetching contact list...")
 	ctx := context.Background()
 	contacts, err := fetchContactList(ctx, myHex, relays)
+	sp.Stop()
 	if err != nil {
 		return err
 	}
@@ -151,7 +159,6 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	}
 
 	if !found {
-		targetNpub, _ := nip19.EncodePublicKey(targetHex)
 		yellow.Printf("Not following %s\n", targetNpub)
 		return nil
 	}
@@ -174,13 +181,15 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
-	if err := internalRelay.PublishEvent(ctx, *contacts, relays); err != nil {
+	sp = ui.NewSpinner("Publishing...")
+	err = internalRelay.PublishEvent(ctx, *contacts, relays)
+	sp.Stop()
+	if err != nil {
 		return err
 	}
 
 	_ = cache.LogEvent(npub, *contacts)
 
-	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 	green.Printf("✓ Unfollowed %s\n", targetNpub)
 	return nil
 }

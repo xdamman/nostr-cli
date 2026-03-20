@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/fatih/color"
@@ -17,6 +18,14 @@ var aliasCmd = &cobra.Command{
 	RunE:  runAlias,
 }
 
+var aliasesCmd = &cobra.Command{
+	Use:   "aliases",
+	Short: "List all aliases",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runAlias(cmd, nil)
+	},
+}
+
 var aliasRmCmd = &cobra.Command{
 	Use:   "rm [name]",
 	Short: "Remove an alias",
@@ -27,6 +36,7 @@ var aliasRmCmd = &cobra.Command{
 func init() {
 	aliasCmd.AddCommand(aliasRmCmd)
 	rootCmd.AddCommand(aliasCmd)
+	rootCmd.AddCommand(aliasesCmd)
 }
 
 func runAlias(cmd *cobra.Command, args []string) error {
@@ -45,8 +55,11 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if len(aliases) == 0 {
+			dim := color.New(color.Faint)
 			fmt.Println("No aliases configured.")
-			fmt.Println("Usage: nostr alias [name] [npub|nip05]")
+			fmt.Println()
+			dim.Println("Add an alias:  nostr alias <name> <npub|nip05>")
+			dim.Println("Send a DM:     nostr dm <name> <message>")
 			return nil
 		}
 
@@ -60,6 +73,10 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		for _, name := range names {
 			fmt.Printf("  %s → %s\n", cyan(name), aliases[name])
 		}
+		fmt.Println()
+		dim := color.New(color.Faint)
+		dim.Println("Add an alias:     nostr alias <name> <npub|nip05>")
+		dim.Println("Remove an alias:  nostr alias rm <name>")
 		return nil
 	}
 
@@ -84,6 +101,11 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	aliases[name] = targetNpub
 	if err := resolve.SaveAliases(npub, aliases); err != nil {
 		return err
+	}
+
+	// Create symlink ~/.nostr/profiles/<alias> -> ~/.nostr/profiles/<npub>
+	if err := config.CreateProfileSymlink(name, targetNpub); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not create profile symlink: %v\n", err)
 	}
 
 	green.Printf("✓ Alias %s → %s\n", name, targetNpub)
@@ -112,6 +134,9 @@ func runAliasRm(cmd *cobra.Command, args []string) error {
 	if err := resolve.SaveAliases(npub, aliases); err != nil {
 		return err
 	}
+
+	// Remove profile symlink if it exists
+	_ = config.RemoveProfileSymlink(name)
 
 	green.Printf("✓ Removed alias %s\n", name)
 	return nil

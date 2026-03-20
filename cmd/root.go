@@ -8,6 +8,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"github.com/xdamman/nostr-cli/internal/config"
 )
 
 var (
@@ -35,6 +36,10 @@ var rootCmd = &cobra.Command{
 				return fetchAndDisplayNIP(args[0])
 			}
 			return runUserLookup(args)
+		}
+		// If logged in, launch interactive shell
+		if _, err := config.ActiveProfile(); err == nil {
+			return runShell()
 		}
 		return cmd.Help()
 	},

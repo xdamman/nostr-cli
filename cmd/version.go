@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -18,6 +22,8 @@ var (
 	CommitMsg  string = "unknown"
 )
 
+var updateYesFlag bool
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
@@ -26,11 +32,12 @@ var versionCmd = &cobra.Command{
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Check for updates",
+	Short: "Check for updates and install the latest version",
 	RunE:  runUpdate,
 }
 
 func init() {
+	updateCmd.Flags().BoolVarP(&updateYesFlag, "yes", "y", false, "Update without confirmation")
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(updateCmd)
 }
@@ -43,80 +50,86 @@ func runVersion(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s %s\n", label("Message:"), CommitMsg)
 }
 
+// ghCommit holds the fields we need from the GitHub commits API.
+type ghCommit struct {
+	SHA    string `json:"sha"`
+	Commit struct {
+		Message string `json:"message"`
+		Author  struct {
+			Date string `json:"date"`
+		} `json:"author"`
+	} `json:"commit"`
+}
+
 func runUpdate(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen).SprintFunc()
-	cyan := color.New(color.FgCyan).SprintFunc()
-	yellow := color.New(color.FgYellow).SprintFunc()
+	label := color.New(color.FgCyan).SprintFunc()
+	green := color.New(color.FgGreen)
+	yellow := color.New(color.FgYellow)
 
-	fmt.Printf("Current: nostr-cli %s (%s)\n", Version, CommitSHA)
-	fmt.Println("Checking for updates...")
+	// Show current version
+	fmt.Println(label("Current version:"))
+	fmt.Printf("  Version: %s\n", Version)
+	fmt.Printf("  Commit:  %s\n", CommitSHA)
+	fmt.Printf("  Date:    %s\n", CommitDate)
+	fmt.Printf("  Message: %s\n", CommitMsg)
 
+	// Fetch latest commit from main
+	fmt.Println("\nChecking for updates...")
 	client := &http.Client{Timeout: 10 * time.Second}
-
-	// Try releases first
-	resp, err := client.Get("https://api.github.com/repos/xdamman/nostr-cli/releases/latest")
+	resp, err := client.Get("https://api.github.com/repos/xdamman/nostr-cli/commits/main")
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
-		var release struct {
-			TagName     string `json:"tag_name"`
-			PublishedAt string `json:"published_at"`
-			HTMLURL     string `json:"html_url"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&release); err == nil {
-			fmt.Printf("\n%s %s (released %s)\n", cyan("Latest release:"), release.TagName, release.PublishedAt)
-			if release.TagName != Version {
-				fmt.Printf("%s A newer version is available!\n", yellow("→"))
-				fmt.Printf("  Run: %s\n", green("go install github.com/xdamman/nostr-cli@latest"))
-			} else {
-				fmt.Printf("%s You're up to date.\n", green("✓"))
-			}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var latest ghCommit
+	if err := json.NewDecoder(resp.Body).Decode(&latest); err != nil {
+		return fmt.Errorf("failed to parse commit info: %w", err)
+	}
+
+	shortSHA := latest.SHA
+	if len(shortSHA) > 7 {
+		shortSHA = shortSHA[:7]
+	}
+	// Take only the first line of the commit message
+	latestMsg := strings.SplitN(latest.Commit.Message, "\n", 2)[0]
+	latestDate := latest.Commit.Author.Date
+
+	if shortSHA == CommitSHA {
+		green.Println("\nYou're up to date.")
+		return nil
+	}
+
+	// Show latest version
+	fmt.Println()
+	fmt.Println(label("Latest version:"))
+	fmt.Printf("  Commit:  %s\n", shortSHA)
+	fmt.Printf("  Date:    %s\n", latestDate)
+	fmt.Printf("  Message: %s\n", latestMsg)
+
+	if !updateYesFlag {
+		yellow.Print("\nUpdate to latest version? [Y/n] ")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input != "" && input != "y" && input != "yes" {
+			fmt.Println("Update cancelled.")
 			return nil
 		}
 	}
 
-	// No releases — check latest commit
-	resp2, err := client.Get("https://api.github.com/repos/xdamman/nostr-cli/commits/main")
-	if err != nil {
-		return fmt.Errorf("failed to fetch latest commit: %w", err)
-	}
-	defer resp2.Body.Close()
-
-	if resp2.StatusCode != 200 {
-		return fmt.Errorf("GitHub API returned %d", resp2.StatusCode)
+	fmt.Println("\nUpdating...")
+	install := exec.Command("go", "install", "github.com/xdamman/nostr-cli@latest")
+	install.Stdout = os.Stdout
+	install.Stderr = os.Stderr
+	if err := install.Run(); err != nil {
+		return fmt.Errorf("update failed: %w", err)
 	}
 
-	var commit struct {
-		SHA    string `json:"sha"`
-		Commit struct {
-			Message string `json:"message"`
-			Author  struct {
-				Date string `json:"date"`
-			} `json:"author"`
-		} `json:"commit"`
-	}
-	if err := json.NewDecoder(resp2.Body).Decode(&commit); err != nil {
-		return fmt.Errorf("failed to parse commit info: %w", err)
-	}
-
-	shortSHA := commit.SHA
-	if len(shortSHA) > 7 {
-		shortSHA = shortSHA[:7]
-	}
-
-	fmt.Printf("\n%s %s (%s)\n", cyan("Latest commit:"), shortSHA, commit.Commit.Author.Date)
-	fmt.Printf("  %s\n", commit.Commit.Message)
-
-	if shortSHA != CommitSHA {
-		fmt.Printf("\n%s A newer version may be available.\n", yellow("→"))
-		fmt.Printf("  Run: %s\n", green("go install github.com/xdamman/nostr-cli@latest"))
-		fmt.Println("  Or:  git pull && make install")
-	} else {
-		fmt.Printf("\n%s You're up to date.\n", green("✓"))
-	}
-
+	green.Println("Updated successfully.")
 	return nil
 }

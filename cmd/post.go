@@ -13,6 +13,7 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/cache"
+	"github.com/xdamman/nostr-cli/internal/ui"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
@@ -113,9 +114,11 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println("Publishing...")
+	sp := ui.NewSpinner("Publishing...")
 	ctx := context.Background()
-	if err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
+	err = internalRelay.PublishEvent(ctx, event, relays)
+	sp.Stop()
+	if err != nil {
 		return err
 	}
 

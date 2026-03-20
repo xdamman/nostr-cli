@@ -138,6 +138,59 @@ func DefaultRelays() []string {
 	return relays
 }
 
+// CreateProfileSymlink creates a symlink ~/.nostr/profiles/<alias> -> ~/.nostr/profiles/<npub>.
+func CreateProfileSymlink(alias, npub string) error {
+	base, err := BaseDir()
+	if err != nil {
+		return err
+	}
+	link := filepath.Join(base, "profiles", alias)
+	target := filepath.Join(base, "profiles", npub)
+
+	// Don't create if target doesn't exist
+	if _, err := os.Stat(target); os.IsNotExist(err) {
+		return nil
+	}
+
+	// Remove existing symlink if present
+	if fi, err := os.Lstat(link); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			os.Remove(link)
+		} else {
+			return fmt.Errorf("%s already exists and is not a symlink", alias)
+		}
+	}
+
+	return os.Symlink(npub, link)
+}
+
+// RemoveProfileSymlink removes a profile symlink if it exists.
+func RemoveProfileSymlink(alias string) error {
+	base, err := BaseDir()
+	if err != nil {
+		return err
+	}
+	link := filepath.Join(base, "profiles", alias)
+	fi, err := os.Lstat(link)
+	if err != nil {
+		return nil // doesn't exist, nothing to do
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return os.Remove(link)
+	}
+	return nil
+}
+
+// HasNsec checks whether the given profile directory contains an nsec file.
+func HasNsec(npub string) bool {
+	dir, err := ProfileDir(npub)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(dir, "nsec"))
+	return err == nil
+}
+
 // LoadResolvedProfile returns the npub to use, considering the --profile flag.
 func LoadResolvedProfile(profileFlag string) (string, error) {
 	if profileFlag != "" {
