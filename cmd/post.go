@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/cobra"
@@ -30,6 +31,9 @@ func init() {
 }
 
 func runPost(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen)
+	cyan := color.New(color.FgCyan).SprintFunc()
+
 	npub, err := config.LoadResolvedProfile(profileFlag)
 	if err != nil {
 		return err
@@ -102,10 +106,10 @@ func runPost(cmd *cobra.Command, args []string) error {
 	// Encode nevent
 	nevent, _ := nip19.EncodeEvent(event.ID, relays, pubHex)
 
-	fmt.Println("✓ Published!")
-	fmt.Printf("  Event ID: %s\n", event.ID)
+	green.Println("✓ Published!")
+	fmt.Printf("  %s %s\n", cyan("Event ID:"), event.ID)
 	if nevent != "" {
-		fmt.Printf("  nevent:   %s\n", nevent)
+		fmt.Printf("  %s %s\n", cyan("nevent:"), nevent)
 	}
 	return nil
 }
