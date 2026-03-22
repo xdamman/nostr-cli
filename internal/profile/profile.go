@@ -63,7 +63,11 @@ func IsCacheFresh(npub string) bool {
 }
 
 // SaveCached writes the profile metadata to profile.json.
+// Only writes if the profile directory already exists (i.e., has an nsec file).
 func SaveCached(npub string, m *Metadata) error {
+	if !config.HasNsec(npub) {
+		return nil // Don't create profile dirs for non-local profiles
+	}
 	dir, err := config.ProfileDir(npub)
 	if err != nil {
 		return err

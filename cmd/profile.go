@@ -63,23 +63,17 @@ func runProfile(cmd *cobra.Command, args []string) error {
 }
 
 func lookupUserProfile(user string, label func(a ...interface{}) string, errColor *color.Color) error {
-	// Try to resolve the user
 	activeNpub, _ := config.ActiveProfile()
 
 	npub := user
 	if !strings.HasPrefix(user, "npub1") {
-		// Try resolve via alias/nip05
-		if activeNpub != "" {
-			resolved, err := resolve.ResolveToNpub(activeNpub, user)
-			if err != nil {
-				errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
-				os.Exit(1)
-			}
-			npub = resolved
-		} else {
+		// Try resolve via alias/nip05 (aliases are global, no active profile needed)
+		resolved, err := resolve.ResolveToNpub(activeNpub, user)
+		if err != nil {
 			errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
 			os.Exit(1)
 		}
+		npub = resolved
 	}
 
 	if profileJSONFlag {

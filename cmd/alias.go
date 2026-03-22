@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/fatih/color"
@@ -14,7 +13,7 @@ import (
 var aliasCmd = &cobra.Command{
 	Use:   "alias [name] [npub|nip05]",
 	Short: "Manage aliases for users",
-	Long:  "Create, list, or remove aliases. Aliases are profile-scoped shortcuts for npubs.",
+	Long:  "Create, list, or remove aliases. Aliases are global shortcuts for npubs.",
 	RunE:  runAlias,
 }
 
@@ -43,14 +42,9 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
 	cyan := color.New(color.FgCyan).SprintFunc()
 
-	npub, err := config.LoadResolvedProfile(profileFlag)
-	if err != nil {
-		return err
-	}
-
 	if len(args) == 0 {
 		// List aliases
-		aliases, err := resolve.LoadAliases(npub)
+		aliases, err := config.LoadGlobalAliases()
 		if err != nil {
 			return err
 		}
@@ -87,25 +81,15 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	target := args[1]
 
-	// Resolve target to npub
-	targetNpub, err := resolve.ResolveToNpub(npub, target)
+	// Resolve target to npub (need active profile for NIP-05 relay lookup)
+	activeNpub, _ := config.ActiveProfile()
+	targetNpub, err := resolve.ResolveToNpub(activeNpub, target)
 	if err != nil {
 		return fmt.Errorf("cannot resolve %q: %w", target, err)
 	}
 
-	aliases, err := resolve.LoadAliases(npub)
-	if err != nil {
+	if err := config.SetGlobalAlias(name, targetNpub); err != nil {
 		return err
-	}
-
-	aliases[name] = targetNpub
-	if err := resolve.SaveAliases(npub, aliases); err != nil {
-		return err
-	}
-
-	// Create symlink ~/.nostr/profiles/<alias> -> ~/.nostr/profiles/<npub>
-	if err := config.CreateProfileSymlink(name, targetNpub); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not create profile symlink: %v\n", err)
 	}
 
 	green.Printf("✓ Alias %s → %s\n", name, targetNpub)
@@ -115,28 +99,10 @@ func runAlias(cmd *cobra.Command, args []string) error {
 func runAliasRm(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
 
-	npub, err := config.LoadResolvedProfile(profileFlag)
-	if err != nil {
-		return err
-	}
-
 	name := args[0]
-	aliases, err := resolve.LoadAliases(npub)
-	if err != nil {
+	if err := config.RemoveGlobalAlias(name); err != nil {
 		return err
 	}
-
-	if _, ok := aliases[name]; !ok {
-		return fmt.Errorf("alias %q not found", name)
-	}
-
-	delete(aliases, name)
-	if err := resolve.SaveAliases(npub, aliases); err != nil {
-		return err
-	}
-
-	// Remove profile symlink if it exists
-	_ = config.RemoveProfileSymlink(name)
 
 	green.Printf("✓ Removed alias %s\n", name)
 	return nil

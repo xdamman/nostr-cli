@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
@@ -15,6 +16,8 @@ import (
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
+
+var followingRefreshFlag bool
 
 var followCmd = &cobra.Command{
 	Use:   "follow [npub|nip05|alias]",
@@ -30,9 +33,17 @@ var unfollowCmd = &cobra.Command{
 	RunE:  runUnfollow,
 }
 
+var followingCmd = &cobra.Command{
+	Use:   "following",
+	Short: "List accounts you follow",
+	RunE:  runFollowing,
+}
+
 func init() {
+	followingCmd.Flags().BoolVar(&followingRefreshFlag, "refresh", false, "Force refresh from relays")
 	rootCmd.AddCommand(followCmd)
 	rootCmd.AddCommand(unfollowCmd)
+	rootCmd.AddCommand(followingCmd)
 }
 
 func runFollow(cmd *cobra.Command, args []string) error {
@@ -108,6 +119,9 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	}
 
 	_ = cache.LogEvent(npub, *contacts)
+
+	// Update following cache
+	cacheFollowingFromTags(npub, contacts.Tags)
 
 	green.Printf("✓ Now following %s\n", targetNpub)
 	return nil
@@ -190,8 +204,111 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 
 	_ = cache.LogEvent(npub, *contacts)
 
+	// Update following cache
+	cacheFollowingFromTags(npub, contacts.Tags)
+
 	green.Printf("✓ Unfollowed %s\n", targetNpub)
 	return nil
+}
+
+func runFollowing(cmd *cobra.Command, args []string) error {
+	npub, err := config.LoadResolvedProfile(profileFlag)
+	if err != nil {
+		return err
+	}
+
+	myHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return err
+	}
+
+	// Load profile cache for name resolution
+	cache.LoadProfileCache(npub)
+
+	printActiveProfile(npub)
+
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint)
+
+	// Try cache first (unless --refresh)
+	if !followingRefreshFlag {
+		if cached := cache.LoadFollowing(npub); cached != nil && len(cached.Hexes) > 0 {
+			printFollowingList(cached.Hexes, cyan, dim)
+			age := time.Since(cached.UpdatedAt).Truncate(time.Second)
+			dim.Printf("  (cached %s ago)\n", formatDuration(age))
+			return nil
+		}
+	}
+
+	relays, err := config.LoadRelays(npub)
+	if err != nil {
+		return err
+	}
+
+	sp := ui.NewSpinner("Fetching contact list...")
+	ctx := context.Background()
+	contacts, err := fetchContactList(ctx, myHex, relays)
+	sp.Stop()
+	if err != nil {
+		return err
+	}
+
+	var hexes []string
+	for _, tag := range contacts.Tags {
+		if len(tag) >= 2 && tag[0] == "p" {
+			hexes = append(hexes, tag[1])
+		}
+	}
+
+	// Cache the result
+	_ = cache.SaveFollowing(npub, hexes)
+
+	if len(hexes) == 0 {
+		fmt.Println("You're not following anyone yet.")
+		return nil
+	}
+
+	printFollowingList(hexes, cyan, dim)
+	return nil
+}
+
+func printFollowingList(hexes []string, cyan func(a ...interface{}) string, dim *color.Color) {
+	dimFn := dim.SprintFunc()
+	fmt.Printf("Following %d accounts:\n\n", len(hexes))
+	for _, hex := range hexes {
+		name := cache.ResolveNameByHex(hex)
+		npubStr, _ := nip19.EncodePublicKey(hex)
+		shortNpub := npubStr
+		if len(shortNpub) > 20 {
+			shortNpub = shortNpub[:20] + "..."
+		}
+		if name != "" {
+			fmt.Printf("  %s %s\n", cyan(name), dimFn(shortNpub))
+		} else {
+			fmt.Printf("  %s\n", shortNpub)
+		}
+	}
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+// cacheFollowingFromTags extracts hex pubkeys from contact list tags and caches them.
+func cacheFollowingFromTags(npub string, tags nostr.Tags) {
+	var hexes []string
+	for _, tag := range tags {
+		if len(tag) >= 2 && tag[0] == "p" {
+			hexes = append(hexes, tag[1])
+		}
+	}
+	_ = cache.SaveFollowing(npub, hexes)
 }
 
 // fetchContactList fetches the latest kind 3 event for the given pubkey, or returns an empty one.

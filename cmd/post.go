@@ -1,12 +1,14 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
@@ -46,15 +48,23 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get message
+	printActiveProfile(npub)
+
+	// Get message: from args, piped stdin, or interactive prompt
 	var message string
 	if len(args) > 0 {
 		message = strings.Join(args, " ")
+	} else if !term.IsTerminal(int(os.Stdin.Fd())) {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		message = strings.TrimSpace(string(data))
 	} else {
 		fmt.Print("Enter your note: ")
-		reader := bufio.NewReader(os.Stdin)
-		message, _ = reader.ReadString('\n')
-		message = strings.TrimSpace(message)
+		var line string
+		fmt.Scanln(&line)
+		message = strings.TrimSpace(line)
 	}
 
 	if message == "" {
@@ -124,6 +134,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 
 	// Cache the event
 	_ = cache.LogEvent(npub, event)
+	_ = cache.LogFeedEvent(npub, event)
 
 	// Encode nevent
 	nevent, _ := nip19.EncodeEvent(event.ID, relays, pubHex)

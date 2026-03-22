@@ -46,6 +46,8 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	printActiveProfile(npub)
+
 	relays, err := config.LoadRelays(npub)
 	if err != nil {
 		return err
@@ -93,6 +95,11 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("%s %s %s\n", bold(fmt.Sprintf("%d.", i+1)), status, s.url)
 	}
+	fmt.Println()
+	dim := color.New(color.Faint)
+	dim.Println("To edit this list of relays, use:")
+	dim.Println("  nostr relays add <wss://...>    Add a relay")
+	dim.Println("  nostr relays rm <number>        Remove a relay")
 	return nil
 }
 

@@ -12,11 +12,13 @@ import (
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
+	"golang.org/x/term"
 )
 
 var (
 	loginNsec     string
 	loginGenerate bool
+	loginNew      bool
 )
 
 var loginCmd = &cobra.Command{
@@ -29,6 +31,7 @@ var loginCmd = &cobra.Command{
 func init() {
 	loginCmd.Flags().StringVar(&loginNsec, "nsec", "", "Import an existing nsec (non-interactive)")
 	loginCmd.Flags().BoolVar(&loginGenerate, "generate", false, "Generate a new keypair (skip prompt)")
+	loginCmd.Flags().BoolVar(&loginNew, "new", false, "Generate a new keypair (alias for --generate)")
 	rootCmd.AddCommand(loginCmd)
 }
 
@@ -38,6 +41,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 	var nsec, npub string
 	var err error
+	interactive := false
 
 	switch {
 	case loginNsec != "":
@@ -46,17 +50,17 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid nsec: %w", err)
 		}
-	case loginGenerate:
+	case loginGenerate || loginNew:
 		nsec, npub, _, err = crypto.GenerateKeyPair()
 		if err != nil {
 			return err
 		}
 		green.Println("Generated new keypair")
 	default:
+		interactive = true
 		fmt.Print("Enter your nsec (leave blank to generate a new keypair): ")
-		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
+		input, _ := readMaskedInput()
+		fmt.Println()
 		if input == "" {
 			nsec, npub, _, err = crypto.GenerateKeyPair()
 			if err != nil {
@@ -122,8 +126,90 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Prompt for alias (interactive mode only)
+	if interactive && term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Print("\nChoose an alias for this profile (enter to skip): ")
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			alias := strings.TrimSpace(scanner.Text())
+			if alias != "" {
+				if err := config.SetGlobalAlias(alias, npub); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
+				} else {
+					green.Printf("✓ Alias %s → %s\n", alias, npub)
+				}
+			}
+		}
+	}
+
 	fmt.Println()
 	green.Printf("✓ Logged in as %s\n", npub)
 	fmt.Printf("  Profile dir: %s\n", dir)
 	return nil
+}
+
+// readMaskedInput reads input character by character in raw mode,
+// displaying • for all characters except the last 4.
+func readMaskedInput() (string, error) {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		// Fallback: read without masking
+		var line string
+		fmt.Scanln(&line)
+		return strings.TrimSpace(line), nil
+	}
+
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		var line string
+		fmt.Scanln(&line)
+		return strings.TrimSpace(line), nil
+	}
+	defer term.Restore(fd, oldState)
+
+	var buf []byte
+	b := make([]byte, 1)
+
+	for {
+		_, err := os.Stdin.Read(b)
+		if err != nil {
+			return string(buf), err
+		}
+
+		switch b[0] {
+		case 13, 10: // Enter
+			return string(buf), nil
+		case 3: // Ctrl-C
+			return "", fmt.Errorf("interrupted")
+		case 127, 8: // Backspace
+			if len(buf) > 0 {
+				buf = buf[:len(buf)-1]
+				redrawMasked(buf)
+			}
+		case 22: // Ctrl-V (paste) — just continue reading chars
+			continue
+		default:
+			if b[0] >= 32 {
+				buf = append(buf, b[0])
+				redrawMasked(buf)
+			}
+		}
+	}
+}
+
+// redrawMasked redraws the masked input: •••••last4
+func redrawMasked(buf []byte) {
+	display := maskSecret(string(buf))
+	// Clear the line from cursor start, reprint prompt + masked value
+	fmt.Printf("\r\033[K")
+	fmt.Printf("Enter your nsec (leave blank to generate a new keypair): %s", display)
+}
+
+// maskSecret returns a masked version showing only the last 4 characters.
+func maskSecret(s string) string {
+	if len(s) <= 4 {
+		return s
+	}
+	masked := strings.Repeat("•", len(s)-4)
+	return masked + s[len(s)-4:]
 }

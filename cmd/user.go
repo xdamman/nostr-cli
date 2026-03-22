@@ -64,12 +64,25 @@ func runUserLookup(args []string) error {
 
 	// Check profile cache first
 	var meta profile.Metadata
-	cachedMeta, _ := profile.LoadCachedWithTime(targetNpub)
 	usedCache := false
 
-	if cachedMeta != nil && profile.IsCacheFresh(targetNpub) {
-		meta = *cachedMeta
-		usedCache = true
+	if npub != "" {
+		cache.LoadProfileCache(npub)
+		if !cache.IsProfileStale(targetHex, time.Hour) {
+			if cp := cache.GetProfile(targetHex); cp != nil {
+				meta = profile.Metadata{
+					Name:        cp.Name,
+					DisplayName: cp.DisplayName,
+					About:       cp.About,
+					Picture:     cp.Picture,
+					NIP05:       cp.NIP05,
+					Banner:      cp.Banner,
+					Website:     cp.Website,
+					LUD16:       cp.LUD16,
+				}
+				usedCache = true
+			}
+		}
 	}
 
 	// Fetch profile (kind 0) from relays
@@ -85,8 +98,20 @@ func runUserLookup(args []string) error {
 			_ = cache.LogEvent(npub, *profileEvent)
 		}
 		_ = json.Unmarshal([]byte(profileEvent.Content), &meta)
-		// Update cache for this target
-		_ = profile.SaveCached(targetNpub, &meta)
+		// Update profile in active user's cache (not target's profile dir)
+		if npub != "" {
+			_ = cache.PutProfile(npub, &cache.CachedProfile{
+				PubKey:      targetHex,
+				Name:        meta.Name,
+				DisplayName: meta.DisplayName,
+				About:       meta.About,
+				Picture:     meta.Picture,
+				NIP05:       meta.NIP05,
+				Banner:      meta.Banner,
+				Website:     meta.Website,
+				LUD16:       meta.LUD16,
+			})
+		}
 		usedCache = false
 	}
 

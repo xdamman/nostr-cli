@@ -1,12 +1,9 @@
 package resolve
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,7 +14,7 @@ import (
 
 // Resolve resolves user input to a hex pubkey.
 // Order: alias lookup → npub/hex detection → NIP-05 resolution.
-// npub is the active profile's npub (for alias lookup).
+// npub is the active profile's npub (for legacy compat, not used for alias lookup).
 func Resolve(npub string, input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -27,11 +24,9 @@ func Resolve(npub string, input string) (string, error) {
 	// Strip leading @ if present
 	input = strings.TrimPrefix(input, "@")
 
-	// 1. Try alias lookup
-	if npub != "" {
-		if hex, err := resolveAlias(npub, input); err == nil {
-			return hex, nil
-		}
+	// 1. Try global alias lookup
+	if resolved, err := config.ResolveAlias(input); err == nil {
+		return crypto.NpubToHex(resolved)
 	}
 
 	// 2. Try npub
@@ -71,31 +66,6 @@ func ResolveToNpub(activeNpub string, input string) (string, error) {
 		return "", err
 	}
 	return result, nil
-}
-
-func resolveAlias(npub string, name string) (string, error) {
-	dir, err := config.ProfileDir(npub)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(filepath.Join(dir, "aliases.csv"))
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return "", err
-	}
-	for _, rec := range records {
-		if len(rec) >= 2 && strings.EqualFold(rec[0], name) {
-			targetNpub := rec[1]
-			return crypto.NpubToHex(targetNpub)
-		}
-	}
-	return "", fmt.Errorf("alias %q not found", name)
 }
 
 func resolveNIP05(input string) (string, error) {
@@ -149,53 +119,12 @@ func isHex(s string) bool {
 	return true
 }
 
-// LoadAliases reads all aliases for the given npub.
-func LoadAliases(npub string) (map[string]string, error) {
-	dir, err := config.ProfileDir(npub)
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.Open(filepath.Join(dir, "aliases.csv"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]string), nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	aliases := make(map[string]string)
-	for _, rec := range records {
-		if len(rec) >= 2 {
-			aliases[rec[0]] = rec[1]
-		}
-	}
-	return aliases, nil
+// LoadAliases reads all global aliases.
+func LoadAliases(_ string) (map[string]string, error) {
+	return config.LoadGlobalAliases()
 }
 
-// SaveAliases writes all aliases for the given npub.
-func SaveAliases(npub string, aliases map[string]string) error {
-	dir, err := config.ProfileDir(npub)
-	if err != nil {
-		return err
-	}
-	f, err := os.Create(filepath.Join(dir, "aliases.csv"))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	writer := csv.NewWriter(f)
-	defer writer.Flush()
-	for name, target := range aliases {
-		if err := writer.Write([]string{name, target}); err != nil {
-			return err
-		}
-	}
-	return nil
+// SaveAliases writes global aliases.
+func SaveAliases(_ string, aliases map[string]string) error {
+	return config.SaveGlobalAliases(aliases)
 }

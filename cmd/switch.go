@@ -85,11 +85,10 @@ func runSwitch(cmd *cobra.Command, args []string) error {
 
 func switchToTarget(arg string, activeNpub string, green *color.Color) error {
 	targetNpub := arg
-	if activeNpub != "" {
-		resolved, err := resolve.ResolveToNpub(activeNpub, arg)
-		if err == nil {
-			targetNpub = resolved
-		}
+	// Try alias/npub resolution (works even without active profile)
+	resolved, err := resolve.ResolveToNpub(activeNpub, arg)
+	if err == nil {
+		targetNpub = resolved
 	}
 
 	dir, err := config.ProfileDir(targetNpub)
@@ -215,47 +214,57 @@ func interactiveSelect(entries []profileEntry, selected int) (int, error) {
 
 	render()
 
-	buf := make([]byte, 3)
+	b := make([]byte, 1)
 	for {
-		n, err := os.Stdin.Read(buf)
-		if err != nil {
+		if _, err := os.Stdin.Read(b); err != nil {
 			return -1, err
 		}
 
-		if n == 1 {
-			switch buf[0] {
-			case 13: // enter
-				// Move past the rendered menu before returning
-				fmt.Print("\r\033[J")
-				return selected, nil
-			case 'q', 27: // q or bare escape (no arrow sequence)
-				if n == 1 && buf[0] == 27 {
-					// Could be start of escape sequence — but if n==1, it's just Esc
-					fmt.Print("\r\033[J")
-					return -1, nil
+		switch b[0] {
+		case 13: // enter
+			fmt.Print("\r\033[J")
+			return selected, nil
+		case 'q', 3: // q or Ctrl-C
+			fmt.Print("\r\033[J")
+			return -1, nil
+		case 27: // ESC — could be arrow key or bare Esc
+			seq := make([]byte, 2)
+			n, _ := os.Stdin.Read(seq)
+			if n == 2 && seq[0] == '[' {
+				switch seq[1] {
+				case 'A':
+					if selected > 0 {
+						selected--
+					}
+				case 'B':
+					if selected < len(entries)-1 {
+						selected++
+					}
 				}
+			} else if n == 1 && seq[0] == '[' {
+				if _, err := os.Stdin.Read(seq[:1]); err == nil {
+					switch seq[0] {
+					case 'A':
+						if selected > 0 {
+							selected--
+						}
+					case 'B':
+						if selected < len(entries)-1 {
+							selected++
+						}
+					}
+				}
+			} else {
 				fmt.Print("\r\033[J")
 				return -1, nil
-			case 'k': // vim up
-				if selected > 0 {
-					selected--
-				}
-			case 'j': // vim down
-				if selected < len(entries)-1 {
-					selected++
-				}
 			}
-		}
-		if n == 3 && buf[0] == 27 && buf[1] == '[' {
-			switch buf[2] {
-			case 'A': // up arrow
-				if selected > 0 {
-					selected--
-				}
-			case 'B': // down arrow
-				if selected < len(entries)-1 {
-					selected++
-				}
+		case 'k': // vim up
+			if selected > 0 {
+				selected--
+			}
+		case 'j': // vim down
+			if selected < len(entries)-1 {
+				selected++
 			}
 		}
 

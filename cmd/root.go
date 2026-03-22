@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
+	"github.com/xdamman/nostr-cli/internal/profile"
+	"golang.org/x/term"
 )
 
 var (
@@ -28,6 +31,8 @@ var rootCmd = &cobra.Command{
 		if noColorFlag || os.Getenv("NO_COLOR") != "" {
 			color.NoColor = true
 		}
+		// Auto-migrate per-profile aliases to global aliases.json
+		_ = config.MigrateAliases()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
@@ -37,11 +42,25 @@ var rootCmd = &cobra.Command{
 			}
 			return runUserLookup(args)
 		}
+		// If stdin is piped, read it and post as a note
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("failed to read stdin: %w", err)
+			}
+			message := strings.TrimSpace(string(data))
+			if message == "" {
+				return fmt.Errorf("empty input from pipe")
+			}
+			return runPost(cmd, []string{message})
+		}
 		// If logged in, launch interactive shell
-		if _, err := config.ActiveProfile(); err == nil {
+		_, err := config.ActiveProfile()
+		if err == nil {
 			return runShell()
 		}
-		return cmd.Help()
+		// Show the specific error (e.g. "run nostr login" or "run nostr switch")
+		return err
 	},
 	Args: cobra.ArbitraryArgs,
 }
@@ -169,6 +188,43 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// printActiveProfile prints a one-line header showing the active profile name and npub.
+func printActiveProfile(npub string) {
+	dim := color.New(color.Faint)
+	name := resolveProfileName(npub)
+	short := npub
+	if len(short) > 20 {
+		short = short[:20] + "..."
+	}
+	if name != "" {
+		dim.Printf("Using profile %s (%s)\n", name, short)
+	} else {
+		dim.Printf("Using profile %s\n", short)
+	}
+}
+
+// resolveProfileName tries to find a display name for an npub via aliases or cached profile metadata.
+func resolveProfileName(npub string) string {
+	// Check global aliases (reverse lookup)
+	aliases, _ := config.LoadGlobalAliases()
+	for name, target := range aliases {
+		if target == npub {
+			return name
+		}
+	}
+	// Try cached profile metadata
+	meta, _ := profile.LoadCached(npub)
+	if meta != nil {
+		if meta.Name != "" {
+			return meta.Name
+		}
+		if meta.DisplayName != "" {
+			return meta.DisplayName
+		}
+	}
+	return ""
 }
 
 func init() {

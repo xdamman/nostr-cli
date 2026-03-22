@@ -12,6 +12,11 @@ import (
 	"github.com/xdamman/nostr-cli/internal/config"
 )
 
+// IsLocalProfile returns true if the npub has an nsec file (i.e., is a logged-in profile).
+func IsLocalProfile(npub string) bool {
+	return config.HasNsec(npub)
+}
+
 var (
 	seenMu sync.Mutex
 	seen   = make(map[string]map[string]bool) // npub -> event ID -> true
@@ -61,8 +66,13 @@ func loadSeen(npub string) map[string]bool {
 }
 
 // LogEvent appends an event as a JSON line to the cache, deduplicating by ID.
+// Only writes to profiles that have an nsec file (local profiles).
 func LogEvent(npub string, event nostr.Event) error {
 	if npub == "" || event.ID == "" {
+		return nil
+	}
+
+	if !IsLocalProfile(npub) {
 		return nil
 	}
 

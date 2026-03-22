@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"sort"
@@ -24,6 +25,7 @@ import (
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"github.com/xdamman/nostr-cli/internal/ui"
+	"golang.org/x/term"
 )
 
 var dmCmd = &cobra.Command{
@@ -42,6 +44,8 @@ func runDM(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	printActiveProfile(npub)
 
 	if len(args) == 0 {
 		return showDMAliases(npub)
@@ -73,6 +77,19 @@ func runDM(cmd *cobra.Command, args []string) error {
 	if len(args) >= 2 {
 		// One-shot message
 		message := strings.Join(args[1:], " ")
+		return sendDM(npub, skHex, myHex, targetHex, message, relays)
+	}
+
+	// If stdin is piped, read message from it
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		message := strings.TrimSpace(string(data))
+		if message == "" {
+			return fmt.Errorf("empty input from pipe")
+		}
 		return sendDM(npub, skHex, myHex, targetHex, message, relays)
 	}
 
