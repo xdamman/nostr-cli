@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nostr cli — a human and bot-friendly command-line interface for Nostr</title>
+  <meta name="description" content="A fast, scriptable CLI for the Nostr protocol. Post notes, send encrypted DMs, manage profiles, and more — all from your terminal.">
+  <meta property="og:title" content="nostr cli">
+  <meta property="og:description" content="A human and bot-friendly command-line interface for the Nostr protocol.">
+  <meta property="og:url" content="https://nostrcli.sh">
+  <meta property="og:type" content="website">
+  <style>
+    :root {
+      --purple: #7c3aed;
+      --purple-light: #a78bfa;
+      --green: #28c840;
+      --cyan: #06b6d4;
+      --bg: #0a0a0a;
+      --bg-card: #1a1a2e;
+      --bg-terminal: #13131f;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --border: #2a2a3e;
+      --max-width: 860px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- Hero ---- */
+    .hero {
+      text-align: center;
+      padding: 100px 24px 60px;
+    }
+
+    .hero h1 {
+      font-size: clamp(3rem, 8vw, 5rem);
+      font-weight: 700;
+      letter-spacing: -2px;
+      margin-bottom: 16px;
+    }
+
+    .hero h1 .accent { color: var(--purple); }
+    .hero h1 .dim { color: #555; font-weight: 400; }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--text-dim);
+      max-width: 560px;
+      margin: 0 auto 40px;
+    }
+
+    /* ---- Install widget ---- */
+    .install-widget {
+      max-width: 540px;
+      margin: 0 auto 24px;
+    }
+
+    .install-cmd {
+      display: flex;
+      align-items: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px 14px 24px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 1rem;
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.2s;
+      gap: 12px;
+    }
+
+    .install-cmd:hover { border-color: var(--purple); }
+    .install-cmd .prompt { color: var(--purple); }
+    .install-cmd .cmd-text { flex: 1; text-align: left; }
+
+    .install-cmd .copy-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: color 0.2s, background 0.2s;
+      white-space: nowrap;
+    }
+
+    .install-cmd .copy-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .install-cmd.copied .copy-btn { color: var(--green); }
+
+    .install-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .install-tab {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+
+    .install-tab:hover { color: var(--text); border-color: var(--border); }
+    .install-tab.active { color: var(--text); border-color: var(--purple); background: rgba(124,58,237,0.1); }
+
+    .install-note {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    .install-note a { color: var(--purple-light); text-decoration: none; }
+    .install-note a:hover { text-decoration: underline; }
+
+    .hero-links {
+      margin-top: 24px;
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .hero-links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: color 0.2s;
+    }
+
+    .hero-links a:hover { color: var(--purple-light); }
+
+    /* ---- Sections ---- */
+    section {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+
+    section h2 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      margin-bottom: 32px;
+      letter-spacing: -0.5px;
+    }
+
+    section h2 .accent { color: var(--purple); }
+
+    /* ---- Video ---- */
+    .video-section {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px 60px;
+    }
+
+    .video-wrapper {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 20px 80px rgba(124, 58, 237, 0.08);
+    }
+
+    .video-wrapper video {
+      width: 100%;
+      display: block;
+    }
+
+    .video-placeholder {
+      background: var(--bg-card);
+      padding: 120px 24px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 1.1rem;
+    }
+
+    /* ---- Terminal blocks ---- */
+    .terminal {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .terminal-bar {
+      background: #2d2d2d;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      color: #666;
+      font-size: 0.8rem;
+    }
+
+    .terminal-body {
+      padding: 20px 24px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .terminal-body .prompt { color: var(--purple); }
+    .terminal-body .output { color: var(--text-dim); }
+    .terminal-body .success { color: var(--green); }
+    .terminal-body .info { color: var(--cyan); }
+    .terminal-body .dim { color: #666; }
+    .terminal-body .input { color: var(--green); }
+    .terminal-body .purple { color: var(--purple-light); }
+
+    /* ---- Features grid ---- */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+
+    .feature {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      transition: border-color 0.2s;
+    }
+
+    .feature:hover { border-color: var(--purple); }
+
+    .feature h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .feature p {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    /* ---- Commands table ---- */
+    .commands-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .commands-table th {
+      text-align: left;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .commands-table td {
+      padding: 10px 0;
+      border-bottom: 1px solid #1a1a2e;
+      vertical-align: top;
+    }
+
+    .commands-table td:first-child {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.85rem;
+      color: var(--purple-light);
+      white-space: nowrap;
+      padding-right: 24px;
+    }
+
+    .commands-table td:last-child {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    .commands-group {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding-top: 20px;
+    }
+
+    /* ---- Footer ---- */
+    footer {
+      text-align: center;
+      padding: 60px 24px;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      max-width: var(--max-width);
+      margin: 0 auto;
+    }
+
+    footer a {
+      color: var(--purple-light);
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 600px) {
+      .hero { padding: 60px 16px 40px; }
+      section { padding: 40px 16px; }
+      .terminal-body { font-size: 0.78rem; padding: 16px; }
+      .install-cmd { font-size: 0.85rem; padding: 12px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1><span class="accent">nostr</span> <span class="dim">cli</span></h1>
+    <p>A human and bot-friendly command-line interface for the Nostr protocol. Post notes, send encrypted DMs, manage profiles — all from your terminal.</p>
+
+    <div class="install-widget" id="install-widget">
+      <div class="install-tabs" id="install-tabs">
+        <button class="install-tab" data-os="mac" onclick="selectOS('mac')">macOS</button>
+        <button class="install-tab" data-os="linux" onclick="selectOS('linux')">Linux</button>
+        <button class="install-tab" data-os="debian" onclick="selectOS('debian')">Debian/Ubuntu</button>
+        <button class="install-tab" data-os="fedora" onclick="selectOS('fedora')">Fedora/RHEL</button>
+        <button class="install-tab" data-os="windows" onclick="selectOS('windows')">Windows</button>
+        <button class="install-tab" data-os="source" onclick="selectOS('source')">Source</button>
+      </div>
+      <div class="install-cmd" onclick="copyInstall(this)" title="Click to copy">
+        <span class="prompt">$</span>
+        <span class="cmd-text" id="install-cmd-text">brew install xdamman/tap/nostr</span>
+        <button class="copy-btn" id="copy-btn">copy</button>
+      </div>
+      <div class="install-note" id="install-note"></div>
+    </div>
+
+    <div class="hero-links">
+      <a href="https://github.com/xdamman/nostr-cli">GitHub</a>
+      <a href="https://github.com/xdamman/nostr-cli/releases/latest">Releases</a>
+      <a href="#examples">Examples</a>
+      <a href="#commands">Commands</a>
+    </div>
+  </div>
+
+  <!-- Video -->
+  <div class="video-section">
+    <div class="video-wrapper">
+      <div class="video-placeholder">
+        Demo video coming soon &mdash; render with <code>cd video && npx remotion render</code>
+      </div>
+      <!-- Uncomment when video is ready:
+      <video autoplay loop muted playsinline>
+        <source src="demo.mp4" type="video/mp4">
+      </video>
+      -->
+    </div>
+  </div>
+
+  <!-- Examples -->
+  <section id="examples">
+    <h2>Examples</h2>
+
+    <!-- Login -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Login</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> nostr login</div>
+        <div>&nbsp;</div>
+        <div>How would you like to log in?</div>
+        <div>&nbsp;</div>
+        <div><span class="purple">  &gt; Import existing nsec</span></div>
+        <div class="dim">    Generate new keypair</div>
+        <div>&nbsp;</div>
+        <div>Enter your nsec: nsec1&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;</div>
+        <div>&nbsp;</div>
+        <div class="success">&#10003; Logged in as npub1xsp...uvds</div>
+        <div class="dim">  Keys stored in ~/.nostr/profiles/npub1xsp.../</div>
+      </div>
+    </div>
+
+    <!-- Post -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Post a public note</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> nostr post "Hello Nostr!"</div>
+        <div class="success">&#10003; Published!</div>
+        <div class="info">  Event ID: a1b2c3d4...</div>
+      </div>
+    </div>
+
+    <!-- Pipe -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Pipe content to Nostr</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> echo "Hello from the command line" | nostr</div>
+        <div class="success">&#10003; Published!</div>
+      </div>
+    </div>
+
+    <!-- DM -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Send an encrypted DM</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> nostr dm xavier "See you at the meetup"</div>
+        <div class="success">&#10003; DM sent to xavier</div>
+        <div>&nbsp;</div>
+        <div><span class="prompt">$</span> echo "Here's that link" | nostr dm xavier</div>
+        <div class="success">&#10003; DM sent to xavier</div>
+      </div>
+    </div>
+
+    <!-- Interactive feed -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Interactive mode &mdash; public feed</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> nostr</div>
+        <div class="info">xavier  following 42  7/7 relays</div>
+        <div>&nbsp;</div>
+        <div class="dim">23/03 10:15  fiatjaf     working on a new relay implementation</div>
+        <div class="dim">23/03 10:18  jb55        zaps are underrated for micropayments</div>
+        <div class="dim">23/03 10:22  odell       "fix the money, fix the world"</div>
+        <div class="dim">23/03 10:30  gigi        nostr is the social layer bitcoin needed</div>
+        <div>&nbsp;</div>
+        <div><span class="input">xavier&gt;</span> this is amazing!</div>
+        <div class="success">&#10003; Published!</div>
+      </div>
+    </div>
+
+    <!-- Interactive DM -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Interactive mode &mdash; DM conversation</div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> nostr dm xavier</div>
+        <div class="info">Chatting with xavier</div>
+        <div>&nbsp;</div>
+        <div class="dim">23/03 14:01  xavier   Hey, are you coming to the meetup?</div>
+        <div class="dim">23/03 14:05  me       Yes! See you there</div>
+        <div>&nbsp;</div>
+        <div><span class="input">me&gt;</span> Can't wait!</div>
+        <div class="success">&#10003; Sent!</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <h2>Why <span class="accent">nostr</span> cli?</h2>
+    <div class="features">
+      <div class="feature">
+        <h3>Multi-profile</h3>
+        <p>Switch between identities like git branches. Each profile has its own keys, relays, and aliases.</p>
+      </div>
+      <div class="feature">
+        <h3>Human-friendly</h3>
+        <p>Use aliases and NIP-05 usernames instead of raw npubs. <code>nostr dm xavier</code> just works.</p>
+      </div>
+      <div class="feature">
+        <h3>Unix-native</h3>
+        <p>Pipes, scripts, cron jobs. <code>echo "hello" | nostr</code> &mdash; compose with any tool.</p>
+      </div>
+      <div class="feature">
+        <h3>Encrypted DMs</h3>
+        <p>NIP-04 / NIP-44 encrypted direct messages with interactive chat mode.</p>
+      </div>
+      <div class="feature">
+        <h3>Interactive shell</h3>
+        <p>Live feed, posting, and slash commands. Like a tiny Nostr client in your terminal.</p>
+      </div>
+      <div class="feature">
+        <h3>Built-in NIP viewer</h3>
+        <p><code>nostr nip 01</code> fetches and renders any NIP specification right in your terminal.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Commands -->
+  <section id="commands">
+    <h2>Commands</h2>
+
+    <table class="commands-table">
+      <tr><td colspan="2" class="commands-group">Social</td></tr>
+      <tr><td>nostr post [message]</td><td>Post a text note (interactive if no message given)</td></tr>
+      <tr><td>nostr dm [profile] [message]</td><td>Send an encrypted DM or start interactive chat</td></tr>
+      <tr><td>nostr follow [profile]</td><td>Follow a user</td></tr>
+      <tr><td>nostr [profile]</td><td>View a user's profile and latest notes</td></tr>
+      <tr><td>nostr [profile] --watch</td><td>Live-stream a user's new notes</td></tr>
+
+      <tr><td colspan="2" class="commands-group">Profile</td></tr>
+      <tr><td>nostr login</td><td>Create a new profile or import an existing nsec</td></tr>
+      <tr><td>nostr switch [profile]</td><td>Switch between profiles</td></tr>
+      <tr><td>nostr profile</td><td>Show your current profile</td></tr>
+      <tr><td>nostr profile update</td><td>Interactively update your profile metadata</td></tr>
+      <tr><td>nostr profiles</td><td>List all local profiles</td></tr>
+
+      <tr><td colspan="2" class="commands-group">Infrastructure</td></tr>
+      <tr><td>nostr relays</td><td>Manage relays (add, remove, check status)</td></tr>
+      <tr><td>nostr alias [name] [npub|nip05]</td><td>Create an alias for quick access</td></tr>
+
+      <tr><td colspan="2" class="commands-group">Reference</td></tr>
+      <tr><td>nostr nip [number]</td><td>View a NIP specification in the terminal</td></tr>
+      <tr><td>nostr version</td><td>Print version info</td></tr>
+      <tr><td>nostr update</td><td>Check for updates and self-update</td></tr>
+    </table>
+
+    <p style="margin-top: 20px; color: var(--text-dim); font-size: 0.9rem;">
+      A <code style="color:var(--purple-light)">&lt;profile&gt;</code> can be an alias, npub, or NIP-05 address (e.g. user@domain.com).
+      Append <code style="color:var(--purple-light)">--json</code> to most commands for machine-readable output.
+    </p>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>
+      <a href="https://github.com/xdamman/nostr-cli">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/xdamman/nostr-cli/releases/latest">Releases</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/xdamman/nostr-cli/issues">Issues</a>
+    </p>
+    <p style="margin-top: 12px;">MIT License</p>
+  </footer>
+
+  <script>
+    var installOptions = {
+      mac: {
+        cmd: 'curl -sf https://nostrcli.sh/install.sh | sh',
+        note: 'Or use Homebrew: <code>brew install xdamman/tap/nostr</code>'
+      },
+      linux: {
+        cmd: 'curl -sf https://nostrcli.sh/install.sh | sh',
+        note: ''
+      },
+      debian: {
+        cmd: 'sudo dpkg -i nostr_*.deb',
+        note: 'Download the <a href="https://github.com/xdamman/nostr-cli/releases/latest">.deb package</a> first'
+      },
+      fedora: {
+        cmd: 'sudo rpm -i nostr_*.rpm',
+        note: 'Download the <a href="https://github.com/xdamman/nostr-cli/releases/latest">.rpm package</a> first'
+      },
+      windows: {
+        cmd: 'scoop install nostr',
+        note: 'Or download the .exe from <a href="https://github.com/xdamman/nostr-cli/releases/latest">releases</a>'
+      },
+      source: {
+        cmd: 'go install github.com/xdamman/nostr-cli@latest',
+        note: 'Requires Go 1.21+'
+      }
+    };
+
+    function detectOS() {
+      var ua = navigator.userAgent.toLowerCase();
+      if (ua.indexOf('mac') !== -1) return 'mac';
+      if (ua.indexOf('win') !== -1) return 'windows';
+      // Check for common Linux distros
+      if (ua.indexOf('ubuntu') !== -1 || ua.indexOf('debian') !== -1) return 'debian';
+      if (ua.indexOf('fedora') !== -1 || ua.indexOf('red hat') !== -1) return 'fedora';
+      if (ua.indexOf('linux') !== -1) return 'linux';
+      return 'mac'; // default
+    }
+
+    function selectOS(os) {
+      var tabs = document.querySelectorAll('.install-tab');
+      tabs.forEach(function(tab) {
+        tab.classList.toggle('active', tab.getAttribute('data-os') === os);
+      });
+
+      var opt = installOptions[os];
+      document.getElementById('install-cmd-text').textContent = opt.cmd;
+      document.getElementById('install-note').innerHTML = opt.note;
+      document.getElementById('copy-btn').textContent = 'copy';
+
+      var cmdEl = document.querySelector('.install-cmd');
+      cmdEl.classList.remove('copied');
+    }
+
+    function copyInstall(el) {
+      var text = document.getElementById('install-cmd-text').textContent;
+      navigator.clipboard.writeText(text).then(function() {
+        el.classList.add('copied');
+        document.getElementById('copy-btn').textContent = 'copied!';
+        setTimeout(function() {
+          el.classList.remove('copied');
+          document.getElementById('copy-btn').textContent = 'copy';
+        }, 2000);
+      });
+    }
+
+    // Auto-detect OS on load
+    selectOS(detectOS());
+  </script>
+</body>
+</html>

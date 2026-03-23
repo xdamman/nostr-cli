@@ -1,6 +1,6 @@
 # nostr
 
-> A human-friendly command-line interface for the [Nostr](https://nostr.com) protocol.
+> A human and bot-friendly command-line interface for the [Nostr](https://nostr.com) protocol.
 
 <!-- badges -->
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -38,7 +38,7 @@ brew install xdamman/tap/nostr
 ### Shell script (macOS / Linux)
 
 ```bash
-curl -sf https://raw.githubusercontent.com/xdamman/nostr-cli/main/install.sh | sh
+curl -sf https://nostrcli.sh/install.sh | sh
 ```
 
 ### Debian / Ubuntu (.deb)
@@ -74,23 +74,69 @@ nostr update
 ## Quick Start
 
 ```bash
-# Create or import a profile
-nostr login
+nostr login                            # Create or import a profile
+nostr post "Hello Nostr!"             # Post a public note
+nostr dm xavier "See you at the meetup" # Send an encrypted DM
+nostr                                  # Launch the interactive shell
+```
 
-# Launch the interactive shell (feed + posting + slash commands)
-nostr
+## Examples
 
-# Post a note
-nostr post "Hello Nostr!"
+### Post a public note
 
-# Follow someone
-nostr follow npub1...
+```bash
+$ nostr post "Hello Nostr!"
+✓ Published!
+  Event ID: a1b2c3d4...
+```
 
-# Send a DM
-nostr dm npub1... "hey there"
+### Pipe content to Nostr
 
-# View someone's profile and notes
-nostr npub1...
+```bash
+$ echo "Hello from the command line" | nostr
+✓ Published!
+```
+
+### Send an encrypted DM
+
+```bash
+$ nostr dm xavier "See you at the meetup"
+✓ DM sent to xavier
+```
+
+```bash
+$ echo "Here's that link" | nostr dm xavier
+✓ DM sent to xavier
+```
+
+### Interactive mode — public feed
+
+Run `nostr` with no arguments to enter the interactive shell. You'll see your feed from followed accounts, and can type to post:
+
+```
+$ nostr
+xavier  following 42  7/7 relays
+
+23/03 10:15  fiatjaf     working on a new relay implementation
+23/03 10:18  jb55        zaps are underrated for micropayments
+23/03 10:22  odell       "fix the money, fix the world"
+23/03 10:30  gigi        nostr is the social layer bitcoin needed
+
+xavier> this is amazing!
+✓ Published!
+```
+
+### Interactive mode — DM conversation
+
+```
+$ nostr dm xavier
+Chatting with xavier
+
+23/03 14:01  xavier   Hey, are you coming to the meetup?
+23/03 14:05  me       Yes! See you there
+
+me> Can't wait 🎉
+✓ Sent!
 ```
 
 ## Commands
