@@ -182,6 +182,49 @@ func SaveRelays(npub string, relays []string) error {
 	return os.WriteFile(filepath.Join(dir, "relays.json"), data, 0644)
 }
 
+// LoadCachedRelays reads relays from the per-profile cache (~/.nostr/profiles/<npub>/cache/relays.json).
+func LoadCachedRelays(npub string) ([]string, error) {
+	dir, err := ProfileDir(npub)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "cache", "relays.json"))
+	if err != nil {
+		return nil, err
+	}
+	var relays []string
+	if err := json.Unmarshal(data, &relays); err != nil {
+		return nil, err
+	}
+	return relays, nil
+}
+
+// SaveCachedRelays writes relays to the per-profile cache (~/.nostr/profiles/<npub>/cache/relays.json).
+func SaveCachedRelays(npub string, relays []string) error {
+	dir, err := ProfileDir(npub)
+	if err != nil {
+		return err
+	}
+	cacheDir := filepath.Join(dir, "cache")
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(relays, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(cacheDir, "relays.json"), data, 0644)
+}
+
+// LoadRelaysWithFallback loads relays from the profile dir, falling back to the per-profile cache.
+func LoadRelaysWithFallback(npub string) ([]string, error) {
+	relays, err := LoadRelays(npub)
+	if err == nil {
+		return relays, nil
+	}
+	return LoadCachedRelays(npub)
+}
+
 // SaveDefaultRelays writes the embedded default relays to the profile directory.
 func SaveDefaultRelays(npub string) error {
 	var relays []string

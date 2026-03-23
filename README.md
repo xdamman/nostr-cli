@@ -86,15 +86,31 @@ nostr                                  # Launch the interactive shell
 
 ```bash
 $ nostr post "Hello Nostr!"
-✓ Published!
-  Event ID: a1b2c3d4...
+
+Posting as xavier to 5 relays
+
+  Signer:    npub1xdm...a8f2
+  Event ID:  a1b2c3d4e5f6...
+
+  ✓ relay.damus.io     142ms
+  ✓ nos.lol             89ms
+  ✓ relay.nostr.band   203ms
+  ✗ eden.nostr.land   2001ms
+  ✓ relay.snort.social 312ms
+
+✓ Published to 4/5 relays
+  Saved locally in ~/.nostr/profiles/npub1xdm.../events.jsonl
 ```
 
 ### Pipe content to Nostr
 
 ```bash
 $ echo "Hello from the command line" | nostr
-✓ Published!
+Posting as xavier to 5 relays
+  ✓ relay.damus.io  128ms
+  ✓ nos.lol         102ms
+  ...
+✓ Published to 5/5 relays
 ```
 
 ### Send an encrypted DM
@@ -179,6 +195,14 @@ me> Can't wait 🎉
 | `nostr update` | Check for updates and self-update |
 
 > **Tip:** Append `--help` to any command for usage details — e.g. `nostr dm --help`
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--profile <npub\|alias>` | Use a specific profile instead of the active one |
+| `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
+| `--no-color` | Disable colored output |
 
 ## Interactive Shell
 

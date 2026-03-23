@@ -380,14 +380,9 @@
   <!-- Video -->
   <div class="video-section">
     <div class="video-wrapper">
-      <div class="video-placeholder">
-        Demo video coming soon &mdash; render with <code>cd video && npx remotion render</code>
-      </div>
-      <!-- Uncomment when video is ready:
       <video autoplay loop muted playsinline>
         <source src="demo.mp4" type="video/mp4">
       </video>
-      -->
     </div>
   </div>
 
@@ -428,8 +423,20 @@
       </div>
       <div class="terminal-body">
         <div><span class="prompt">$</span> nostr post "Hello Nostr!"</div>
-        <div class="success">&#10003; Published!</div>
-        <div class="info">  Event ID: a1b2c3d4...</div>
+        <div>&nbsp;</div>
+        <div>Posting as <span class="info">xavier</span> to 5 relays</div>
+        <div>&nbsp;</div>
+        <div>  <span class="info">Signer:  </span> npub1xdm...a8f2</div>
+        <div>  <span class="info">Event ID:</span> a1b2c3d4e5f6...</div>
+        <div>&nbsp;</div>
+        <div>  <span class="success">&#10003;</span> relay.damus.io     142ms</div>
+        <div>  <span class="success">&#10003;</span> nos.lol             89ms</div>
+        <div>  <span class="success">&#10003;</span> relay.nostr.band   203ms</div>
+        <div>  <span style="color:#ff5f57">&#10007;</span> eden.nostr.land   2001ms</div>
+        <div>  <span class="success">&#10003;</span> relay.snort.social 312ms</div>
+        <div>&nbsp;</div>
+        <div class="success">&#10003; Published to 4/5 relays</div>
+        <div class="dim">  Saved locally in ~/.nostr/profiles/npub1xdm.../events.jsonl</div>
       </div>
     </div>
 
@@ -443,7 +450,16 @@
       </div>
       <div class="terminal-body">
         <div><span class="prompt">$</span> echo "Hello from the command line" | nostr</div>
-        <div class="success">&#10003; Published!</div>
+        <div>&nbsp;</div>
+        <div>Posting as <span class="info">xavier</span> to 5 relays</div>
+        <div>&nbsp;</div>
+        <div>  <span class="success">&#10003;</span> relay.damus.io     128ms</div>
+        <div>  <span class="success">&#10003;</span> nos.lol            102ms</div>
+        <div>  <span class="success">&#10003;</span> relay.nostr.band   187ms</div>
+        <div>  <span class="success">&#10003;</span> eden.nostr.land    245ms</div>
+        <div>  <span class="success">&#10003;</span> relay.snort.social 156ms</div>
+        <div>&nbsp;</div>
+        <div class="success">&#10003; Published to 5/5 relays</div>
       </div>
     </div>
 
@@ -482,7 +498,7 @@
         <div class="dim">23/03 10:30  gigi        nostr is the social layer bitcoin needed</div>
         <div>&nbsp;</div>
         <div><span class="input">xavier&gt;</span> this is amazing!</div>
-        <div class="success">&#10003; Published!</div>
+        <div class="success">&#10003; Published to 7/7 relays</div>
       </div>
     </div>
 

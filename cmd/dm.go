@@ -132,13 +132,13 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 
 	sp := ui.NewSpinner("Sending...")
 	ctx := context.Background()
-	err = internalRelay.PublishEvent(ctx, event, relays)
+	_, err = internalRelay.PublishEvent(ctx, event, relays)
 	sp.Stop()
 	if err != nil {
 		return err
 	}
 
-	_ = cache.LogEvent(npub, event)
+	_ = cache.LogSentEvent(npub, event)
 
 	green.Printf("✓ DM sent to %s\n", targetNpub)
 	return nil
@@ -166,12 +166,12 @@ func sendDMAsync(npub, skHex, myHex, targetHex, message string, relays []string,
 	}
 
 	ctx := context.Background()
-	if err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
+	if _, err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
 		statusCh <- fmt.Sprintf("✗ %v", err)
 		return
 	}
 
-	_ = cache.LogEvent(npub, event)
+	_ = cache.LogSentEvent(npub, event)
 	statusCh <- "✓"
 }
 

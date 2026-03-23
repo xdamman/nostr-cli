@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-var frames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+// SpinnerFrames are the braille animation frames used by the spinner.
+var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+var frames = SpinnerFrames
 
 // Spinner displays an animated spinner with a message.
 type Spinner struct {

@@ -115,13 +115,13 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	}
 
 	sp = ui.NewSpinner("Publishing...")
-	err = internalRelay.PublishEvent(ctx, *contacts, relays)
+	_, err = internalRelay.PublishEvent(ctx, *contacts, relays)
 	sp.Stop()
 	if err != nil {
 		return err
 	}
 
-	_ = cache.LogEvent(npub, *contacts)
+	_ = cache.LogSentEvent(npub, *contacts)
 
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
@@ -199,13 +199,13 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	}
 
 	sp = ui.NewSpinner("Publishing...")
-	err = internalRelay.PublishEvent(ctx, *contacts, relays)
+	_, err = internalRelay.PublishEvent(ctx, *contacts, relays)
 	sp.Stop()
 	if err != nil {
 		return err
 	}
 
-	_ = cache.LogEvent(npub, *contacts)
+	_ = cache.LogSentEvent(npub, *contacts)
 
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)

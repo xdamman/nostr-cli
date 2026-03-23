@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
+	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"golang.org/x/term"
@@ -27,8 +30,10 @@ func init() {
 }
 
 type profileEntry struct {
-	npub string
-	name string
+	npub      string
+	name      string
+	alias     string
+	relayInfo string
 }
 
 func runSwitch(cmd *cobra.Command, args []string) error {
@@ -81,6 +86,7 @@ func runSwitch(cmd *cobra.Command, args []string) error {
 	} else {
 		green.Printf("Switched to %s\n", target.npub)
 	}
+	showSwitchedProfile(target.npub)
 	return nil
 }
 
@@ -111,13 +117,69 @@ func switchToTarget(arg string, activeNpub string, green *color.Color) error {
 	} else {
 		green.Printf("Switched to %s\n", targetNpub)
 	}
+	showSwitchedProfile(targetNpub)
 	return nil
+}
+
+// showSwitchedProfile displays profile details and relays after switching.
+func showSwitchedProfile(npub string) {
+	label := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint)
+
+	// Try to fetch fresh profile from relays, fall back to cache
+	relays, _ := config.LoadRelays(npub)
+	var meta *profile.Metadata
+
+	if len(relays) > 0 {
+		ctx := context.Background()
+		fresh, err := profile.FetchFromRelays(ctx, npub, relays)
+		if err == nil && fresh != nil {
+			meta = fresh
+			_ = profile.SaveCached(npub, meta)
+		}
+	}
+	if meta == nil {
+		meta, _ = profile.LoadCached(npub)
+	}
+
+	fmt.Println()
+	pubHex, _ := crypto.NpubToHex(npub)
+	fmt.Printf("%s %s\n", label("npub:"), npub)
+	if meta != nil {
+		printColorField(label, "Name", meta.Name)
+		printColorField(label, "Display Name", meta.DisplayName)
+		printColorField(label, "About", meta.About)
+		printColorField(label, "Picture", meta.Picture)
+		printNIP05Field(label, meta.NIP05, pubHex)
+		printColorField(label, "Banner", meta.Banner)
+		printColorField(label, "Website", meta.Website)
+		printColorField(label, "Lightning", meta.LUD16)
+	}
+
+	if len(relays) > 0 {
+		fmt.Printf("%-14s\n", label("Relays:"))
+		for _, r := range relays {
+			if u, err := url.Parse(r); err == nil && u.Host != "" {
+				dim.Printf("  %s\n", u.Host)
+			} else {
+				dim.Printf("  %s\n", r)
+			}
+		}
+	}
 }
 
 func listSwitchableProfiles() ([]profileEntry, error) {
 	base, err := config.BaseDir()
 	if err != nil {
 		return nil, err
+	}
+
+	// Build reverse alias map: npub -> alias
+	aliasMap := make(map[string]string)
+	if aliases, err := config.LoadGlobalAliases(); err == nil {
+		for name, npub := range aliases {
+			aliasMap[npub] = name
+		}
 	}
 
 	profilesDir := filepath.Join(base, "profiles")
@@ -147,9 +209,28 @@ func listSwitchableProfiles() ([]profileEntry, error) {
 			continue
 		}
 		meta, _ := profile.LoadCached(npub)
-		entries = append(entries, profileEntry{npub: npub, name: profileName(meta)})
+		entries = append(entries, profileEntry{
+			npub:      npub,
+			name:      profileName(meta),
+			alias:     aliasMap[npub],
+			relayInfo: relayInfoStr(npub),
+		})
 	}
 	return entries, nil
+}
+
+func relayInfoStr(npub string) string {
+	relays, _ := config.LoadRelays(npub)
+	if len(relays) == 0 {
+		return "no relays"
+	}
+	if len(relays) == 1 {
+		if u, err := url.Parse(relays[0]); err == nil {
+			return u.Host
+		}
+		return relays[0]
+	}
+	return fmt.Sprintf("%d relays", len(relays))
 }
 
 func profileName(meta *profile.Metadata) string {
@@ -162,11 +243,92 @@ func profileName(meta *profile.Metadata) string {
 	return meta.DisplayName
 }
 
-func interactiveSelect(entries []profileEntry, selected int) (int, error) {
+// columnWidths computes the max width for name, alias, and npub columns.
+func columnWidths(entries []profileEntry) (int, int, int) {
+	var nameW, aliasW, npubW int
+	for _, e := range entries {
+		if len(e.alias) > aliasW {
+			aliasW = len(e.alias)
+		}
+		if len(e.name) > nameW {
+			nameW = len(e.name)
+		}
+		short := e.npub
+		if len(short) > 20 {
+			short = short[:20] + "..."
+		}
+		if len(short) > npubW {
+			npubW = len(short)
+		}
+	}
+	return nameW, aliasW, npubW
+}
+
+func shortNpub(npub string) string {
+	return npub
+}
+
+func formatEntry(e profileEntry, nameW, aliasW, npubW int, cyanFn, dimFn func(a ...interface{}) string, highlight bool) string {
+	name := e.name
+	alias := e.alias
+	npub := shortNpub(e.npub)
+	relay := e.relayInfo
+
+	// Build columns with padding: name, alias, npub, relays
+	nameCol := fmt.Sprintf("%-*s", nameW, name)
+	aliasCol := fmt.Sprintf("%-*s", aliasW, alias)
+	npubCol := fmt.Sprintf("%-*s", npubW, npub)
+
+	if highlight {
+		parts := []string{}
+		if nameW > 0 {
+			parts = append(parts, nameCol)
+		}
+		if aliasW > 0 {
+			if alias != "" {
+				parts = append(parts, cyanFn(aliasCol))
+			} else {
+				parts = append(parts, aliasCol)
+			}
+		}
+		parts = append(parts, dimFn(npubCol))
+		if relay != "" {
+			parts = append(parts, dimFn(relay))
+		}
+		return strings.Join(parts, "  ")
+	}
+
+	// Non-selected: dim name and npub, bright alias
+	parts := []string{}
+	if nameW > 0 {
+		parts = append(parts, dimFn(nameCol))
+	}
+	if aliasW > 0 {
+		if alias != "" {
+			parts = append(parts, cyanFn(aliasCol))
+		} else {
+			parts = append(parts, dimFn(aliasCol))
+		}
+	}
+	parts = append(parts, dimFn(npubCol))
+	if relay != "" {
+		parts = append(parts, dimFn(relay))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func interactiveSelect(entries []profileEntry, selected int, footer ...string) (int, error) {
+	footerText := "Run 'nostr login' to add a new profile."
+	if len(footer) > 0 {
+		footerText = footer[0]
+	}
+	nameW, aliasW, npubW := columnWidths(entries)
+
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		// Not a terminal — fall back to listing
 		cyan := color.New(color.FgCyan).SprintFunc()
 		bold := color.New(color.Bold).SprintFunc()
+		dim := color.New(color.Faint).SprintFunc()
 		activeNpub, _ := config.ActiveProfile()
 		fmt.Println("Available profiles:")
 		for i, e := range entries {
@@ -174,14 +336,13 @@ func interactiveSelect(entries []profileEntry, selected int) (int, error) {
 			if e.npub == activeNpub {
 				active = " " + bold("(active)")
 			}
-			if e.name != "" {
-				fmt.Printf("  %d. %s %s%s\n", i+1, cyan(e.name), e.npub, active)
-			} else {
-				fmt.Printf("  %d. %s%s\n", i+1, e.npub, active)
-			}
+			line := formatEntry(e, nameW, aliasW, npubW, cyan, dim, true)
+			fmt.Printf("  %d. %s%s\n", i+1, line, active)
 		}
-		fmt.Println()
-		fmt.Println("Run 'nostr login' to add a new identity.")
+		if footerText != "" {
+			fmt.Println()
+			fmt.Println(footerText)
+		}
 		return -1, nil
 	}
 
@@ -200,17 +361,16 @@ func interactiveSelect(entries []profileEntry, selected int) (int, error) {
 		fmt.Print("\r\033[J") // clear from cursor to end of screen
 		fmt.Print("Select a profile (arrow keys to move, enter to select, q to cancel):\r\n\r\n")
 		for i, e := range entries {
-			label := e.npub
-			if e.name != "" {
-				label = fmt.Sprintf("%s (%s)", cyan(e.name), e.npub[:20]+"...")
-			}
+			line := formatEntry(e, nameW, aliasW, npubW, cyan, dim, i == selected)
 			if i == selected {
-				fmt.Printf("  > %s\r\n", label)
+				fmt.Printf("  > %s\r\n", line)
 			} else {
-				fmt.Printf("    %s\r\n", dim(entryLabel(e)))
+				fmt.Printf("    %s\r\n", line)
 			}
 		}
-		fmt.Printf("\r\n  %s\r\n", dim("Run 'nostr login' to add a new identity."))
+		if footerText != "" {
+			fmt.Printf("\r\n  %s\r\n", dim(footerText))
+		}
 	}
 
 	render()
@@ -270,15 +430,11 @@ func interactiveSelect(entries []profileEntry, selected int) (int, error) {
 		}
 
 		// Re-render: move cursor up to overwrite
-		lines := len(entries) + 4 // header + entries + footer
+		lines := len(entries) + 2 // header + entries
+		if footerText != "" {
+			lines += 2 // blank line + footer
+		}
 		fmt.Printf("\033[%dA", lines)
 		render()
 	}
-}
-
-func entryLabel(e profileEntry) string {
-	if e.name != "" {
-		return fmt.Sprintf("%s (%s...)", e.name, e.npub[:20])
-	}
-	return e.npub
 }

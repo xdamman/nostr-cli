@@ -17,6 +17,7 @@ import (
 var (
 	profileFlag string
 	noColorFlag bool
+	timeoutFlag int
 )
 
 var rootCmd = &cobra.Command{
@@ -272,6 +273,7 @@ func resolveProfileName(npub string) string {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub of the profile to use (default: active profile)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
+	rootCmd.PersistentFlags().IntVar(&timeoutFlag, "timeout", 2000, "Timeout per relay in milliseconds")
 
 	// Command groups
 	rootCmd.AddGroup(

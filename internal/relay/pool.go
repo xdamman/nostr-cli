@@ -12,12 +12,14 @@ import (
 const (
 	ConnectTimeout = 5 * time.Second
 	FetchTimeout   = 10 * time.Second
+	PublishTimeout = 10 * time.Second
 )
 
-// PublishEvent signs and publishes an event to the given relays.
-func PublishEvent(ctx context.Context, event nostr.Event, relayURLs []string) error {
+// PublishEvent publishes an event to the given relays and returns
+// the URLs of relays that accepted it.
+func PublishEvent(ctx context.Context, event nostr.Event, relayURLs []string) ([]string, error) {
 	if len(relayURLs) == 0 {
-		return fmt.Errorf("no relays configured")
+		return nil, fmt.Errorf("no relays configured")
 	}
 
 	var (
@@ -60,12 +62,63 @@ func PublishEvent(ctx context.Context, event nostr.Event, relayURLs []string) er
 
 	if len(successURLs) == 0 {
 		if lastErr != nil {
-			return fmt.Errorf("failed to publish to any relay: %w", lastErr)
+			return nil, fmt.Errorf("failed to publish to any relay: %w", lastErr)
 		}
-		return fmt.Errorf("failed to publish to any relay")
+		return nil, fmt.Errorf("failed to publish to any relay")
 	}
 
-	return nil
+	return successURLs, nil
+}
+
+// RelayResult holds the outcome of publishing to a single relay.
+type RelayResult struct {
+	URL      string
+	OK       bool
+	Duration time.Duration
+	Err      error
+}
+
+// PublishEventWithProgress publishes an event to relays and sends per-relay results
+// to the returned channel as each completes. The channel is closed when all are done.
+// timeout is the per-relay deadline; if 0, PublishTimeout is used.
+func PublishEventWithProgress(ctx context.Context, event nostr.Event, relayURLs []string, timeout time.Duration) <-chan RelayResult {
+	if timeout <= 0 {
+		timeout = PublishTimeout
+	}
+	ch := make(chan RelayResult, len(relayURLs))
+	var wg sync.WaitGroup
+
+	for _, u := range relayURLs {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			start := time.Now()
+
+			relayCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			r, err := nostr.RelayConnect(relayCtx, u)
+			if err != nil {
+				ch <- RelayResult{URL: u, Err: fmt.Errorf("connect: %w", err), Duration: time.Since(start)}
+				return
+			}
+			defer r.Close()
+
+			if err := r.Publish(relayCtx, event); err != nil {
+				ch <- RelayResult{URL: u, Err: fmt.Errorf("publish: %w", err), Duration: time.Since(start)}
+				return
+			}
+
+			ch <- RelayResult{URL: u, OK: true, Duration: time.Since(start)}
+		}(u)
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	return ch
 }
 
 // FetchEvent fetches the latest event matching the filter from the given relays.

@@ -21,6 +21,7 @@ var profilesCmd = &cobra.Command{
 
 func init() {
 	profilesCmd.Flags().BoolVar(&profilesJSONFlag, "json", false, "Output as JSON")
+	profilesCmd.AddCommand(profileRmCmd)
 	rootCmd.AddCommand(profilesCmd)
 }
 
@@ -147,7 +148,7 @@ func runProfiles(cmd *cobra.Command, args []string) error {
 	dim.Println("")
 	dim.Println("  nostr switch <profile>        Switch active profile")
 	dim.Println("  nostr profile update           Update your profile metadata")
-	dim.Println("  nostr profile rm <profile>    Remove a profile")
+	dim.Println("  nostr profiles rm              Remove a profile")
 	dim.Println("  nostr login                    Add a new profile")
 
 	return nil

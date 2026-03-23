@@ -65,6 +65,55 @@ func loadSeen(npub string) map[string]bool {
 	return s
 }
 
+// sentEventsFile returns the path to the profile-level events.jsonl (sent events only).
+func sentEventsFile(npub string) string {
+	dir, err := config.ProfileDir(npub)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "events.jsonl")
+}
+
+// SentEventsPath returns the path to the sent events file for display purposes.
+func SentEventsPath(npub string) string {
+	return sentEventsFile(npub)
+}
+
+// LogSentEvent appends a sent event to the profile-level events.jsonl.
+// This file is NOT in cache/ — it's user data meant for backup.
+func LogSentEvent(npub string, event nostr.Event) error {
+	if npub == "" || event.ID == "" {
+		return nil
+	}
+	if !IsLocalProfile(npub) {
+		return nil
+	}
+
+	path := sentEventsFile(npub)
+	if path == "" {
+		return nil
+	}
+
+	dir, _ := config.ProfileDir(npub)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
+
 // LogEvent appends an event as a JSON line to the cache, deduplicating by ID.
 // Only writes to profiles that have an nsec file (local profiles).
 func LogEvent(npub string, event nostr.Event) error {

@@ -46,12 +46,7 @@ Advanced features for daily use.
 
 Ideas for later. No promises, no timeline.
 
-- **TUI mode** — bubbletea-based interactive interface
-- **Plugin system** — extend with custom commands
-- **Scripting** — pipe-friendly output, JSON mode for all commands
 - **Notifications** — subscribe to mentions and replies
 - **Media** — upload and attach images (NIP-94, Blossom)
 - **Zaps** — send/receive zaps (NIP-57)
 - **Relay discovery** — auto-discover relays from contact list
-- **Key management** — NIP-46 remote signer support
-- **Search** — full-text search across cached events

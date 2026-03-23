@@ -4,14 +4,17 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
+	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"golang.org/x/term"
 )
 
@@ -39,10 +42,12 @@ func init() {
 func runLogin(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
 	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint)
 
 	var nsec, npub string
 	var err error
 	interactive := false
+	isNewKeypair := false
 
 	switch {
 	case loginNsec != "":
@@ -56,6 +61,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		isNewKeypair = true
 		green.Println("Generated new keypair")
 	default:
 		interactive = true
@@ -67,6 +73,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
+			isNewKeypair = true
 			green.Println("Generated new keypair")
 		} else {
 			nsec = input
@@ -97,23 +104,75 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save nsec: %w", err)
 	}
 
-	// Save default relays
-	if err := config.SaveDefaultRelays(npub); err != nil {
-		return fmt.Errorf("failed to save default relays: %w", err)
-	}
+	isTTY := term.IsTerminal(int(os.Stdin.Fd()))
 
-	// Set as active profile
-	if err := config.SetActiveProfile(npub); err != nil {
-		return fmt.Errorf("failed to set active profile: %w", err)
-	}
+	if isNewKeypair {
+		// --- New keypair flow ---
+		// Show relay checklist
+		relays := config.DefaultRelays()
+		if isTTY {
+			fmt.Println()
+			fmt.Println("Default relays:")
+			relays = relayChecklist(relays)
+		}
 
-	// Try to fetch profile from relays
-	relays, _ := config.LoadRelays(npub)
-	if len(relays) > 0 {
+		if err := config.SaveRelays(npub, relays); err != nil {
+			return fmt.Errorf("failed to save relays: %w", err)
+		}
+
+		// Set as active profile
+		if err := config.SetActiveProfile(npub); err != nil {
+			return fmt.Errorf("failed to set active profile: %w", err)
+		}
+
+		// Prompt for profile setup
+		if isTTY {
+			fmt.Println()
+			fmt.Println("Set up your profile (enter to skip any field):")
+			reader := bufio.NewReader(os.Stdin)
+			meta := &profile.Metadata{}
+			meta.Name = promptField(reader, "Username", "")
+			meta.DisplayName = promptField(reader, "Display name", "")
+			meta.About = promptField(reader, "About", "")
+			meta.Picture = promptField(reader, "Picture URL", "")
+			meta.Website = promptField(reader, "Website", "")
+
+			if err := profile.SaveCached(npub, meta); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save profile: %v\n", err)
+			}
+
+			// Publish profile if any field was set
+			if meta.Name != "" || meta.DisplayName != "" || meta.About != "" {
+				fmt.Println("Publishing profile to relays...")
+				ctx := context.Background()
+				if err := profile.PublishMetadata(ctx, npub, meta, relays); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not publish profile: %v\n", err)
+				} else {
+					green.Println("✓ Profile published")
+				}
+			}
+
+			// Alias prompt — default to Name
+			promptAlias(npub, meta.Name, green)
+		}
+	} else {
+		// --- Import existing nsec flow ---
+		// Save default relays first so we can fetch
+		if err := config.SaveDefaultRelays(npub); err != nil {
+			return fmt.Errorf("failed to save default relays: %w", err)
+		}
+
+		// Set as active profile
+		if err := config.SetActiveProfile(npub); err != nil {
+			return fmt.Errorf("failed to set active profile: %w", err)
+		}
+
+		// Fetch profile from relays
+		defaultRelays := config.DefaultRelays()
 		fmt.Println("Fetching profile from relays...")
 		ctx := context.Background()
-		meta, err := profile.FetchFromRelays(ctx, npub, relays)
-		if err == nil && meta != nil {
+		meta, fetchErr := profile.FetchFromRelays(ctx, npub, defaultRelays)
+		if fetchErr == nil && meta != nil {
 			if err := profile.SaveCached(npub, meta); err == nil {
 				if meta.Name != "" {
 					fmt.Printf("%s %s\n", cyan("Found profile:"), meta.Name)
@@ -122,31 +181,252 @@ func runLogin(cmd *cobra.Command, args []string) error {
 					fmt.Printf("%s %s\n", cyan("Display name:"), meta.DisplayName)
 				}
 			}
-		} else {
-			fmt.Println("No profile found on relays (new identity?)")
 		}
-	}
 
-	// Prompt for alias (interactive mode only)
-	if interactive && term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Print("\nChoose an alias for this profile (enter to skip): ")
-		scanner := bufio.NewScanner(os.Stdin)
-		if scanner.Scan() {
-			alias := strings.TrimSpace(scanner.Text())
-			if alias != "" {
-				if err := config.SetGlobalAlias(alias, npub); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
-				} else {
-					green.Printf("✓ Alias %s → %s\n", alias, npub)
-				}
+		// Fetch relay list (NIP-65 kind 10002) from default relays
+		pubHex, _ := crypto.NpubToHex(npub)
+		fetchedRelays := fetchRelayList(ctx, pubHex, defaultRelays)
+
+		// Merge fetched relays with defaults (fetched first, then defaults not already in list)
+		var allRelays []string
+		seen := make(map[string]bool)
+		for _, r := range fetchedRelays {
+			if !seen[r] {
+				seen[r] = true
+				allRelays = append(allRelays, r)
 			}
+		}
+		for _, r := range defaultRelays {
+			if !seen[r] {
+				seen[r] = true
+				allRelays = append(allRelays, r)
+			}
+		}
+
+		if isTTY && len(allRelays) > 0 {
+			fmt.Println()
+			if len(fetchedRelays) > 0 {
+				fmt.Printf("Found %d relays from your profile. Confirm your relay list:\n", len(fetchedRelays))
+			} else {
+				fmt.Println("Default relays:")
+			}
+			allRelays = relayChecklist(allRelays)
+		}
+
+		if err := config.SaveRelays(npub, allRelays); err != nil {
+			return fmt.Errorf("failed to save relays: %w", err)
+		}
+
+		// Alias prompt — default to Name
+		if interactive && isTTY {
+			name := ""
+			if meta != nil {
+				name = meta.Name
+			}
+			promptAlias(npub, name, green)
 		}
 	}
 
 	fmt.Println()
 	green.Printf("✓ Logged in as %s\n", npub)
 	fmt.Printf("  Profile dir: %s\n", dir)
+
+	// Next steps hints
+	fmt.Println()
+	dim.Println("Next steps:")
+	dim.Println("  Post a public note:     nostr post \"Hello Nostr!\"")
+	dim.Println("  Send a direct message:  nostr dm <profile> \"message\"")
+	dim.Println("  Enter interactive mode:  nostr")
+	dim.Println("  Manage relays:          nostr relays add <wss://...>")
+
 	return nil
+}
+
+// promptAlias prompts for an alias with the given default name.
+func promptAlias(npub, defaultName string, green *color.Color) {
+	defaultAlias := ""
+	if defaultName != "" {
+		defaultAlias = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(defaultName), " ", "-"))
+	}
+	if defaultAlias != "" {
+		fmt.Printf("\nChoose an alias for this profile [%s]: ", defaultAlias)
+	} else {
+		fmt.Print("\nChoose an alias for this profile (enter to skip): ")
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		alias := strings.TrimSpace(scanner.Text())
+		if alias == "" && defaultAlias != "" {
+			alias = defaultAlias
+		}
+		if alias != "" {
+			if err := config.SetGlobalAlias(alias, npub); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
+			} else {
+				green.Printf("✓ Alias %s → %s\n", alias, npub)
+			}
+		}
+	}
+}
+
+// fetchRelayList fetches NIP-65 (kind 10002) relay list for a pubkey.
+func fetchRelayList(ctx context.Context, pubHex string, relayURLs []string) []string {
+	filter := nostr.Filter{
+		Authors: []string{pubHex},
+		Kinds:   []int{10002},
+		Limit:   1,
+	}
+
+	event, err := internalRelay.FetchEvent(ctx, filter, relayURLs)
+	if err != nil || event == nil {
+		return nil
+	}
+
+	var relays []string
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "r" {
+			relays = append(relays, tag[1])
+		}
+	}
+	return relays
+}
+
+// relayChecklist shows an interactive checkbox list for relays.
+// Returns the selected relays. Allows toggling with space, adding with 'a', continuing with enter.
+func relayChecklist(relays []string) []string {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		// Non-interactive: return all
+		return relays
+	}
+
+	checked := make([]bool, len(relays))
+	for i := range checked {
+		checked[i] = true // all on by default
+	}
+	cursor := 0
+
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return relays
+	}
+	defer term.Restore(fd, oldState)
+
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+
+	relayHost := func(r string) string {
+		if u, err := url.Parse(r); err == nil && u.Host != "" {
+			return u.Host
+		}
+		return r
+	}
+
+	render := func() {
+		fmt.Print("\r\033[J")
+		for i, r := range relays {
+			check := green("[✓]")
+			if !checked[i] {
+				check = dim("[ ]")
+			}
+			label := relayHost(r)
+			if i == cursor {
+				fmt.Printf("  %s %s\r\n", check, cyan(label))
+			} else {
+				fmt.Printf("  %s %s\r\n", check, dim(label))
+			}
+		}
+		fmt.Printf("\r\n  %s\r\n", dim("space: toggle, a: add relay, enter: continue"))
+	}
+
+	render()
+
+	b := make([]byte, 1)
+	for {
+		if _, err := os.Stdin.Read(b); err != nil {
+			break
+		}
+
+		switch b[0] {
+		case 13: // enter — continue
+			fmt.Print("\r\033[J")
+			var selected []string
+			for i, r := range relays {
+				if checked[i] {
+					selected = append(selected, r)
+				}
+			}
+			return selected
+		case ' ': // space — toggle
+			checked[cursor] = !checked[cursor]
+		case 'a': // add relay
+			fmt.Print("\r\033[J")
+			term.Restore(fd, oldState)
+			fmt.Print("  Relay URL (wss://...): ")
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				newRelay := strings.TrimSpace(scanner.Text())
+				if strings.HasPrefix(newRelay, "wss://") || strings.HasPrefix(newRelay, "ws://") {
+					relays = append(relays, newRelay)
+					checked = append(checked, true)
+				}
+			}
+			oldState, _ = term.MakeRaw(fd)
+		case 3: // ctrl-c
+			fmt.Print("\r\033[J")
+			var selected []string
+			for i, r := range relays {
+				if checked[i] {
+					selected = append(selected, r)
+				}
+			}
+			return selected
+		case 27: // ESC / arrow keys
+			seq := make([]byte, 2)
+			n, _ := os.Stdin.Read(seq)
+			if n >= 2 && seq[0] == '[' {
+				switch seq[1] {
+				case 'A': // up
+					if cursor > 0 {
+						cursor--
+					}
+				case 'B': // down
+					if cursor < len(relays)-1 {
+						cursor++
+					}
+				}
+			} else if n == 1 && seq[0] == '[' {
+				if _, err := os.Stdin.Read(seq[:1]); err == nil {
+					switch seq[0] {
+					case 'A':
+						if cursor > 0 {
+							cursor--
+						}
+					case 'B':
+						if cursor < len(relays)-1 {
+							cursor++
+						}
+					}
+				}
+			}
+		case 'k': // vim up
+			if cursor > 0 {
+				cursor--
+			}
+		case 'j': // vim down
+			if cursor < len(relays)-1 {
+				cursor++
+			}
+		}
+
+		// Re-render
+		lines := len(relays) + 2
+		fmt.Printf("\033[%dA", lines)
+		render()
+	}
+
+	return relays
 }
 
 // readMaskedInput reads input character by character in raw mode,

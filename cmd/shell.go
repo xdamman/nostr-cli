@@ -579,12 +579,12 @@ func postNoteAsync(npub, myHex, message string, relays []string, statusCh chan<-
 	}
 
 	ctx := context.Background()
-	if err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
+	if _, err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
 		statusCh <- fmt.Sprintf("✗ %v", err)
 		return
 	}
 
-	_ = cache.LogEvent(npub, event)
+	_ = cache.LogSentEvent(npub, event)
 	_ = cache.LogFeedEvent(npub, event)
 	statusCh <- "✓ posted"
 }
@@ -643,13 +643,13 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			return
 		}
 		sp = ui.NewSpinner("Publishing...")
-		err = internalRelay.PublishEvent(ctx, *contacts, relays)
+		_, err = internalRelay.PublishEvent(ctx, *contacts, relays)
 		sp.Stop()
 		if err != nil {
 			color.Red("Error: %v", err)
 			return
 		}
-		_ = cache.LogEvent(npub, *contacts)
+		_ = cache.LogSentEvent(npub, *contacts)
 		cacheFollowingFromTags(npub, contacts.Tags)
 		targetNpub, _ := nip19.EncodePublicKey(targetHex)
 		color.Green("✓ Now following %s", targetNpub)
@@ -743,13 +743,13 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			return
 		}
 		sp = ui.NewSpinner("Publishing...")
-		err = internalRelay.PublishEvent(ctx, *contacts, relays)
+		_, err = internalRelay.PublishEvent(ctx, *contacts, relays)
 		sp.Stop()
 		if err != nil {
 			color.Red("Error: %v", err)
 			return
 		}
-		_ = cache.LogEvent(npub, *contacts)
+		_ = cache.LogSentEvent(npub, *contacts)
 		cacheFollowingFromTags(npub, contacts.Tags)
 		targetNpub, _ := nip19.EncodePublicKey(targetHex)
 		color.Green("✓ Unfollowed %s", targetNpub)

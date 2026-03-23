@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
@@ -17,9 +19,13 @@ import (
 	"github.com/xdamman/nostr-cli/internal/profile"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/resolve"
+	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
-var profileJSONFlag bool
+var (
+	profileJSONFlag    bool
+	profileRefreshFlag bool
+)
 
 var profileCmd = &cobra.Command{
 	Use:     "profile [profile]",
@@ -36,16 +42,16 @@ var profileUpdateCmd = &cobra.Command{
 }
 
 var profileRmCmd = &cobra.Command{
-	Use:   "rm <profile>",
+	Use:   "rm [profile]",
 	Short: "Remove a local profile (profile: npub, alias, or nip05)",
-	Args:  exactArgs(1),
+	Long:  "Remove a local profile. Without arguments, select interactively.\nA <profile> can be an npub, alias, or NIP-05 address.",
 	RunE:  runProfileRm,
 }
 
 func init() {
 	profileCmd.Flags().BoolVar(&profileJSONFlag, "json", false, "Output raw kind 0 event as JSON")
+	profileCmd.Flags().BoolVar(&profileRefreshFlag, "refresh", false, "Fetch fresh profile from relays")
 	profileCmd.AddCommand(profileUpdateCmd)
-	profileCmd.AddCommand(profileRmCmd)
 	rootCmd.AddCommand(profileCmd)
 }
 
@@ -77,7 +83,6 @@ func lookupUserProfile(user string, label func(a ...interface{}) string, errColo
 
 	npub := user
 	if !strings.HasPrefix(user, "npub1") {
-		// Try resolve via alias/nip05 (aliases are global, no active profile needed)
 		resolved, err := resolve.ResolveToNpub(activeNpub, user)
 		if err != nil {
 			errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
@@ -90,15 +95,39 @@ func lookupUserProfile(user string, label func(a ...interface{}) string, errColo
 		return showProfileJSON(npub)
 	}
 
-	// Merge current user's relays with defaults for broader coverage
+	if profileRefreshFlag {
+		return fetchAndShowProfile(npub, user, label, errColor)
+	}
+
+	// Try cache first
+	meta, err := profile.LoadCached(npub)
+	if err == nil && meta != nil {
+		printProfileFields(npub, meta, label)
+		printCacheHint(npub)
+		return nil
+	}
+
+	// No cache — fetch from relays
+	return fetchAndShowProfile(npub, user, label, errColor)
+}
+
+func fetchAndShowProfile(npub, user string, label func(a ...interface{}) string, errColor *color.Color) error {
+	activeNpub, _ := config.ActiveProfile()
+
 	var relays []string
 	if activeNpub != "" {
 		relays, _ = config.LoadRelays(activeNpub)
 	}
-	// Always include default relays when looking up other users
+	targetRelays, _ := config.LoadRelaysWithFallback(npub)
 	seen := make(map[string]bool, len(relays))
 	for _, r := range relays {
 		seen[r] = true
+	}
+	for _, r := range targetRelays {
+		if !seen[r] {
+			seen[r] = true
+			relays = append(relays, r)
+		}
 	}
 	for _, r := range config.DefaultRelays() {
 		if !seen[r] {
@@ -107,22 +136,27 @@ func lookupUserProfile(user string, label func(a ...interface{}) string, errColo
 	}
 
 	ctx := context.Background()
+
+	sp := ui.NewSpinner("Fetching profile from relays...")
 	meta, err := profile.FetchFromRelays(ctx, npub, relays)
+	sp.Stop()
 	if err != nil || meta == nil {
 		errColor.Fprintf(os.Stderr, "Error: user %q not found\n", user)
 		os.Exit(1)
 	}
 
+	_ = profile.SaveCached(npub, meta)
+
+	// Fetch and cache NIP-65 relay list
+	sp = ui.NewSpinner("Fetching relay list...")
 	pubHex, _ := crypto.NpubToHex(npub)
-	fmt.Printf("%s %s\n", label("npub:"), npub)
-	printColorField(label, "Name", meta.Name)
-	printColorField(label, "Display Name", meta.DisplayName)
-	printColorField(label, "About", meta.About)
-	printColorField(label, "Picture", meta.Picture)
-	printNIP05Field(label, meta.NIP05, pubHex)
-	printColorField(label, "Banner", meta.Banner)
-	printColorField(label, "Website", meta.Website)
-	printColorField(label, "Lightning", meta.LUD16)
+	fetchedRelays := fetchRelayList(ctx, pubHex, relays)
+	sp.Stop()
+	if len(fetchedRelays) > 0 {
+		_ = config.SaveCachedRelays(npub, fetchedRelays)
+	}
+
+	printProfileFields(npub, meta, label)
 	return nil
 }
 
@@ -191,74 +225,83 @@ func showProfileJSON(npub string) error {
 }
 
 func showProfile(npub string, label func(a ...interface{}) string) error {
+	errColor := color.New(color.FgRed)
+
+	if profileRefreshFlag {
+		return fetchAndShowProfile(npub, npub, label, errColor)
+	}
+
+	// Try cache first
+	meta, err := profile.LoadCached(npub)
+	if err == nil && meta != nil {
+		printProfileFields(npub, meta, label)
+		printCacheHint(npub)
+		return nil
+	}
+
+	// No cache — fetch from relays
+	return fetchAndShowProfile(npub, npub, label, errColor)
+}
+
+func printProfileFields(npub string, meta *profile.Metadata, label func(a ...interface{}) string) {
 	dim := color.New(color.Faint)
+	pubHex, _ := crypto.NpubToHex(npub)
+	fmt.Printf("%s %s\n", label("npub:"), npub)
+	printColorField(label, "Name", meta.Name)
+	printColorField(label, "Display Name", meta.DisplayName)
+	printColorField(label, "About", meta.About)
+	printColorField(label, "Picture", meta.Picture)
+	printNIP05Field(label, meta.NIP05, pubHex)
+	printColorField(label, "Banner", meta.Banner)
+	printColorField(label, "Website", meta.Website)
+	printColorField(label, "Lightning", meta.LUD16)
 
-	// Profile caching: check cache first
-	meta, cachedErr := profile.LoadCachedWithTime(npub)
-	showedCached := false
-
-	if cachedErr == nil && meta != nil && profile.IsCacheFresh(npub) {
-		// Cache is fresh (< 1 hour), show it with indicator
-		showedCached = true
-		pubHex, _ := crypto.NpubToHex(npub)
-		fmt.Printf("%s %s\n", label("npub:"), npub)
-		printColorField(label, "Name", meta.Name)
-		printColorField(label, "Display Name", meta.DisplayName)
-		printColorField(label, "About", meta.About)
-		printColorField(label, "Picture", meta.Picture)
-		printNIP05Field(label, meta.NIP05, pubHex)
-		printColorField(label, "Banner", meta.Banner)
-		printColorField(label, "Website", meta.Website)
-		printColorField(label, "Lightning", meta.LUD16)
-		dim.Println("  (cached)")
-	}
-
-	// Fetch fresh from relays
-	relays, relayErr := config.LoadRelays(npub)
-	if relayErr == nil && len(relays) > 0 {
-		ctx := context.Background()
-		fresh, err := profile.FetchFromRelays(ctx, npub, relays)
-		if err == nil && fresh != nil {
-			meta = fresh
-			_ = profile.SaveCached(npub, meta)
-
-			if !showedCached {
-				pubHex, _ := crypto.NpubToHex(npub)
-				fmt.Printf("%s %s\n", label("npub:"), npub)
-				printColorField(label, "Name", meta.Name)
-				printColorField(label, "Display Name", meta.DisplayName)
-				printColorField(label, "About", meta.About)
-				printColorField(label, "Picture", meta.Picture)
-				printNIP05Field(label, meta.NIP05, pubHex)
-				printColorField(label, "Banner", meta.Banner)
-				printColorField(label, "Website", meta.Website)
-				printColorField(label, "Lightning", meta.LUD16)
+	relays, _ := config.LoadRelaysWithFallback(npub)
+	if len(relays) > 0 {
+		fmt.Printf("%-14s\n", label("Relays:"))
+		for _, r := range relays {
+			if u, err := url.Parse(r); err == nil && u.Host != "" {
+				dim.Printf("  %s\n", u.Host)
+			} else {
+				dim.Printf("  %s\n", r)
 			}
-			return nil
 		}
 	}
+}
 
-	// If we didn't show cached and couldn't fetch, show whatever we have
-	if !showedCached {
-		if meta == nil {
-			meta = &profile.Metadata{}
-		}
-		pubHex, _ := crypto.NpubToHex(npub)
-		fmt.Printf("%s %s\n", label("npub:"), npub)
-		printColorField(label, "Name", meta.Name)
-		printColorField(label, "Display Name", meta.DisplayName)
-		printColorField(label, "About", meta.About)
-		printColorField(label, "Picture", meta.Picture)
-		printNIP05Field(label, meta.NIP05, pubHex)
-		printColorField(label, "Banner", meta.Banner)
-		printColorField(label, "Website", meta.Website)
-		printColorField(label, "Lightning", meta.LUD16)
-		if cachedErr == nil {
-			dim.Println("  (from cache - relays unreachable)")
-		}
+func printCacheHint(npub string) {
+	dim := color.New(color.Faint)
+	age, err := profile.CacheAge(npub)
+	if err != nil {
+		return
 	}
+	fmt.Println()
+	dim.Printf("  Last refreshed %s ago. Run with --refresh to fetch from relays.\n", humanDuration(age))
+}
 
-	return nil
+func humanDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", m)
+	}
+	if d < 24*time.Hour {
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", h)
+	}
+	days := int(d.Hours() / 24)
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
 }
 
 func runProfileUpdate(cmd *cobra.Command, args []string) error {
@@ -277,7 +320,7 @@ func runProfileUpdate(cmd *cobra.Command, args []string) error {
 
 	reader := bufio.NewReader(os.Stdin)
 
-	meta.Name = promptField(reader, "Name", meta.Name)
+	meta.Name = promptField(reader, "Username", meta.Name)
 	meta.DisplayName = promptField(reader, "Display name", meta.DisplayName)
 	meta.About = promptField(reader, "About", meta.About)
 	meta.Picture = promptField(reader, "Picture URL", meta.Picture)
@@ -328,30 +371,51 @@ func printColorField(label func(a ...interface{}) string, name, value string) {
 // printNIP05Field prints the NIP-05 field with verification status.
 func runProfileRm(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
-	target := args[0]
 
-	// Resolve to npub
-	npub := target
-	if !strings.HasPrefix(target, "npub1") {
-		resolved, err := resolve.ResolveToNpub("", target)
-		if err != nil {
-			return fmt.Errorf("cannot resolve %q to a profile: %w", target, err)
+	var npub, displayLabel string
+
+	if len(args) > 0 {
+		target := args[0]
+		npub = target
+		if !strings.HasPrefix(target, "npub1") {
+			resolved, err := resolve.ResolveToNpub("", target)
+			if err != nil {
+				return fmt.Errorf("cannot resolve %q to a profile: %w", target, err)
+			}
+			npub = resolved
 		}
-		npub = resolved
-	}
+		if !config.HasNsec(npub) {
+			return fmt.Errorf("no local profile found for %s", target)
+		}
+		displayLabel = target
+	} else {
+		// Interactive selection
+		entries, err := listSwitchableProfiles()
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			fmt.Println("No profiles found.")
+			return nil
+		}
 
-	// Check it exists locally
-	if !config.HasNsec(npub) {
-		return fmt.Errorf("no local profile found for %s", target)
+		chosen, err := interactiveSelect(entries, 0, "")
+		if err != nil {
+			return err
+		}
+		if chosen < 0 {
+			return nil // user cancelled
+		}
+		npub = entries[chosen].npub
+		displayLabel = npub
 	}
 
 	// Confirm
 	name := resolveProfileName(npub)
 	if name != "" {
-		fmt.Printf("Remove profile %s (%s)? This deletes the local keys and cache. [y/N] ", name, npub)
-	} else {
-		fmt.Printf("Remove profile %s? This deletes the local keys and cache. [y/N] ", npub)
+		displayLabel = fmt.Sprintf("%s (%s)", name, npub)
 	}
+	fmt.Printf("Remove profile %s? This deletes the local keys and cache. [y/N] ", displayLabel)
 	var answer string
 	fmt.Scanln(&answer)
 	if answer != "y" && answer != "Y" {
@@ -363,11 +427,7 @@ func runProfileRm(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if name != "" {
-		green.Printf("✓ Removed profile %s (%s)\n", name, npub)
-	} else {
-		green.Printf("✓ Removed profile %s\n", npub)
-	}
+	green.Printf("✓ Removed profile %s\n", displayLabel)
 	return nil
 }
 
