@@ -144,11 +144,14 @@
     .hero-links a {
       color: var(--text-dim);
       text-decoration: none;
-      font-size: 0.95rem;
-      transition: color 0.2s;
+      font-size: 0.9rem;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
     }
 
-    .hero-links a:hover { color: var(--purple-light); }
+    .hero-links a:hover { color: var(--text); border-color: var(--purple); background: rgba(124,58,237,0.08); }
 
     /* ---- Sections ---- */
     section {
@@ -370,10 +373,11 @@
     </div>
 
     <div class="hero-links">
-      <a href="https://github.com/xdamman/nostr-cli">GitHub</a>
-      <a href="https://github.com/xdamman/nostr-cli/releases/latest">Releases</a>
       <a href="#examples">Examples</a>
       <a href="#commands">Commands</a>
+      <a href="#agents">AI Agents</a>
+      <a href="https://github.com/xdamman/nostr-cli">GitHub</a>
+      <a href="https://github.com/xdamman/nostr-cli/releases/latest">Releases</a>
     </div>
   </div>
 
@@ -586,6 +590,35 @@
     <p style="margin-top: 20px; color: var(--text-dim); font-size: 0.9rem;">
       A <code style="color:var(--purple-light)">&lt;profile&gt;</code> can be an alias, npub, or NIP-05 address (e.g. user@domain.com).
       Append <code style="color:var(--purple-light)">--json</code> to most commands for machine-readable output.
+    </p>
+  </section>
+
+  <!-- AI Agent Integration -->
+  <section id="agents">
+    <h2>AI Agent <span class="accent">Integration</span></h2>
+    <p style="color: var(--text-dim); margin-bottom: 24px;">
+      nostr-cli is designed for bots and AI coding agents. Use <code style="color:var(--purple-light)">--json</code> for structured output, <code style="color:var(--purple-light)">--no-color</code> to strip ANSI codes, and pipe content for posting.
+    </p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Install the nostr skill in your AI agent</div>
+      </div>
+      <div class="terminal-body">
+        <div class="dim"># Claude Code</div>
+        <div><span class="prompt">$</span> /install-skill https://nostrcli.sh/skill</div>
+        <div>&nbsp;</div>
+        <div class="dim"># Codex, Cursor, Windsurf, Aider (via OpenSkills)</div>
+        <div><span class="prompt">$</span> npx openskills install https://github.com/xdamman/nostr-cli</div>
+      </div>
+    </div>
+
+    <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 16px;">
+      An <a href="https://github.com/xdamman/nostr-cli/blob/main/AGENTS.md" style="color:var(--purple-light); text-decoration: none;">AGENTS.md</a> is included at the repo root for tools that auto-load it (Codex, Cursor, Augment, Gemini).
+      See also: <a href="llms.txt" style="color:var(--purple-light); text-decoration: none;">llms.txt</a> &middot; <a href="skill/SKILL.md" style="color:var(--purple-light); text-decoration: none;">skill/SKILL.md</a>
     </p>
   </section>
 

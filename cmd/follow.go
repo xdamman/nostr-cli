@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 )
 
 var followingRefreshFlag bool
+var followJSONFlag bool
 
 var followCmd = &cobra.Command{
 	Use:     "follow <profile>",
@@ -43,6 +45,9 @@ var followingCmd = &cobra.Command{
 }
 
 func init() {
+	followCmd.Flags().BoolVar(&followJSONFlag, "json", false, "Output as JSON")
+	unfollowCmd.Flags().BoolVar(&followJSONFlag, "json", false, "Output as JSON")
+	followingCmd.Flags().BoolVar(&followJSONFlag, "json", false, "Output as JSON")
 	followingCmd.Flags().BoolVar(&followingRefreshFlag, "refresh", false, "Force refresh from relays")
 	rootCmd.AddCommand(followCmd)
 	rootCmd.AddCommand(unfollowCmd)
@@ -90,7 +95,19 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	// Check if already following
 	for _, tag := range contacts.Tags {
 		if len(tag) >= 2 && tag[0] == "p" && tag[1] == targetHex {
-			yellow.Printf("Already following %s\n", targetNpub)
+			if followJSONFlag {
+				result := map[string]interface{}{
+					"ok":              false,
+					"action":          "follow",
+					"user":            targetNpub,
+					"error":           "already following",
+					"following_count": len(contacts.Tags),
+				}
+				jsonBytes, _ := json.Marshal(result)
+				fmt.Println(string(jsonBytes))
+			} else {
+				yellow.Printf("Already following %s\n", targetNpub)
+			}
 			return nil
 		}
 	}
@@ -126,7 +143,18 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
 
-	green.Printf("✓ Now following %s\n", targetNpub)
+	if followJSONFlag {
+		result := map[string]interface{}{
+			"ok":              true,
+			"action":          "follow",
+			"user":            targetNpub,
+			"following_count": len(contacts.Tags),
+		}
+		jsonBytes, _ := json.Marshal(result)
+		fmt.Println(string(jsonBytes))
+	} else {
+		green.Printf("✓ Now following %s\n", targetNpub)
+	}
 	return nil
 }
 
@@ -176,7 +204,19 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	}
 
 	if !found {
-		yellow.Printf("Not following %s\n", targetNpub)
+		if followJSONFlag {
+			result := map[string]interface{}{
+				"ok":              false,
+				"action":          "unfollow",
+				"user":            targetNpub,
+				"error":           "not following",
+				"following_count": len(contacts.Tags),
+			}
+			jsonBytes, _ := json.Marshal(result)
+			fmt.Println(string(jsonBytes))
+		} else {
+			yellow.Printf("Not following %s\n", targetNpub)
+		}
 		return nil
 	}
 
@@ -210,7 +250,18 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
 
-	green.Printf("✓ Unfollowed %s\n", targetNpub)
+	if followJSONFlag {
+		result := map[string]interface{}{
+			"ok":              true,
+			"action":          "unfollow",
+			"user":            targetNpub,
+			"following_count": len(contacts.Tags),
+		}
+		jsonBytes, _ := json.Marshal(result)
+		fmt.Println(string(jsonBytes))
+	} else {
+		green.Printf("✓ Unfollowed %s\n", targetNpub)
+	}
 	return nil
 }
 
@@ -236,9 +287,23 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 	// Try cache first (unless --refresh)
 	if !followingRefreshFlag {
 		if cached := cache.LoadFollowing(npub); cached != nil && len(cached.Hexes) > 0 {
-			printFollowingList(cached.Hexes, cyan, dim)
-			age := time.Since(cached.UpdatedAt).Truncate(time.Second)
-			dim.Printf("  (cached %s ago)\n", formatDuration(age))
+			if followJSONFlag {
+				var following []map[string]string
+				for _, hex := range cached.Hexes {
+					name := cache.ResolveNameByHex(hex)
+					npubStr, _ := nip19.EncodePublicKey(hex)
+					following = append(following, map[string]string{
+						"npub": npubStr,
+						"name": name,
+					})
+				}
+				jsonBytes, _ := json.Marshal(following)
+				fmt.Println(string(jsonBytes))
+			} else {
+				printFollowingList(cached.Hexes, cyan, dim)
+				age := time.Since(cached.UpdatedAt).Truncate(time.Second)
+				dim.Printf("  (cached %s ago)\n", formatDuration(age))
+			}
 			return nil
 		}
 	}
@@ -267,11 +332,29 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 	_ = cache.SaveFollowing(npub, hexes)
 
 	if len(hexes) == 0 {
-		fmt.Println("You're not following anyone yet.")
+		if followJSONFlag {
+			fmt.Println("[]")
+		} else {
+			fmt.Println("You're not following anyone yet.")
+		}
 		return nil
 	}
 
-	printFollowingList(hexes, cyan, dim)
+	if followJSONFlag {
+		var following []map[string]string
+		for _, hex := range hexes {
+			name := cache.ResolveNameByHex(hex)
+			npubStr, _ := nip19.EncodePublicKey(hex)
+			following = append(following, map[string]string{
+				"npub": npubStr,
+				"name": name,
+			})
+		}
+		jsonBytes, _ := json.Marshal(following)
+		fmt.Println(string(jsonBytes))
+	} else {
+		printFollowingList(hexes, cyan, dim)
+	}
 	return nil
 }
 

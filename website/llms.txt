@@ -1,0 +1,63 @@
+# nostr-cli
+
+A command-line tool for interacting with the Nostr protocol. Nostr is a decentralized social network protocol.
+
+## Quick Install
+
+```bash
+curl -sL https://nostrcli.sh/install.sh | bash
+brew install xdamman/tap/nostr
+```
+
+## Core Features
+
+- **Pipe-friendly**: `echo "hello" | nostr` posts a note, `echo "msg" | nostr dm user` sends a DM
+- **Structured output**: All commands support `--json` for machine-readable output
+- **Customizable display**: `--no-color` disables ANSI colors, `--timeout <ms>` sets relay timeout
+- **Non-interactive**: Supports flags for headless operation: `nostr login --nsec <key>`, `nostr post "msg"`, `nostr dm user "msg"`
+
+## Commands
+
+### Posting & Messaging
+- `nostr post [message]` — Post a text note (kind 1). Flags: `--reply`, `--json`, `--timeout`
+- `nostr dm <user> [message]` — Send encrypted DM (NIP-44). User: npub, alias, or nip05
+- `nostr [user]` — View user profile and recent notes. Flags: `--watch`, `--json`, `--limit`
+
+### Profile Management
+- `nostr profile [user]` — View profile metadata. Flags: `--json`, `--refresh`
+- `nostr profiles` — List all local profiles. Flags: `--json`
+- `nostr profiles rm [profile]` — Remove a profile
+- `nostr login` — Create or import profile. Flags: `--new`, `--nsec`
+- `nostr switch [profile]` — Switch active profile
+
+### Social Graph
+- `nostr follow <user>` — Add user to contact list (kind 3)
+- `nostr unfollow <user>` — Remove user from contact list
+- `nostr following` — List followed users
+
+### Configuration
+- `nostr alias <name> <user>` — Create alias for a user
+- `nostr aliases` — List all aliases
+- `nostr alias rm <name>` — Remove an alias
+- `nostr relays` — List relays. Flags: `--json`
+- `nostr relays add <url>` — Add relay
+- `nostr relays rm <url>` — Remove relay
+
+## User Format
+
+A `<user>` can be:
+- npub address (npub1...)
+- Local alias
+- NIP-05 address (user@domain.com)
+
+## Configuration
+
+- Config directory: `~/.nostr/`
+- Event logs: `~/.nostr/profiles/<npub>/events.jsonl`
+
+## Resources
+
+- Website: https://nostrcli.sh
+- Source: https://github.com/xdamman/nostr-cli
+- Skill (full reference): https://nostrcli.sh/skill/SKILL.md
+- AGENTS.md: https://github.com/xdamman/nostr-cli/blob/main/AGENTS.md

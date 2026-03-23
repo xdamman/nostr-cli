@@ -204,6 +204,38 @@ me> Can't wait 🎉
 | `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
 
+## Bot / LLM Integration
+
+nostr-cli is designed to be used by bots and LLMs. Use `--json` for structured output, `--no-color` to strip ANSI codes, and pipe content for posting.
+
+```bash
+# Post and capture event ID
+nostr post "Hello from my bot" --json | jq -r '.id'
+
+# Fetch a profile as JSON
+nostr profile alice@example.com --json
+
+# Non-interactive login
+nostr login --new
+nostr login --nsec nsec1...
+```
+
+### AI coding agent integration
+
+Install the nostr skill in your AI coding agent:
+
+```bash
+# Claude Code
+/install-skill https://nostrcli.sh/skill
+
+# Codex, Cursor, Windsurf, Aider (via OpenSkills)
+npx openskills install https://github.com/xdamman/nostr-cli
+```
+
+An [`AGENTS.md`](AGENTS.md) is included at the repo root for tools that auto-load it (Codex, Cursor, Augment, Gemini).
+
+See also: [nostrcli.sh/llms.txt](https://nostrcli.sh/llms.txt)
+
 ## Interactive Shell
 
 Run `nostr` with no arguments to launch the interactive shell:
@@ -225,8 +257,10 @@ All state lives in `~/.nostr/`:
         ├── profile.json      # Kind 0 metadata
         ├── relays.json       # Preferred relay list
         ├── aliases.csv       # Contact aliases
+        ├── events.jsonl      # Sent events (for backup)
         └── cache/
-            ├── events.jsonl      # Cached events
+            ├── events.jsonl      # Received events (safe to delete)
+            ├── relays.json       # Cached relay list
             └── profiles.jsonl    # Cached profile metadata
 ```
 
