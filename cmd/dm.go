@@ -29,9 +29,10 @@ import (
 )
 
 var dmCmd = &cobra.Command{
-	Use:   "dm [user] [message]",
-	Short: "Send an encrypted direct message",
-	Long:  "Send a DM to a user. Without a message, enters interactive chat mode.\nWithout arguments, shows your aliases.",
+	Use:     "dm [profile] [message]",
+	Short:   "Send an encrypted direct message",
+	GroupID: "social",
+	Long:  "Send a DM to a profile (npub, alias, or nip05). Without a message, enters interactive chat mode.\nWithout arguments, shows your aliases.",
 	RunE:  runDM,
 }
 
@@ -45,7 +46,17 @@ func runDM(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	printActiveProfile(npub)
+	dim := color.New(color.Faint)
+	name := resolveProfileName(npub)
+	short := npub
+	if len(short) > 20 {
+		short = short[:20] + "..."
+	}
+	if name != "" {
+		dim.Printf("Sending direct message as %s (%s)\n", name, short)
+	} else {
+		dim.Printf("Sending direct message as %s\n", short)
+	}
 
 	if len(args) == 0 {
 		return showDMAliases(npub)
@@ -210,9 +221,32 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Deduplication: track seen event IDs
+	// Deduplication: track seen event IDs (seed with cached history)
 	var seenMu sync.Mutex
 	seen := make(map[string]bool)
+	cachedEvents, _ := cache.QueryEvents(npub, func(ev nostr.Event) bool {
+		if ev.Kind != nostr.KindEncryptedDirectMessage {
+			return false
+		}
+		if ev.PubKey == myHex {
+			for _, tag := range ev.Tags {
+				if len(tag) >= 2 && tag[0] == "p" && tag[1] == targetHex {
+					return true
+				}
+			}
+		}
+		if ev.PubKey == targetHex {
+			for _, tag := range ev.Tags {
+				if len(tag) >= 2 && tag[0] == "p" && tag[1] == myHex {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	for _, ev := range cachedEvents {
+		seen[ev.ID] = true
+	}
 
 	// Track relay connection status
 	var connectedCount int32
@@ -260,6 +294,87 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		}
 		if newName != "" && newName != target.get() {
 			target.set(newName)
+		}
+	}()
+
+	// Fetch recent DM history from relays (fills the gap between cache and real-time)
+	go func() {
+		since := nostr.Timestamp(time.Now().Add(-7 * 24 * time.Hour).Unix())
+		// Messages they sent to me
+		filter1 := nostr.Filter{
+			Kinds:   []int{nostr.KindEncryptedDirectMessage},
+			Authors: []string{targetHex},
+			Tags:    nostr.TagMap{"p": []string{myHex}},
+			Since:   &since,
+			Limit:   50,
+		}
+		// Messages I sent to them
+		filter2 := nostr.Filter{
+			Kinds:   []int{nostr.KindEncryptedDirectMessage},
+			Authors: []string{myHex},
+			Tags:    nostr.TagMap{"p": []string{targetHex}},
+			Since:   &since,
+			Limit:   50,
+		}
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer fetchCancel()
+
+		events1, _ := internalRelay.FetchEvents(fetchCtx, filter1, relays)
+		events2, _ := internalRelay.FetchEvents(fetchCtx, filter2, relays)
+
+		var allNew []nostr.Event
+		sharedSecret := generateSharedSecret(skHex, targetHex)
+
+		for _, evp := range append(events1, events2...) {
+			if evp == nil {
+				continue
+			}
+			seenMu.Lock()
+			alreadySeen := seen[evp.ID]
+			if !alreadySeen {
+				seen[evp.ID] = true
+			}
+			seenMu.Unlock()
+			if alreadySeen {
+				continue
+			}
+			_ = cache.LogEvent(npub, *evp)
+			allNew = append(allNew, *evp)
+		}
+
+		if len(allNew) == 0 {
+			return
+		}
+
+		// Sort chronologically
+		sortEventsByTime(allNew)
+
+		// Compute column width
+		nameWidth := len("you")
+		tName := target.get()
+		if len(tName) > nameWidth {
+			nameWidth = len(tName)
+		}
+
+		youColor := color.New(color.FgGreen)
+
+		prefixLen := 14 + 2 + nameWidth + 2
+		for _, ev := range allNew {
+			plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
+			if err != nil {
+				continue
+			}
+			ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
+			content := wrapNote(plaintext, prefixLen)
+			fmt.Print("\r\033[K")
+			dim.Printf("%s  ", ts)
+			if ev.PubKey == myHex {
+				youColor.Printf("%-*s: ", nameWidth, "you")
+			} else {
+				cyan.Printf("%-*s: ", nameWidth, tName)
+			}
+			dim.Printf("%s\n", content)
+			fmt.Print("> ")
 		}
 	}()
 
@@ -371,9 +486,17 @@ func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targ
 
 			ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
 			dim := color.New(color.Faint)
+			name := target.get()
+			nameWidth := len(name)
+			if nameWidth < 3 {
+				nameWidth = 3
+			}
+			prefixLen := 14 + 2 + nameWidth + 2
+			content := wrapNote(plaintext, prefixLen)
 			fmt.Print("\r")
 			dim.Printf("%s  ", ts)
-			fmt.Printf("%s: %s\n> ", cyan.Sprint(target.get()), plaintext)
+			cyan.Printf("%-*s: ", nameWidth, name)
+			fmt.Printf("%s\n> ", content)
 		}
 	}
 }
@@ -440,13 +563,15 @@ func showDMHistory(npub, myHex, targetHex, targetName string, cyan, dim *color.C
 			continue
 		}
 		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
+		prefixLen := 14 + 2 + nameWidth + 2
+		content := wrapNote(plaintext, prefixLen)
 		dim.Printf("%s  ", ts)
 		if ev.PubKey == myHex {
 			youColor.Printf("%-*s: ", nameWidth, "you")
 		} else {
 			themColor.Printf("%-*s: ", nameWidth, targetName)
 		}
-		dim.Printf("%s\n", plaintext)
+		dim.Printf("%s\n", content)
 		lines++
 	}
 	return lines
@@ -497,33 +622,51 @@ func generateSharedSecret(skHex, targetHex string) []byte {
 func showDMAliases(npub string) error {
 	cyan := color.New(color.FgCyan).SprintFunc()
 	dim := color.New(color.Faint)
+	bold := color.New(color.Bold)
 
 	aliases, err := resolve.LoadAliases(npub)
 	if err != nil {
 		return err
 	}
 
-	if len(aliases) == 0 {
-		fmt.Println("No aliases configured.")
+	bold.Println("Usage: nostr dm <profile> [message]")
+	fmt.Println()
+	dim.Println("A <profile> can be an alias, npub, or NIP-05 address (user@domain.com).")
+	dim.Println("Without a message, enters interactive chat mode.")
+	fmt.Println()
+
+	if len(aliases) > 0 {
+		fmt.Println("Your aliases:")
 		fmt.Println()
-		dim.Println("Add an alias:  nostr alias <name> <npub|nip05>")
-		dim.Println("Then send a DM: nostr dm <name> <message>")
-		return nil
+		for _, name := range sortedKeys(aliases) {
+			fmt.Printf("  %s → %s\n", cyan(name), aliases[name])
+		}
+		fmt.Println()
+
+		example := sortedKeys(aliases)[0]
+		dim.Printf("Example:  nostr dm %s \"Hey, how are you?\"\n", example)
 	}
 
-	names := make([]string, 0, len(aliases))
-	for name := range aliases {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	fmt.Println()
+	dim.Println("To add an alias:")
+	dim.Println("  nostr alias <name> <npub|nip05>")
 
-	fmt.Println("Your aliases:")
-	fmt.Println()
-	for _, name := range names {
-		fmt.Printf("  %s → %s\n", cyan(name), aliases[name])
+	// Show switch hint only if there are multiple profiles
+	entries, _ := listSwitchableProfiles()
+	if len(entries) > 1 {
+		fmt.Println()
+		dim.Println("To switch active profile:")
+		dim.Println("  nostr switch <profile>")
 	}
-	fmt.Println()
-	dim.Println("Send a DM:     nostr dm <name> <message>")
-	dim.Println("Add an alias:  nostr alias <name> <npub|nip05>")
+
 	return nil
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

@@ -28,15 +28,17 @@ var (
 var updateYesFlag bool
 
 var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print version information",
-	Run:   runVersion,
+	Use:     "version",
+	Short:   "Print version information",
+	GroupID: "app",
+	Run:     runVersion,
 }
 
 var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Check for updates and install the latest version",
-	RunE:  runUpdate,
+	Use:     "update",
+	Short:   "Check for updates and install the latest version",
+	GroupID: "app",
+	RunE:    runUpdate,
 }
 
 func init() {

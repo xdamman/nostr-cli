@@ -22,9 +22,11 @@ import (
 var profileJSONFlag bool
 
 var profileCmd = &cobra.Command{
-	Use:   "profile [user]",
-	Short: "View a profile (yours by default, or specify a user)",
-	RunE:  runProfile,
+	Use:     "profile [profile]",
+	Short:   "Manage and view profiles",
+	Long:    "View a profile. A <profile> can be an npub, alias, or NIP-05 address (e.g. user@domain.com).",
+	GroupID: "profile",
+	RunE:    runProfile,
 }
 
 var profileUpdateCmd = &cobra.Command{
@@ -33,9 +35,17 @@ var profileUpdateCmd = &cobra.Command{
 	RunE:  runProfileUpdate,
 }
 
+var profileRmCmd = &cobra.Command{
+	Use:   "rm <profile>",
+	Short: "Remove a local profile (profile: npub, alias, or nip05)",
+	Args:  exactArgs(1),
+	RunE:  runProfileRm,
+}
+
 func init() {
 	profileCmd.Flags().BoolVar(&profileJSONFlag, "json", false, "Output raw kind 0 event as JSON")
 	profileCmd.AddCommand(profileUpdateCmd)
+	profileCmd.AddCommand(profileRmCmd)
 	rootCmd.AddCommand(profileCmd)
 }
 
@@ -313,6 +323,52 @@ func printColorField(label func(a ...interface{}) string, name, value string) {
 	if value != "" {
 		fmt.Printf("%-14s %s\n", label(name+":"), value)
 	}
+}
+
+// printNIP05Field prints the NIP-05 field with verification status.
+func runProfileRm(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen)
+	target := args[0]
+
+	// Resolve to npub
+	npub := target
+	if !strings.HasPrefix(target, "npub1") {
+		resolved, err := resolve.ResolveToNpub("", target)
+		if err != nil {
+			return fmt.Errorf("cannot resolve %q to a profile: %w", target, err)
+		}
+		npub = resolved
+	}
+
+	// Check it exists locally
+	if !config.HasNsec(npub) {
+		return fmt.Errorf("no local profile found for %s", target)
+	}
+
+	// Confirm
+	name := resolveProfileName(npub)
+	if name != "" {
+		fmt.Printf("Remove profile %s (%s)? This deletes the local keys and cache. [y/N] ", name, npub)
+	} else {
+		fmt.Printf("Remove profile %s? This deletes the local keys and cache. [y/N] ", npub)
+	}
+	var answer string
+	fmt.Scanln(&answer)
+	if answer != "y" && answer != "Y" {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	if err := config.RemoveProfile(npub); err != nil {
+		return err
+	}
+
+	if name != "" {
+		green.Printf("✓ Removed profile %s (%s)\n", name, npub)
+	} else {
+		green.Printf("✓ Removed profile %s\n", npub)
+	}
+	return nil
 }
 
 // printNIP05Field prints the NIP-05 field with verification status.

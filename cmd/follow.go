@@ -20,23 +20,26 @@ import (
 var followingRefreshFlag bool
 
 var followCmd = &cobra.Command{
-	Use:   "follow [npub|nip05|alias]",
-	Short: "Follow a user",
-	Args:  cobra.ExactArgs(1),
+	Use:     "follow <profile>",
+	Short:   "Follow a profile",
+	GroupID: "social",
+	Args:  exactArgs(1),
 	RunE:  runFollow,
 }
 
 var unfollowCmd = &cobra.Command{
-	Use:   "unfollow [npub|nip05|alias]",
-	Short: "Unfollow a user",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runUnfollow,
+	Use:     "unfollow <profile>",
+	Short:   "Unfollow a profile",
+	GroupID: "social",
+	Args:    exactArgs(1),
+	RunE:    runUnfollow,
 }
 
 var followingCmd = &cobra.Command{
-	Use:   "following",
-	Short: "List accounts you follow",
-	RunE:  runFollowing,
+	Use:     "following",
+	Short:   "List accounts you follow",
+	GroupID: "social",
+	RunE:    runFollowing,
 }
 
 func init() {

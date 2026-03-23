@@ -16,11 +16,12 @@ import (
 )
 
 var nipCmd = &cobra.Command{
-	Use:   "nip [number]",
-	Short: "View a NIP specification",
-	Long:  "Fetch and display a NIP (Nostr Implementation Possibility) in the terminal.\nExamples: nostr nip 01, nostr nip 44, nostr nip01",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runNIP,
+	Use:     "nip [number]",
+	Short:   "View a NIP specification",
+	Long:    "Fetch and display a NIP (Nostr Implementation Possibility) in the terminal.\nExamples: nostr nip 01, nostr nip 44, nostr nip01",
+	GroupID: "reference",
+	Args:    exactArgs(1),
+	RunE:    runNIP,
 }
 
 func init() {

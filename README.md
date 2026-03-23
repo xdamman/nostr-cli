@@ -41,6 +41,22 @@ brew install xdamman/tap/nostr
 curl -sf https://raw.githubusercontent.com/xdamman/nostr-cli/main/install.sh | sh
 ```
 
+### Debian / Ubuntu (.deb)
+
+Download the `.deb` package from the [latest release](https://github.com/xdamman/nostr-cli/releases/latest), then:
+
+```bash
+sudo dpkg -i nostr_*.deb
+```
+
+### Fedora / RHEL / openSUSE (.rpm)
+
+Download the `.rpm` package from the [latest release](https://github.com/xdamman/nostr-cli/releases/latest), then:
+
+```bash
+sudo rpm -i nostr_*.rpm
+```
+
 ### From source (requires Go)
 
 ```bash

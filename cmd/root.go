@@ -22,7 +22,17 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "nostr",
 	Short: "A command-line client for the Nostr protocol",
-	Long:  "nostr lets you manage Nostr identities, publish notes, and interact with relays from the terminal.",
+	Long: `Nostr is an open protocol for censorship-resistant social networking
+and other decentralized applications. It uses cryptographic keys for
+identity — no accounts, no servers you depend on.
+
+nostr-cli lets you manage profiles, publish notes, send encrypted DMs,
+and interact with relays from the terminal.
+
+A <profile> can be specified as an npub (npub1...), a local alias, or a NIP-05
+address (e.g. user@domain.com).
+
+Most commands support --json for machine-readable output.`,
 	// Catch-all: treat unknown first arg as user lookup
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -76,13 +86,18 @@ func colorizeHelp(s string) string {
 	dimItalic := color.New(color.Faint).SprintFunc()
 
 	sectionHeaders := map[string]bool{
-		"Usage:":               true,
-		"Available Commands:":  true,
-		"Additional Commands:": true,
-		"Flags:":               true,
-		"Global Flags:":        true,
-		"Aliases:":             true,
-		"Examples:":            true,
+		"Usage:":                  true,
+		"Available Commands:":     true,
+		"Additional Commands:":    true,
+		"Social Commands:":        true,
+		"Profile Commands:":       true,
+		"Infrastructure Commands:": true,
+		"Reference:":              true,
+		"App Commands:":           true,
+		"Flags:":                  true,
+		"Global Flags:":           true,
+		"Aliases:":                true,
+		"Examples:":               true,
 	}
 
 	lines := strings.Split(s, "\n")
@@ -156,6 +171,18 @@ func isNIPArg(s string) bool {
 }
 
 func Execute() {
+	// Initialize built-in commands so we can set their groups
+	rootCmd.InitDefaultHelpCmd()
+	rootCmd.InitDefaultCompletionCmd()
+	for _, cmd := range rootCmd.Commands() {
+		switch cmd.Name() {
+		case "completion":
+			cmd.GroupID = "app"
+		case "help":
+			cmd.GroupID = "reference"
+		}
+	}
+
 	// Intercept unknown subcommands to treat as user lookup
 	rootCmd.TraverseChildren = true
 	if err := rootCmd.Execute(); err != nil {
@@ -174,6 +201,21 @@ func Execute() {
 		}
 		color.New(color.FgRed).Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// exactArgs returns a cobra.PositionalArgs that shows help when the wrong number of args is given.
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) != n {
+			cmd.Help()
+			fmt.Println()
+			if len(args) < n {
+				return fmt.Errorf("requires %d arg(s), received %d", n, len(args))
+			}
+			return fmt.Errorf("accepts %d arg(s), received %d", n, len(args))
+		}
+		return nil
 	}
 }
 
@@ -231,8 +273,22 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub of the profile to use (default: active profile)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 
+	// Command groups
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "social", Title: "Social Commands:"},
+		&cobra.Group{ID: "profile", Title: "Profile Commands:"},
+		&cobra.Group{ID: "infra", Title: "Infrastructure Commands:"},
+		&cobra.Group{ID: "reference", Title: "Reference:"},
+		&cobra.Group{ID: "app", Title: "App Commands:"},
+	)
+
 	// Set custom help function to colorize output
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		// Show Long description before usage
+		if cmd.Long != "" {
+			fmt.Println(colorizeHelp(cmd.Long))
+			fmt.Println()
+		}
 		usage := cmd.UsageString()
 		fmt.Print(colorizeHelp(usage))
 	})

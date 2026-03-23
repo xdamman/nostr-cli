@@ -11,15 +11,17 @@ import (
 )
 
 var aliasCmd = &cobra.Command{
-	Use:   "alias [name] [npub|nip05]",
-	Short: "Manage aliases for users",
-	Long:  "Create, list, or remove aliases. Aliases are global shortcuts for npubs.",
-	RunE:  runAlias,
+	Use:     "alias [name] [profile]",
+	Short:   "Manage aliases",
+	Long:    "Create, list, or remove aliases. Aliases are global shortcuts for npubs.\nA <profile> can be an npub or NIP-05 address.",
+	GroupID: "infra",
+	RunE:    runAlias,
 }
 
 var aliasesCmd = &cobra.Command{
-	Use:   "aliases",
-	Short: "List all aliases",
+	Use:     "aliases",
+	Short:   "List all aliases",
+	GroupID: "infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAlias(cmd, nil)
 	},
@@ -28,7 +30,7 @@ var aliasesCmd = &cobra.Command{
 var aliasRmCmd = &cobra.Command{
 	Use:   "rm [name]",
 	Short: "Remove an alias",
-	Args:  cobra.ExactArgs(1),
+	Args:  exactArgs(1),
 	RunE:  runAliasRm,
 }
 
@@ -52,7 +54,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			dim := color.New(color.Faint)
 			fmt.Println("No aliases configured.")
 			fmt.Println()
-			dim.Println("Add an alias:  nostr alias <name> <npub|nip05>")
+			dim.Println("Add an alias:  nostr alias <name> <profile>")
 			dim.Println("Send a DM:     nostr dm <name> <message>")
 			return nil
 		}
@@ -69,13 +71,13 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println()
 		dim := color.New(color.Faint)
-		dim.Println("Add an alias:     nostr alias <name> <npub|nip05>")
+		dim.Println("Add an alias:     nostr alias <name> <profile>")
 		dim.Println("Remove an alias:  nostr alias rm <name>")
 		return nil
 	}
 
 	if len(args) < 2 {
-		return fmt.Errorf("usage: nostr alias [name] [npub|nip05]")
+		return fmt.Errorf("usage: nostr alias <name> <profile>")
 	}
 
 	name := args[0]

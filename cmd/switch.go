@@ -15,10 +15,11 @@ import (
 )
 
 var switchCmd = &cobra.Command{
-	Use:   "switch [npub|alias]",
-	Short: "Switch active profile",
-	Long:  "Switch to a different profile. Without arguments, select interactively.",
-	RunE:  runSwitch,
+	Use:     "switch [profile]",
+	Short:   "Switch active profile",
+	Long:    "Switch to a different profile. Without arguments, select interactively.\nA <profile> can be an npub, alias, or NIP-05 address.",
+	GroupID: "profile",
+	RunE:    runSwitch,
 }
 
 func init() {

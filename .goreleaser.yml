@@ -39,6 +39,18 @@ changelog:
       - "^test:"
       - "^ci:"
 
+nfpms:
+  - id: nostr
+    package_name: nostr
+    vendor: Xavier Damman
+    homepage: https://github.com/xdamman/nostr-cli
+    maintainer: Xavier Damman <https://github.com/xdamman>
+    description: A command-line client for the Nostr protocol
+    license: MIT
+    formats:
+      - deb
+      - rpm
+
 brews:
   - repository:
       owner: xdamman

@@ -22,10 +22,11 @@ var (
 )
 
 var loginCmd = &cobra.Command{
-	Use:   "login",
-	Short: "Create a new profile or import an existing one",
-	Long:  "Login with an existing nsec or generate a new keypair. Creates a profile in ~/.nostr/profiles/<npub>/.",
-	RunE:  runLogin,
+	Use:     "login",
+	Short:   "Create a new profile or import an existing one",
+	Long:    "Login with an existing nsec or generate a new keypair. Creates a profile in ~/.nostr/profiles/<npub>/.",
+	GroupID: "profile",
+	RunE:    runLogin,
 }
 
 func init() {

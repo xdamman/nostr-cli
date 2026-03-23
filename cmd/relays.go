@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,30 +15,40 @@ import (
 	"github.com/xdamman/nostr-cli/internal/config"
 )
 
+var relaysJSONFlag bool
+
 var relaysCmd = &cobra.Command{
-	Use:   "relays",
-	Short: "List configured relays",
-	RunE:  runRelaysList,
+	Use:     "relays",
+	Short:   "Manage relays",
+	GroupID: "infra",
+	RunE:    runRelaysList,
 }
 
 var relaysAddCmd = &cobra.Command{
 	Use:   "add [url]",
 	Short: "Add a relay",
-	Args:  cobra.ExactArgs(1),
+	Args:  exactArgs(1),
 	RunE:  runRelaysAdd,
 }
 
 var relaysRmCmd = &cobra.Command{
 	Use:   "rm [url or number]",
 	Short: "Remove a relay",
-	Args:  cobra.ExactArgs(1),
+	Args:  exactArgs(1),
 	RunE:  runRelaysRm,
 }
 
 func init() {
+	relaysCmd.Flags().BoolVar(&relaysJSONFlag, "json", false, "Output as JSON with connection status and ping")
 	relaysCmd.AddCommand(relaysAddCmd)
 	relaysCmd.AddCommand(relaysRmCmd)
 	rootCmd.AddCommand(relaysCmd)
+}
+
+type relayInfo struct {
+	URL       string `json:"url"`
+	Reachable bool   `json:"reachable"`
+	PingMs    int    `json:"ping_ms,omitempty"`
 }
 
 func runRelaysList(cmd *cobra.Command, args []string) error {
@@ -46,7 +57,9 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	printActiveProfile(npub)
+	if !relaysJSONFlag {
+		printActiveProfile(npub)
+	}
 
 	relays, err := config.LoadRelays(npub)
 	if err != nil {
@@ -54,29 +67,31 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(relays) == 0 {
+		if relaysJSONFlag {
+			fmt.Println("[]")
+			return nil
+		}
 		color.Yellow("No relays configured. Run 'nostr relays add wss://...' to add one.")
 		return nil
 	}
 
-	// Check connectivity for all relays in parallel
-	type relayStatus struct {
-		url       string
-		reachable bool
-	}
-
-	statuses := make([]relayStatus, len(relays))
+	// Check connectivity and measure ping for all relays in parallel
+	infos := make([]relayInfo, len(relays))
 	var wg sync.WaitGroup
 
 	for i, r := range relays {
-		statuses[i] = relayStatus{url: r}
+		infos[i] = relayInfo{URL: r}
 		wg.Add(1)
 		go func(idx int, url string) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			start := time.Now()
 			relay, err := nostr.RelayConnect(ctx, url)
+			elapsed := time.Since(start)
 			if err == nil {
-				statuses[idx].reachable = true
+				infos[idx].Reachable = true
+				infos[idx].PingMs = int(elapsed.Milliseconds())
 				relay.Close()
 			}
 		}(i, r)
@@ -84,19 +99,30 @@ func runRelaysList(cmd *cobra.Command, args []string) error {
 
 	wg.Wait()
 
+	if relaysJSONFlag {
+		data, err := json.MarshalIndent(infos, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
 	bold := color.New(color.Bold).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
+	dim := color.New(color.Faint)
 
-	for i, s := range statuses {
+	for i, info := range infos {
 		status := red("✗")
-		if s.reachable {
+		ping := ""
+		if info.Reachable {
 			status = green("✓")
+			ping = dim.Sprintf("  %dms", info.PingMs)
 		}
-		fmt.Printf("%s %s %s\n", bold(fmt.Sprintf("%d.", i+1)), status, s.url)
+		fmt.Printf("%s %s %s%s\n", bold(fmt.Sprintf("%d.", i+1)), status, info.URL, ping)
 	}
 	fmt.Println()
-	dim := color.New(color.Faint)
 	dim.Println("To edit this list of relays, use:")
 	dim.Println("  nostr relays add <wss://...>    Add a relay")
 	dim.Println("  nostr relays rm <number>        Remove a relay")

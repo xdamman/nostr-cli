@@ -27,8 +27,9 @@ var (
 )
 
 var postCmd = &cobra.Command{
-	Use:   "post [message]",
-	Short: "Publish a text note to Nostr",
+	Use:     "post [message]",
+	Short:   "Publish a text note to Nostr",
+	GroupID: "social",
 	Long:  "Publish a kind 1 text note. Pass the message as an argument or enter it interactively.",
 	RunE:  runPost,
 }

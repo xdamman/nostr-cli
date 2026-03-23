@@ -243,6 +243,45 @@ func RemoveProfileSymlink(alias string) error {
 	return nil
 }
 
+// RemoveProfile removes a profile directory and cleans up associated aliases and active symlink.
+func RemoveProfile(npub string) error {
+	dir, err := ProfileDir(npub)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return fmt.Errorf("profile not found: %s", npub)
+	}
+
+	// Remove the profile directory
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("failed to remove profile directory: %w", err)
+	}
+
+	// Remove any aliases pointing to this npub
+	aliases, _ := LoadGlobalAliases()
+	changed := false
+	for name, target := range aliases {
+		if target == npub {
+			delete(aliases, name)
+			_ = RemoveProfileSymlink(name)
+			changed = true
+		}
+	}
+	if changed {
+		_ = SaveGlobalAliases(aliases)
+	}
+
+	// If this was the active profile, remove the active symlink
+	active, err := ActiveProfile()
+	if err == nil && active == npub {
+		base, _ := BaseDir()
+		_ = os.Remove(filepath.Join(base, "active"))
+	}
+
+	return nil
+}
+
 // HasNsec checks whether the given profile directory contains an nsec file.
 func HasNsec(npub string) bool {
 	dir, err := ProfileDir(npub)
