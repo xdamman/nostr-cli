@@ -110,9 +110,16 @@ nostr relays add wss://...       # Add a relay
 nostr relays rm [url|number]     # Remove a relay
 ```
 
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON with connection status and ping |
+| `--relay <url\|domain>` | Show a specific relay only |
+
 **`relays` (list):**
-- Print numbered list: `1. wss://relay.damus.io`
-- Show connection status if possible (✓ connected, ✗ unreachable)
+- Print numbered list with animated loading indicator per relay
+- Show connection status with response time (✓ connected 142ms, ✗ unreachable)
+- Hints shown immediately, relay status updates as responses arrive
 
 **`relays add`:**
 - Validate URL format (must be `wss://` or `ws://`)
@@ -126,6 +133,45 @@ nostr relays rm [url|number]     # Remove a relay
 **Edge cases:**
 - Duplicate relay on add → warn, skip
 - Remove last relay → warn but allow
+
+---
+
+## `nostr sync`
+
+**Priority:** P1
+**NIPs:** NIP-01
+
+Sync locally stored events with configured relays.
+
+```
+nostr sync                           # Interactive relay selection
+nostr sync --relay nos.lol           # Sync with a specific relay
+nostr sync --json                    # Machine-readable output
+```
+
+**Behavior:**
+1. Load local sent events from `events.jsonl`
+2. Filter to syncable events (skip superseded replaceable events per NIP-01)
+3. Fetch events from each relay (shows per-relay progress)
+4. Interactive checklist to select which relays to sync
+5. Save any new events from relays locally
+6. Publish local events missing from selected relays
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--relay <url\|domain>` | Sync with a specific relay (full URL or domain) |
+| `--json` | Output results as JSON without interactive UI |
+
+**Replaceable events (NIP-01):**
+- Kind 0, 3, 10000-19999: only latest per pubkey+kind is synced
+- Kind 20000-29999 (ephemeral): skipped entirely
+- Kind 30000-39999 (addressable): only latest per pubkey+kind+d-tag
+
+**Edge cases:**
+- No local events → only fetches from relays
+- All relays in sync → "Everything is in sync"
+- Relay unreachable → marked as failed, error shown
 
 ---
 

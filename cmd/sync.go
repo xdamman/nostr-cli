@@ -1,0 +1,993 @@
+package cmd
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/fatih/color"
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
+	"github.com/xdamman/nostr-cli/internal/cache"
+	"github.com/xdamman/nostr-cli/internal/config"
+	"github.com/xdamman/nostr-cli/internal/crypto"
+	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
+	"github.com/xdamman/nostr-cli/internal/ui"
+)
+
+var (
+	syncRelayFlag string
+	syncJSONFlag  bool
+)
+
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync local events with relays",
+	Long: `Sync your locally stored events with your configured relays.
+
+Fetches all your events still present on relays and publishes any local
+events that may be missing from them.
+
+Replaceable events (profile, follow list, relay list, etc.) are handled
+correctly: only the latest version is synced, as relays discard older ones.
+
+Use --relay to sync with a specific relay only.
+Use --json for machine-readable output.`,
+	GroupID: "infra",
+	RunE:    runSync,
+}
+
+func init() {
+	syncCmd.Flags().StringVar(&syncRelayFlag, "relay", "", "Sync with a specific relay only (wss://...)")
+	syncCmd.Flags().BoolVar(&syncJSONFlag, "json", false, "Output sync results as JSON")
+	rootCmd.AddCommand(syncCmd)
+}
+
+// plural returns "s" if n != 1, empty string otherwise.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// relayHost extracts the host from a relay URL for display.
+func relayHost(r string) string {
+	if u, err := url.Parse(r); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return r
+}
+
+// --- Event kind classification per NIP-01 ---
+// https://github.com/nostr-protocol/nips/blob/master/01.md
+
+func isReplaceable(kind int) bool {
+	return kind == 0 || kind == 3 || (kind >= 10000 && kind < 20000)
+}
+
+func isEphemeral(kind int) bool {
+	return kind >= 20000 && kind < 30000
+}
+
+func isAddressable(kind int) bool {
+	return kind >= 30000 && kind < 40000
+}
+
+func dTagValue(ev nostr.Event) string {
+	for _, tag := range ev.Tags {
+		if len(tag) >= 2 && tag[0] == "d" {
+			return tag[1]
+		}
+	}
+	return ""
+}
+
+// syncableEvents filters events to only those that should exist on relays.
+func syncableEvents(events []nostr.Event) (syncable []nostr.Event, skipped int) {
+	latestReplaceable := make(map[int]nostr.Event)
+	latestAddressable := make(map[string]nostr.Event)
+	var regular []nostr.Event
+
+	for _, ev := range events {
+		switch {
+		case isEphemeral(ev.Kind):
+			skipped++
+		case isReplaceable(ev.Kind):
+			if existing, ok := latestReplaceable[ev.Kind]; !ok || ev.CreatedAt > existing.CreatedAt {
+				latestReplaceable[ev.Kind] = ev
+			}
+		case isAddressable(ev.Kind):
+			key := fmt.Sprintf("%d:%s", ev.Kind, dTagValue(ev))
+			if existing, ok := latestAddressable[key]; !ok || ev.CreatedAt > existing.CreatedAt {
+				latestAddressable[key] = ev
+			}
+		default:
+			regular = append(regular, ev)
+		}
+	}
+
+	replaceableCount := 0
+	for _, ev := range events {
+		if isReplaceable(ev.Kind) {
+			replaceableCount++
+		}
+	}
+	addressableCount := 0
+	for _, ev := range events {
+		if isAddressable(ev.Kind) {
+			addressableCount++
+		}
+	}
+	skipped += (replaceableCount - len(latestReplaceable)) + (addressableCount - len(latestAddressable))
+
+	syncable = regular
+	for _, ev := range latestReplaceable {
+		syncable = append(syncable, ev)
+	}
+	for _, ev := range latestAddressable {
+		syncable = append(syncable, ev)
+	}
+
+	sort.Slice(syncable, func(i, j int) bool {
+		return syncable[i].CreatedAt < syncable[j].CreatedAt
+	})
+
+	return syncable, skipped
+}
+
+// relayFetchState tracks what we've learned from fetching a relay.
+type relayFetchState struct {
+	done     bool
+	ok       bool
+	count    int
+	eventIDs map[string]bool
+	missing  int
+	duration time.Duration
+	err      error
+}
+
+// --- JSON output types ---
+
+type syncJSONRelay struct {
+	URL          string `json:"url"`
+	Events       int    `json:"events"`
+	Missing      int    `json:"missing"`
+	Published    int    `json:"published"`
+	Failed       int    `json:"failed"`
+	Reachable    bool   `json:"reachable"`
+	ErrorMessage string `json:"error,omitempty"`
+}
+
+type syncJSONOutput struct {
+	Profile        string          `json:"profile"`
+	LocalEvents    int             `json:"local_events"`
+	SyncableEvents int             `json:"syncable_events"`
+	SkippedEvents  int             `json:"skipped_events"`
+	SavedLocally   int             `json:"saved_locally"`
+	Relays         []syncJSONRelay `json:"relays"`
+}
+
+func runSync(cmd *cobra.Command, args []string) error {
+	if syncJSONFlag {
+		return runSyncJSON(cmd, args)
+	}
+	return runSyncInteractive(cmd, args)
+}
+
+func runSyncJSON(cmd *cobra.Command, args []string) error {
+	npub, err := config.LoadResolvedProfile(profileFlag)
+	if err != nil {
+		return err
+	}
+	pubHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return err
+	}
+
+	allRelays, err := config.LoadRelays(npub)
+	if err != nil {
+		return err
+	}
+
+	// If --relay specified, filter
+	var relays []string
+	if syncRelayFlag != "" {
+		var matched string
+		for _, r := range allRelays {
+			if r == syncRelayFlag || relayHost(r) == syncRelayFlag {
+				matched = r
+				break
+			}
+		}
+		if matched == "" {
+			return fmt.Errorf("relay %s is not in your configured relays", syncRelayFlag)
+		}
+		relays = []string{matched}
+	} else {
+		relays = allRelays
+	}
+
+	localEvents, err := cache.LoadSentEvents(npub)
+	if err != nil {
+		return fmt.Errorf("failed to load local events: %w", err)
+	}
+	localSyncable, localSkipped := syncableEvents(localEvents)
+
+	localIDs := make(map[string]bool, len(localEvents))
+	for _, ev := range localEvents {
+		localIDs[ev.ID] = true
+	}
+
+	// Fetch from all selected relays
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+	filter := nostr.Filter{Authors: []string{pubHex}, Limit: 500}
+	fetchCh := internalRelay.FetchEventsPerRelay(context.Background(), filter, relays, timeout)
+
+	fetchStates := make(map[string]*relayFetchState)
+	for res := range fetchCh {
+		st := &relayFetchState{done: true, eventIDs: make(map[string]bool), duration: res.Duration, err: res.Err}
+		if res.Err == nil {
+			st.ok = true
+			st.count = len(res.Events)
+			for _, ev := range res.Events {
+				st.eventIDs[ev.ID] = true
+			}
+			for _, ev := range localSyncable {
+				if !st.eventIDs[ev.ID] {
+					st.missing++
+				}
+			}
+		}
+		fetchStates[res.URL] = st
+	}
+
+	// Build remote IDs, save new events locally
+	remoteIDs := make(map[string]bool)
+	for _, r := range relays {
+		if st, ok := fetchStates[r]; ok && st.ok {
+			for id := range st.eventIDs {
+				remoteIDs[id] = true
+			}
+		}
+	}
+
+	var newRemoteIDs []string
+	for id := range remoteIDs {
+		if !localIDs[id] {
+			newRemoteIDs = append(newRemoteIDs, id)
+		}
+	}
+
+	savedLocally := 0
+	if len(newRemoteIDs) > 0 {
+		idFilter := nostr.Filter{IDs: newRemoteIDs, Limit: len(newRemoteIDs)}
+		fetched, fErr := internalRelay.FetchEvents(context.Background(), idFilter, relays)
+		if fErr == nil {
+			for _, ev := range fetched {
+				_ = cache.LogSentEvent(npub, *ev)
+				savedLocally++
+			}
+		}
+	}
+
+	// Find missing events and publish
+	var missing []nostr.Event
+	for _, ev := range localSyncable {
+		if !remoteIDs[ev.ID] {
+			missing = append(missing, ev)
+		}
+	}
+
+	// Build per-relay publish results
+	relayResults := make(map[string]*syncJSONRelay)
+	for _, r := range relays {
+		jr := &syncJSONRelay{URL: r}
+		if st, ok := fetchStates[r]; ok && st.done {
+			if st.ok {
+				jr.Events = st.count
+				jr.Missing = st.missing
+				jr.Reachable = true
+			} else {
+				if st.err != nil {
+					jr.ErrorMessage = st.err.Error()
+				}
+			}
+		}
+		relayResults[r] = jr
+	}
+
+	// Publish missing events
+	if len(missing) > 0 {
+		for _, event := range missing {
+			pubCh := internalRelay.PublishEventWithProgress(context.Background(), event, relays, timeout)
+			for res := range pubCh {
+				if jr, ok := relayResults[res.URL]; ok {
+					if res.OK {
+						jr.Published++
+					} else {
+						jr.Failed++
+					}
+				}
+			}
+		}
+	}
+
+	// Build output
+	out := syncJSONOutput{
+		Profile:        npub,
+		LocalEvents:    len(localEvents),
+		SyncableEvents: len(localSyncable),
+		SkippedEvents:  localSkipped,
+		SavedLocally:   savedLocally,
+	}
+	for _, r := range relays {
+		out.Relays = append(out.Relays, *relayResults[r])
+	}
+
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+func runSyncInteractive(cmd *cobra.Command, args []string) error {
+	dimFn := color.New(color.Faint)
+	cyan := color.New(color.FgCyan).SprintFunc()
+	green := color.New(color.FgGreen)
+	greenFn := color.New(color.FgGreen).SprintFunc()
+	redFn := color.New(color.FgRed).SprintFunc()
+
+	npub, err := config.LoadResolvedProfile(profileFlag)
+	if err != nil {
+		return err
+	}
+
+	pubHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return err
+	}
+
+	profileName := resolveProfileName(npub)
+
+	// Show active profile
+	short := npub
+	if len(short) > 20 {
+		short = short[:20] + "..."
+	}
+	if profileName != "" {
+		fmt.Printf("Profile: %s (%s)\n", cyan(profileName), dimFn.Sprint(short))
+	} else {
+		fmt.Printf("Profile: %s\n", cyan(short))
+	}
+	fmt.Println()
+
+	// Load configured relays
+	allRelays, err := config.LoadRelays(npub)
+	if err != nil {
+		return err
+	}
+	if len(allRelays) == 0 {
+		return fmt.Errorf("no relays configured — run `nostr relays add <url>` first")
+	}
+
+	// Load local sent events and compute syncable set upfront
+	localEvents, err := cache.LoadSentEvents(npub)
+	if err != nil {
+		return fmt.Errorf("failed to load local events: %w", err)
+	}
+	localSyncable, localSkipped := syncableEvents(localEvents)
+
+	localIDs := make(map[string]bool, len(localEvents))
+	for _, ev := range localEvents {
+		localIDs[ev.ID] = true
+	}
+
+	// Start fetching from ALL relays immediately (before user selects)
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+	filter := nostr.Filter{
+		Authors: []string{pubHex},
+		Limit:   500,
+	}
+	fetchCh := internalRelay.FetchEventsPerRelay(context.Background(), filter, allRelays, timeout)
+
+	// Collect fetch results in background into a shared map
+	fetchStates := make(map[string]*relayFetchState)
+	fetchResultCh := make(chan internalRelay.FetchResult, len(allRelays))
+	go func() {
+		for res := range fetchCh {
+			fetchResultCh <- res
+		}
+		close(fetchResultCh)
+	}()
+
+	processFetchResult := func(res internalRelay.FetchResult) {
+		st := &relayFetchState{done: true, eventIDs: make(map[string]bool), duration: res.Duration, err: res.Err}
+		if res.Err == nil {
+			st.ok = true
+			st.count = len(res.Events)
+			for _, ev := range res.Events {
+				st.eventIDs[ev.ID] = true
+			}
+			for _, ev := range localSyncable {
+				if !st.eventIDs[ev.ID] {
+					st.missing++
+				}
+			}
+		}
+		fetchStates[res.URL] = st
+	}
+
+	// --- Select relays (with live fetch status) ---
+	var relays []string
+	if syncRelayFlag != "" {
+		// Match by full URL or just domain name
+		var matched string
+		for _, r := range allRelays {
+			if r == syncRelayFlag || relayHost(r) == syncRelayFlag {
+				matched = r
+				break
+			}
+		}
+		if matched == "" {
+			return fmt.Errorf("relay %s is not in your configured relays", syncRelayFlag)
+		}
+		relays = []string{matched}
+
+		// Show single relay with live fetch progress
+		host := relayHost(matched)
+		fmt.Printf("  %s %s\n", dimFn.Sprint(ui.SpinnerFrames[0]), dimFn.Sprint(host))
+
+		ticker := time.NewTicker(80 * time.Millisecond)
+		frame := 0
+		waitDone := false
+		for !waitDone {
+			select {
+			case res, ok := <-fetchResultCh:
+				if !ok {
+					waitDone = true
+					break
+				}
+				processFetchResult(res)
+				if res.URL == matched {
+					fmt.Print("\033[1A\r\033[K")
+					if st := fetchStates[matched]; st.ok {
+						fmt.Printf("  %s %s  %s\n", greenFn("✓"), host,
+							dimFn.Sprintf("%d event%s, %d missing, %dms", st.count, plural(st.count), st.missing, st.duration.Milliseconds()))
+					} else {
+						fmt.Printf("  %s %s  %s\n", redFn("✗"), host,
+							dimFn.Sprintf("%dms", st.duration.Milliseconds()))
+						if st.err != nil {
+							dimFn.Printf("  %s\n", st.err.Error())
+						}
+					}
+					waitDone = true
+				}
+			case <-ticker.C:
+				if fetchStates[matched] == nil {
+					frame++
+					f := ui.SpinnerFrames[frame%len(ui.SpinnerFrames)]
+					fmt.Print("\033[1A\r\033[K")
+					fmt.Printf("  %s %s\n", dimFn.Sprint(f), dimFn.Sprint(host))
+				}
+			}
+		}
+		ticker.Stop()
+		go func() {
+			for range fetchResultCh {
+			}
+		}()
+		fmt.Println()
+	} else {
+		// Interactive relay checklist with live fetch status
+		fmt.Printf("Select relays to sync")
+		if len(localEvents) > 0 {
+			fmt.Printf(" (%d local, %d syncable)", len(localEvents), len(localSyncable))
+		}
+		fmt.Println()
+		relays = syncRelayChecklistLive(allRelays, fetchResultCh, fetchStates, processFetchResult)
+		if len(relays) == 0 {
+			go func() {
+				for range fetchResultCh {
+				}
+			}()
+			fmt.Println("No relays selected.")
+			return nil
+		}
+	}
+
+	if syncRelayFlag != "" {
+		fmt.Printf("Sync with %s? [Y/n] ", cyan(relayHost(relays[0])))
+		var answer string
+		fmt.Scanln(&answer)
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer == "n" || answer == "no" {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	} else {
+		dimFn.Printf("  Tip: use nostr sync --relay <url> to sync with a single relay\n")
+	}
+	fmt.Println()
+
+	// Drain any remaining fetch results
+	drainDone := false
+	for !drainDone {
+		select {
+		case res, ok := <-fetchResultCh:
+			if !ok {
+				drainDone = true
+			} else {
+				processFetchResult(res)
+			}
+		default:
+			drainDone = true
+		}
+	}
+
+	// Build remote ID set from selected relays
+	remoteIDs := make(map[string]bool)
+	for _, r := range relays {
+		if st, ok := fetchStates[r]; ok && st.ok {
+			for id := range st.eventIDs {
+				remoteIDs[id] = true
+			}
+		}
+	}
+
+	n := len(remoteIDs)
+	fmt.Printf("Found %s unique event%s across selected relays\n", cyan(fmt.Sprintf("%d", n)), plural(n))
+
+	// Save new events from relays locally
+	var newRemoteIDs []string
+	for id := range remoteIDs {
+		if !localIDs[id] {
+			newRemoteIDs = append(newRemoteIDs, id)
+		}
+	}
+
+	newFromRelays := 0
+	if len(newRemoteIDs) > 0 {
+		n := len(newRemoteIDs)
+		sp := ui.NewSpinner(fmt.Sprintf("Saving %d new event%s from relays...", n, plural(n)))
+		idFilter := nostr.Filter{
+			IDs:   newRemoteIDs,
+			Limit: len(newRemoteIDs),
+		}
+		fetched, fErr := internalRelay.FetchEvents(context.Background(), idFilter, relays)
+		sp.Stop()
+		if fErr == nil {
+			for _, ev := range fetched {
+				_ = cache.LogSentEvent(npub, *ev)
+				newFromRelays++
+			}
+		}
+		if newFromRelays > 0 {
+			fmt.Printf("Saved %s new event%s from relays locally\n", cyan(fmt.Sprintf("%d", newFromRelays)), plural(newFromRelays))
+		}
+	}
+
+	// Find syncable events missing from relays
+	var missing []nostr.Event
+	for _, ev := range localSyncable {
+		if !remoteIDs[ev.ID] {
+			missing = append(missing, ev)
+		}
+	}
+
+	if len(missing) == 0 {
+		fmt.Println()
+		green.Println("✓ Everything is in sync")
+		if localSkipped > 0 {
+			dimFn.Printf("  %d older event%s not synced (replaceable — relays only keep the latest version)\n", localSkipped, plural(localSkipped))
+		}
+		printSyncSummary(dimFn, npub, newFromRelays, 0, 0)
+		return nil
+	}
+
+	sort.Slice(missing, func(i, j int) bool {
+		return missing[i].CreatedAt < missing[j].CreatedAt
+	})
+
+	fmt.Println()
+	n = len(missing)
+	fmt.Printf("Publishing %s event%s missing from relays:\n", cyan(fmt.Sprintf("%d", n)), plural(n))
+	fmt.Println()
+
+	// Publish missing events
+	publishedCount := 0
+	failedCount := 0
+
+	for i, event := range missing {
+		ts := event.CreatedAt.Time().Format("2006-01-02 15:04")
+		kindLabel := eventKindLabel(event.Kind)
+		snippet := eventSnippet(event)
+
+		fmt.Printf("%s %s %s %s\n",
+			cyan(fmt.Sprintf("%d/%d", i+1, len(missing))),
+			dimFn.Sprint(ts),
+			kindLabel,
+			snippet,
+		)
+
+		pubCh := internalRelay.PublishEventWithProgress(context.Background(), event, relays, timeout)
+
+		anySuccess := false
+		for res := range pubCh {
+			host := relayHost(res.URL)
+			ms := res.Duration.Milliseconds()
+			if res.OK {
+				fmt.Printf("  %s published to %s  %s\n", greenFn("✓"), host, dimFn.Sprintf("%dms", ms))
+				anySuccess = true
+			} else {
+				fmt.Printf("  %s failed on %s  %s\n", redFn("✗"), host, dimFn.Sprintf("%dms", ms))
+			}
+		}
+
+		if anySuccess {
+			publishedCount++
+		} else {
+			failedCount++
+		}
+	}
+
+	fmt.Println()
+	if localSkipped > 0 {
+		dimFn.Printf("  %d older event%s not synced (replaceable — relays only keep the latest version)\n", localSkipped, plural(localSkipped))
+	}
+	printSyncSummary(dimFn, npub, newFromRelays, publishedCount, failedCount)
+
+	return nil
+}
+
+func printSyncSummary(dimFn *color.Color, npub string, saved, published, failed int) {
+	green := color.New(color.FgGreen)
+	cyan := color.New(color.FgCyan).SprintFunc()
+
+	if saved > 0 || published > 0 {
+		green.Printf("✓ Sync complete: %s event%s saved locally, %s event%s published to relays\n",
+			cyan(fmt.Sprintf("%d", saved)), plural(saved),
+			cyan(fmt.Sprintf("%d", published)), plural(published))
+	} else {
+		green.Println("✓ Sync complete")
+	}
+	if failed > 0 {
+		color.New(color.FgRed).Printf("  %d event%s failed to publish\n", failed, plural(failed))
+	}
+
+	if saved > 0 {
+		eventsPath := cache.SentEventsPath(npub)
+		if eventsPath != "" {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				eventsPath = strings.Replace(eventsPath, home, "~", 1)
+			}
+			dimFn.Printf("  Events saved in %s\n", eventsPath)
+		}
+	}
+}
+
+// syncRelayChecklistLive shows an interactive checklist where fetch results
+// update in real time as they arrive. Returns selected relay URLs.
+// Returns nil on ctrl-c.
+func syncRelayChecklistLive(
+	relays []string,
+	fetchCh <-chan internalRelay.FetchResult,
+	fetchStates map[string]*relayFetchState,
+	processFn func(internalRelay.FetchResult),
+) []string {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		for res := range fetchCh {
+			processFn(res)
+		}
+		return relays
+	}
+
+	checked := make([]bool, len(relays))
+	for i := range checked {
+		checked[i] = true
+	}
+	cursor := 0
+
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		for res := range fetchCh {
+			processFn(res)
+		}
+		return relays
+	}
+	defer term.Restore(fd, oldState)
+
+	cyanFn := color.New(color.FgCyan).SprintFunc()
+	dimSprint := color.New(color.Faint).SprintFunc()
+	greenSprint := color.New(color.FgGreen).SprintFunc()
+
+	frame := 0
+
+	render := func() {
+		fmt.Print("\r\033[J")
+		for i, r := range relays {
+			check := greenSprint("[✓]")
+			if !checked[i] {
+				check = dimSprint("[ ]")
+			}
+			host := relayHost(r)
+
+			status := ""
+			if st, ok := fetchStates[r]; ok && st.done {
+				if st.ok {
+					if st.missing == 0 {
+						status = dimSprint(fmt.Sprintf("  %d event%s, in sync", st.count, plural(st.count)))
+					} else {
+						status = dimSprint(fmt.Sprintf("  %d event%s, %d missing", st.count, plural(st.count), st.missing))
+					}
+				} else {
+					status = color.New(color.FgRed).Sprintf("  failed")
+				}
+			} else {
+				f := ui.SpinnerFrames[frame%len(ui.SpinnerFrames)]
+				status = dimSprint(fmt.Sprintf("  %s", f))
+			}
+
+			if i == cursor {
+				fmt.Printf("  %s %s%s\r\n", check, cyanFn(host), status)
+			} else {
+				fmt.Printf("  %s %s%s\r\n", check, dimSprint(host), status)
+			}
+		}
+		selectedCount := 0
+		for i := range relays {
+			if checked[i] {
+				selectedCount++
+			}
+		}
+		fmt.Printf("\r\n  %s\r\n", dimSprint(fmt.Sprintf("↑/↓ select, space toggle, a add relay, enter sync %d selected relay%s", selectedCount, plural(selectedCount))))
+	}
+
+	lines := len(relays) + 2
+
+	rerender := func() {
+		fmt.Printf("\033[%dA", lines)
+		render()
+	}
+
+	render()
+
+	// Read stdin one byte at a time in a goroutine
+	inputCh := make(chan byte, 1)
+	go func() {
+		b := make([]byte, 1)
+		for {
+			if _, err := os.Stdin.Read(b); err != nil {
+				close(inputCh)
+				return
+			}
+			inputCh <- b[0]
+		}
+	}()
+
+	readNext := func() (byte, bool) {
+		select {
+		case b, ok := <-inputCh:
+			return b, ok
+		case <-time.After(20 * time.Millisecond):
+			return 0, false
+		}
+	}
+
+	fetchDone := false
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case res, ok := <-fetchCh:
+			if !ok {
+				fetchDone = true
+				fetchCh = nil
+			} else {
+				processFn(res)
+				for i, r := range relays {
+					if r == res.URL {
+						if st, ok := fetchStates[r]; ok && st.done && st.ok && st.missing == 0 {
+							checked[i] = false
+						}
+					}
+				}
+			}
+			rerender()
+
+		case b, ok := <-inputCh:
+			if !ok {
+				goto done
+			}
+			switch b {
+			case 13: // enter
+				fmt.Print("\r\033[J")
+				if fetchCh != nil {
+					go func() { for range fetchCh {} }()
+				}
+				var selected []string
+				for i, r := range relays {
+					if checked[i] {
+						selected = append(selected, r)
+					}
+				}
+				return selected
+			case ' ':
+				checked[cursor] = !checked[cursor]
+				rerender()
+			case 'a':
+				fmt.Print("\r\033[J")
+				term.Restore(fd, oldState)
+				fmt.Print("  Relay URL (wss://...): ")
+				scanner := bufio.NewScanner(os.Stdin)
+				if scanner.Scan() {
+					newRelay := strings.TrimSpace(scanner.Text())
+					if strings.HasPrefix(newRelay, "wss://") || strings.HasPrefix(newRelay, "ws://") {
+						relays = append(relays, newRelay)
+						checked = append(checked, true)
+						lines = len(relays) + 2
+					}
+				}
+				oldState, _ = term.MakeRaw(fd)
+				render()
+			case 3: // ctrl-c
+				fmt.Print("\r\033[J")
+				if fetchCh != nil {
+					go func() { for range fetchCh {} }()
+				}
+				return nil
+			case 27: // ESC — start of arrow key sequence
+				b2, ok := readNext()
+				if !ok || b2 != '[' {
+					break
+				}
+				b3, ok := readNext()
+				if !ok {
+					break
+				}
+				switch b3 {
+				case 'A':
+					if cursor > 0 {
+						cursor--
+					}
+				case 'B':
+					if cursor < len(relays)-1 {
+						cursor++
+					}
+				}
+				rerender()
+			case 'k':
+				if cursor > 0 {
+					cursor--
+				}
+				rerender()
+			case 'j':
+				if cursor < len(relays)-1 {
+					cursor++
+				}
+				rerender()
+			}
+
+		case <-ticker.C:
+			if !fetchDone {
+				frame++
+				rerender()
+			}
+		}
+	}
+
+done:
+	var selected []string
+	for i, r := range relays {
+		if checked[i] {
+			selected = append(selected, r)
+		}
+	}
+	return selected
+}
+
+// eventKindLabel returns a human-readable label for event kinds.
+func eventKindLabel(kind int) string {
+	switch kind {
+	case nostr.KindProfileMetadata:
+		return "profile update"
+	case nostr.KindTextNote:
+		return "public note"
+	case nostr.KindFollowList:
+		return "follow list"
+	case nostr.KindEncryptedDirectMessage:
+		return "direct message"
+	case nostr.KindDeletion:
+		return "deletion"
+	case nostr.KindReaction:
+		return "reaction"
+	case nostr.KindRelayListMetadata:
+		return "relay list"
+	default:
+		return fmt.Sprintf("kind %d", kind)
+	}
+}
+
+// eventSnippet returns a short preview of an event's content.
+func eventSnippet(event nostr.Event) string {
+	content := event.Content
+	if content == "" {
+		return dimStr(event.ID[:16] + "...")
+	}
+	content = strings.ReplaceAll(content, "\n", " ")
+	if len(content) > 60 {
+		content = content[:57] + "..."
+	}
+	return content
+}
+
+func dimStr(s string) string {
+	return color.New(color.Faint).Sprint(s)
+}
+
+// syncChecklistRenderTo renders the checklist to the given writer (or stdout
+// if nil) and returns the number of lines written. Extracted for testability.
+func syncChecklistRenderTo(w *strings.Builder, relays []string, checked []bool, cursor int, fetchStates map[string]*relayFetchState) int {
+	out := func(format string, a ...interface{}) {
+		if w != nil {
+			fmt.Fprintf(w, format, a...)
+		} else {
+			fmt.Printf(format, a...)
+		}
+	}
+
+	lineCount := 0
+	for i, r := range relays {
+		host := relayHost(r)
+
+		var check string
+		if checked[i] {
+			check = "[✓]"
+		} else {
+			check = "[ ]"
+		}
+
+		status := ""
+		if st, ok := fetchStates[r]; ok && st.done {
+			if st.ok {
+				if st.missing == 0 {
+					status = fmt.Sprintf("  %d event%s, in sync", st.count, plural(st.count))
+				} else {
+					status = fmt.Sprintf("  %d event%s, %d missing", st.count, plural(st.count), st.missing)
+				}
+			} else {
+				status = "  failed"
+			}
+		}
+
+		_ = cursor
+		out("  %s %s%s\r\n", check, host, status)
+		lineCount++
+	}
+
+	selectedCount := 0
+	for i := range relays {
+		if checked[i] {
+			selectedCount++
+		}
+	}
+	out("\r\n")
+	lineCount++
+	out("  hint line (%d selected)\r\n", selectedCount)
+	lineCount++
+
+	return lineCount
+}

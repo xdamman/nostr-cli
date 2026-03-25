@@ -168,6 +168,57 @@ func FetchEvent(ctx context.Context, filter nostr.Filter, relayURLs []string) (*
 	return best, nil
 }
 
+// FetchResult holds the outcome of fetching events from a single relay.
+type FetchResult struct {
+	URL      string
+	Events   []*nostr.Event
+	Duration time.Duration
+	Err      error
+}
+
+// FetchEventsPerRelay fetches events from each relay independently and sends
+// per-relay results to the returned channel as each completes.
+func FetchEventsPerRelay(ctx context.Context, filter nostr.Filter, relayURLs []string, timeout time.Duration) <-chan FetchResult {
+	if timeout <= 0 {
+		timeout = FetchTimeout
+	}
+	ch := make(chan FetchResult, len(relayURLs))
+	var wg sync.WaitGroup
+
+	for _, u := range relayURLs {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			start := time.Now()
+
+			fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			r, err := nostr.RelayConnect(fetchCtx, u)
+			if err != nil {
+				ch <- FetchResult{URL: u, Err: fmt.Errorf("connect: %w", err), Duration: time.Since(start)}
+				return
+			}
+			defer r.Close()
+
+			events, err := r.QuerySync(fetchCtx, filter)
+			if err != nil {
+				ch <- FetchResult{URL: u, Err: fmt.Errorf("query: %w", err), Duration: time.Since(start)}
+				return
+			}
+
+			ch <- FetchResult{URL: u, Events: events, Duration: time.Since(start)}
+		}(u)
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	return ch
+}
+
 // FetchEvents fetches all events matching the filter from relays (deduplicated by ID).
 func FetchEvents(ctx context.Context, filter nostr.Filter, relayURLs []string) ([]*nostr.Event, error) {
 	if len(relayURLs) == 0 {

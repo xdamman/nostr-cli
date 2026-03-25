@@ -39,9 +39,10 @@ brew install xdamman/tap/nostr
 - `nostr alias <name> <user>` — Create alias for a user
 - `nostr aliases` — List all aliases
 - `nostr alias rm <name>` — Remove an alias
-- `nostr relays` — List relays. Flags: `--json`
+- `nostr relays` — List relays. Flags: `--json`, `--relay <url|domain>`
 - `nostr relays add <url>` — Add relay
 - `nostr relays rm <url>` — Remove relay
+- `nostr sync` — Sync local events with relays. Flags: `--json`, `--relay <url|domain>`
 
 ## User Format
 

@@ -25,6 +25,7 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - 🏷️ Create aliases for quick access to contacts
 - 👥 Switch between multiple profiles
 - 📖 Built-in NIP reference viewer
+- 🔄 Sync local events with relays
 - 🐚 Interactive shell with feed, posting, and slash commands
 
 ## Installation
@@ -181,9 +182,13 @@ me> Can't wait 🎉
 
 | Command | Description |
 |---------|-------------|
-| `nostr relays` | List current relays |
+| `nostr relays` | List current relays with connection status |
+| `nostr relays --relay <url\|domain>` | Show a specific relay |
 | `nostr relays add wss://...` | Add a relay |
 | `nostr relays rm [url\|number]` | Remove a relay |
+| `nostr sync` | Sync local events with relays (interactive) |
+| `nostr sync --relay <url\|domain>` | Sync with a specific relay |
+| `nostr sync --json` | Sync and output results as JSON |
 | `nostr alias [name] [npub\|username]` | Create an alias for a user |
 
 ### Reference

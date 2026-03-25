@@ -41,6 +41,10 @@ func TestLLM_Relays_RmRequiresOneArg(t *testing.T) {
 	}
 }
 
+func TestLLM_Relays_RelayFlag(t *testing.T) {
+	requireFlag(t, requireCmd(t, "relays"), "relay")
+}
+
 func TestLLM_Relays_InInfraGroup(t *testing.T) {
 	cmd := requireCmd(t, "relays")
 	if cmd.GroupID != "infra" {

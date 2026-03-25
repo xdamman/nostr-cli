@@ -15,6 +15,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
+	"github.com/xdamman/nostr-cli/internal/ui"
 	"golang.org/x/term"
 )
 
@@ -143,12 +144,14 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 			// Publish profile if any field was set
 			if meta.Name != "" || meta.DisplayName != "" || meta.About != "" {
-				fmt.Println("Publishing profile to relays...")
-				ctx := context.Background()
-				if err := profile.PublishMetadata(ctx, npub, meta, relays); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not publish profile: %v\n", err)
+				event, pErr := profile.CreateMetadataEvent(npub, meta)
+				if pErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not create profile event: %v\n", pErr)
 				} else {
-					green.Println("✓ Profile published")
+					fmt.Println("Publishing profile to relays...")
+					if _, pErr = ui.PublishEventToRelays(npub, event, relays, 0); pErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not publish profile: %v\n", pErr)
+					}
 				}
 			}
 

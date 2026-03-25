@@ -43,8 +43,15 @@ nostr alice --watch                         # Live-stream notes
 ### Relays
 ```bash
 nostr relays --json                         # List relays with status
+nostr relays --relay nos.lol --json         # Show a specific relay
 nostr relays add wss://relay.example.com    # Add a relay
 nostr relays rm wss://relay.example.com     # Remove a relay
+```
+
+### Sync
+```bash
+nostr sync --json                           # Sync all relays, JSON output
+nostr sync --relay nos.lol --json           # Sync a specific relay
 ```
 
 ### Aliases

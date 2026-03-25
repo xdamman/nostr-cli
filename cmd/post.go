@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,7 +17,6 @@ import (
 	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
-	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
@@ -43,7 +40,6 @@ func init() {
 }
 
 func runPost(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen)
 	cyan := color.New(color.FgCyan).SprintFunc()
 
 	npub, err := config.LoadResolvedProfile(profileFlag)
@@ -152,8 +148,6 @@ func runPost(cmd *cobra.Command, args []string) error {
 		postAs = alias
 	}
 
-	dim := color.New(color.Faint)
-
 	// Header
 	fmt.Printf("Posting as %s to %d relays\n", cyan(postAs), len(relays))
 	fmt.Println()
@@ -165,101 +159,16 @@ func runPost(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	// Build relay host labels and print initial spinner state
-	type relayLine struct {
-		host string
-		url  string
-	}
-	rl := make([]relayLine, len(relays))
-	for i, r := range relays {
-		host := r
-		if u, uErr := url.Parse(r); uErr == nil && u.Host != "" {
-			host = u.Host
-		}
-		rl[i] = relayLine{host: host, url: r}
-		fmt.Printf("  %s %s\n", dim.Sprint(ui.SpinnerFrames[0]), dim.Sprint(host))
-	}
-
-	// Publish with per-relay progress
-	ctx := context.Background()
+	// Publish with interactive relay progress
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
-	ch := internalRelay.PublishEventWithProgress(ctx, event, relays, timeout)
-
-	// Track results by URL
-	results := make(map[string]internalRelay.RelayResult)
-	var successRelays []string
-
-	greenFn := color.New(color.FgGreen).SprintFunc()
-	redFn := color.New(color.FgRed).SprintFunc()
-
-	// Render function for relay lines
-	renderRelays := func(frame int) {
-		fmt.Printf("\033[%dA", len(rl))
-		for _, l := range rl {
-			fmt.Print("\r\033[K")
-			if r, ok := results[l.url]; ok {
-				ms := r.Duration.Milliseconds()
-				if r.OK {
-					fmt.Printf("  %s %s  %s\n", greenFn("✓"), l.host, dim.Sprintf("%dms", ms))
-				} else {
-					fmt.Printf("  %s %s  %s\n", redFn("✗"), l.host, dim.Sprintf("%dms", ms))
-				}
-			} else {
-				f := ui.SpinnerFrames[frame%len(ui.SpinnerFrames)]
-				fmt.Printf("  %s %s\n", dim.Sprint(f), dim.Sprint(l.host))
-			}
-		}
+	_, err = ui.PublishEventToRelays(npub, event, relays, timeout)
+	if err != nil {
+		return err
 	}
 
-	// Animate spinners while waiting for results
-	ticker := time.NewTicker(80 * time.Millisecond)
-	defer ticker.Stop()
-	frame := 0
-	done := false
-
-	for !done {
-		select {
-		case res, ok := <-ch:
-			if !ok {
-				done = true
-				break
-			}
-			results[res.URL] = res
-			if res.OK {
-				successRelays = append(successRelays, res.URL)
-			}
-			renderRelays(frame)
-		case <-ticker.C:
-			// Only animate if there are still pending relays
-			if len(results) < len(rl) {
-				frame++
-				renderRelays(frame)
-			}
-		}
-	}
-
-	// Final render to ensure all results shown
-	renderRelays(frame)
-
-	if len(successRelays) == 0 {
-		return fmt.Errorf("failed to publish to any relay")
-	}
-
-	// Save sent event to profile-level events.jsonl (for backup)
-	_ = cache.LogSentEvent(npub, event)
 	// Also cache in feed
 	_ = cache.LogFeedEvent(npub, event)
 
-	fmt.Println()
-	green.Printf("✓ Published to %d/%d relays\n", len(successRelays), len(relays))
-	eventsPath := cache.SentEventsPath(npub)
-	if eventsPath != "" {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			eventsPath = strings.Replace(eventsPath, home, "~", 1)
-		}
-		dim.Printf("  Saved locally in %s\n", eventsPath)
-	}
 	return nil
 }
 

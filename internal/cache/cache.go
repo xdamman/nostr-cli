@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -185,6 +186,44 @@ func QueryEvents(npub string, filter func(nostr.Event) bool) ([]nostr.Event, err
 		}
 	}
 	return result, scanner.Err()
+}
+
+// LoadSentEvents reads the profile-level events.jsonl and returns all sent events,
+// deduplicated by ID and sorted by CreatedAt ascending.
+func LoadSentEvents(npub string) ([]nostr.Event, error) {
+	path := sentEventsFile(npub)
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	var events []nostr.Event
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		var ev nostr.Event
+		if json.Unmarshal(scanner.Bytes(), &ev) == nil && ev.ID != "" && !seen[ev.ID] {
+			seen[ev.ID] = true
+			events = append(events, ev)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].CreatedAt < events[j].CreatedAt
+	})
+
+	return events, nil
 }
 
 // GetEventsByKind returns cached events of the specified kind.

@@ -104,7 +104,7 @@ func TestLLM_GlobalFlags(t *testing.T) {
 
 func TestLLM_GlobalFlagsInherited(t *testing.T) {
 	// LLMs use: nostr post "msg" --timeout 5000 --no-color --profile alice
-	commands := []string{"post", "dm", "profile", "follow", "unfollow", "following", "relays"}
+	commands := []string{"post", "dm", "profile", "follow", "unfollow", "following", "relays", "sync"}
 	globals := []string{"profile", "timeout", "no-color"}
 
 	for _, name := range commands {

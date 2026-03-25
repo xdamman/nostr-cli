@@ -140,24 +140,24 @@ func FetchFromRelays(ctx context.Context, npub string, relayURLs []string) (*Met
 	return &m, nil
 }
 
-// PublishMetadata signs and publishes kind 0 metadata to relays.
-func PublishMetadata(ctx context.Context, npub string, m *Metadata, relayURLs []string) error {
+// CreateMetadataEvent creates and signs a kind 0 metadata event for the given npub.
+func CreateMetadataEvent(npub string, m *Metadata) (nostr.Event, error) {
 	nsec, err := config.LoadNsec(npub)
 	if err != nil {
-		return err
+		return nostr.Event{}, err
 	}
 	skHex, err := crypto.NsecToHex(nsec)
 	if err != nil {
-		return err
+		return nostr.Event{}, err
 	}
 	pubHex, err := crypto.NpubToHex(npub)
 	if err != nil {
-		return err
+		return nostr.Event{}, err
 	}
 
 	content, err := json.Marshal(m)
 	if err != nil {
-		return err
+		return nostr.Event{}, err
 	}
 
 	event := nostr.Event{
@@ -168,7 +168,17 @@ func PublishMetadata(ctx context.Context, npub string, m *Metadata, relayURLs []
 		Content:   string(content),
 	}
 	if err := event.Sign(skHex); err != nil {
-		return fmt.Errorf("failed to sign event: %w", err)
+		return nostr.Event{}, fmt.Errorf("failed to sign event: %w", err)
+	}
+
+	return event, nil
+}
+
+// PublishMetadata signs and publishes kind 0 metadata to relays.
+func PublishMetadata(ctx context.Context, npub string, m *Metadata, relayURLs []string) error {
+	event, err := CreateMetadataEvent(npub, m)
+	if err != nil {
+		return err
 	}
 
 	if _, err := relay.PublishEvent(ctx, event, relayURLs); err != nil {

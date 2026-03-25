@@ -305,8 +305,6 @@ func humanDuration(d time.Duration) string {
 }
 
 func runProfileUpdate(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen)
-
 	npub, err := config.LoadResolvedProfile(profileFlag)
 	if err != nil {
 		return err
@@ -338,13 +336,19 @@ func runProfileUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Create and sign the metadata event
+	event, err := profile.CreateMetadataEvent(npub, meta)
+	if err != nil {
+		return fmt.Errorf("failed to create event: %w", err)
+	}
+
 	fmt.Println("Publishing profile to relays...")
-	ctx := context.Background()
-	if err := profile.PublishMetadata(ctx, npub, meta, relays); err != nil {
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+	_, err = ui.PublishEventToRelays(npub, event, relays, timeout)
+	if err != nil {
 		return fmt.Errorf("failed to publish: %w", err)
 	}
 
-	green.Println("✓ Profile updated and published")
 	return nil
 }
 
