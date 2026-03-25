@@ -185,7 +185,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 }
 
 func runSyncJSON(cmd *cobra.Command, args []string) error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 	greenFn := color.New(color.FgGreen).SprintFunc()
 	redFn := color.New(color.FgRed).SprintFunc()
 
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}

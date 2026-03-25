@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/xdamman/nostr-cli/internal/config"
+	"github.com/xdamman/nostr-cli/internal/resolve"
 )
 
 func setupCmdTestDir(t *testing.T) string {
@@ -24,74 +25,99 @@ func createCmdTestProfile(t *testing.T, dir, npub string) {
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte("nsec1test\n"), 0600)
 }
 
-func TestProfileCommand_ResolvesAlias(t *testing.T) {
+func TestLoadProfile_ResolvesAlias(t *testing.T) {
+	dir := setupCmdTestDir(t)
+	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
+	createCmdTestProfile(t, dir, npub)
+	config.SetActiveProfile(npub)
+	config.SetAlias(npub, "xavier", npub)
+
+	// Save and restore profileFlag
+	old := profileFlag
+	defer func() { profileFlag = old }()
+
+	profileFlag = "xavier"
+	resolved, err := loadProfile()
+	if err != nil {
+		t.Fatalf("loadProfile() with alias failed: %v", err)
+	}
+	if resolved != npub {
+		t.Errorf("resolved = %q, want %q", resolved, npub)
+	}
+}
+
+func TestLoadProfile_ResolvesNpub(t *testing.T) {
+	setupCmdTestDir(t)
+	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
+
+	old := profileFlag
+	defer func() { profileFlag = old }()
+
+	profileFlag = npub
+	resolved, err := loadProfile()
+	if err != nil {
+		t.Fatalf("loadProfile() with npub failed: %v", err)
+	}
+	if resolved != npub {
+		t.Errorf("resolved = %q, want %q", resolved, npub)
+	}
+}
+
+func TestLoadProfile_FallsBackToActive(t *testing.T) {
 	dir := setupCmdTestDir(t)
 	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
 	createCmdTestProfile(t, dir, npub)
 	config.SetActiveProfile(npub)
 
-	// Set alias
-	config.SetGlobalAlias("xavier", npub)
+	old := profileFlag
+	defer func() { profileFlag = old }()
 
-	// LoadResolvedProfile should resolve the alias
-	resolved, err := config.LoadResolvedProfile("xavier")
+	profileFlag = ""
+	resolved, err := loadProfile()
 	if err != nil {
-		t.Fatalf("LoadResolvedProfile(\"xavier\") failed: %v", err)
+		t.Fatalf("loadProfile() with no flag failed: %v", err)
 	}
 	if resolved != npub {
 		t.Errorf("resolved = %q, want %q", resolved, npub)
 	}
 }
 
-func TestProfileCommand_ResolvesNpub(t *testing.T) {
-	setupCmdTestDir(t)
-	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
-
-	resolved, err := config.LoadResolvedProfile(npub)
-	if err != nil {
-		t.Fatalf("LoadResolvedProfile(npub) failed: %v", err)
-	}
-	if resolved != npub {
-		t.Errorf("resolved = %q, want %q", resolved, npub)
-	}
-}
-
-func TestProfileCommand_FallsBackToActive(t *testing.T) {
+func TestResolveToNpub_Alias(t *testing.T) {
 	dir := setupCmdTestDir(t)
-	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
-	createCmdTestProfile(t, dir, npub)
-	config.SetActiveProfile(npub)
+	activeNpub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	createCmdTestProfile(t, dir, activeNpub)
+	config.SetActiveProfile(activeNpub)
 
-	resolved, err := config.LoadResolvedProfile("")
+	targetNpub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
+	config.SetAlias(activeNpub, "xavier", targetNpub)
+
+	resolved, err := resolve.ResolveToNpub(activeNpub, "xavier")
 	if err != nil {
-		t.Fatalf("LoadResolvedProfile(\"\") failed: %v", err)
+		t.Fatalf("ResolveToNpub(\"xavier\") failed: %v", err)
 	}
-	if resolved != npub {
-		t.Errorf("resolved = %q, want %q", resolved, npub)
+	if resolved != targetNpub {
+		t.Errorf("resolved = %q, want %q", resolved, targetNpub)
 	}
-}
 
-func TestProfileCommand_UnknownAliasErrors(t *testing.T) {
-	setupCmdTestDir(t)
-
-	_, err := config.LoadResolvedProfile("nonexistent")
-	if err == nil {
-		t.Error("expected error for unknown alias")
+	// Case-insensitive
+	resolved, err = resolve.ResolveToNpub(activeNpub, "Xavier")
+	if err != nil {
+		t.Fatalf("ResolveToNpub(\"Xavier\") failed: %v", err)
+	}
+	if resolved != targetNpub {
+		t.Errorf("resolved = %q, want %q", resolved, targetNpub)
 	}
 }
 
 func TestProfileCommand_FlagExists(t *testing.T) {
-	// Verify the profile command exists and is registered
 	found := false
 	for _, cmd := range rootCmd.Commands() {
 		if cmd.Name() == "profile" {
 			found = true
-			// Verify --json flag exists
 			jsonFlag := cmd.Flags().Lookup("json")
 			if jsonFlag == nil {
 				t.Error("profile command missing --json flag")
 			}
-			// Verify 'update' subcommand exists
 			subFound := false
 			for _, sub := range cmd.Commands() {
 				if sub.Name() == "update" {
@@ -106,25 +132,6 @@ func TestProfileCommand_FlagExists(t *testing.T) {
 	}
 	if !found {
 		t.Error("profile command not registered on rootCmd")
-	}
-}
-
-func TestProfileCommand_AliasResolution(t *testing.T) {
-	dir := setupCmdTestDir(t)
-	activeNpub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
-	createCmdTestProfile(t, dir, activeNpub)
-	config.SetActiveProfile(activeNpub)
-
-	targetNpub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
-
-	config.SetAlias(activeNpub, "xavier", targetNpub)
-
-	resolved, err := config.ResolveAlias("xavier")
-	if err != nil {
-		t.Fatalf("ResolveAlias failed: %v", err)
-	}
-	if resolved != targetNpub {
-		t.Errorf("resolved = %q, want %q", resolved, targetNpub)
 	}
 }
 

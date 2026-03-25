@@ -41,7 +41,7 @@ func init() {
 }
 
 func runAlias(cmd *cobra.Command, args []string) error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 }
 
 func runAliasRm(cmd *cobra.Command, args []string) error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}

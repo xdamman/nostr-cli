@@ -49,7 +49,7 @@ func init() {
 }
 
 func runDM(cmd *cobra.Command, args []string) error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}

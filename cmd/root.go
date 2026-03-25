@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/profile"
+	"github.com/xdamman/nostr-cli/internal/resolve"
 	"golang.org/x/term"
 )
 
@@ -273,6 +274,24 @@ func resolveProfileName(npub string) string {
 		}
 	}
 	return ""
+}
+
+// loadProfile resolves the --profile flag to an npub.
+// If no flag is set, returns the active profile.
+// The flag value is resolved as: npub → alias → NIP-05 (using the active profile's context).
+func loadProfile() (string, error) {
+	if profileFlag == "" {
+		return config.ActiveProfile()
+	}
+	if strings.HasPrefix(profileFlag, "npub1") {
+		return profileFlag, nil
+	}
+	// Resolve using the active profile's aliases
+	activeNpub, err := config.ActiveProfile()
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve --profile %q: no active profile to look up aliases", profileFlag)
+	}
+	return resolve.ResolveToNpub(activeNpub, profileFlag)
 }
 
 func init() {

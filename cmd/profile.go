@@ -66,7 +66,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 	}
 
 	// No args — show current user's profile
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func humanDuration(d time.Duration) string {
 }
 
 func runProfileUpdate(cmd *cobra.Command, args []string) error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}

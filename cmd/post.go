@@ -42,7 +42,7 @@ func init() {
 func runPost(cmd *cobra.Command, args []string) error {
 	cyan := color.New(color.FgCyan).SprintFunc()
 
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}

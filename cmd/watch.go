@@ -22,7 +22,7 @@ import (
 // runWatchFeed streams all new events from followed accounts.
 // Output: timestamp:name:content (or JSONL with --json via postJSONOut flag on root).
 func runWatchFeed() error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return err
 	}

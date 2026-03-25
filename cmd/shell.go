@@ -77,7 +77,7 @@ func updateFeedNameWidth(name string) int {
 }
 
 func runShell() error {
-	npub, err := config.LoadResolvedProfile(profileFlag)
+	npub, err := loadProfile()
 	if err != nil {
 		return fmt.Errorf("no active profile. Run 'nostr login' first")
 	}
