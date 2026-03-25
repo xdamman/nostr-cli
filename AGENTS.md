@@ -69,7 +69,8 @@ nostr alias rm alice                        # Remove alias
 - `--profile <npub|alias>` — Use a specific profile
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 - `--no-color` — Disable ANSI color codes
-- `--json` — Machine-readable JSON output (most commands)
+- `--raw` — Output raw Nostr event JSON (wire format, as relays see it)
+- `--json` — Enriched JSON output with event + relay results (most commands)
 
 ## User Resolution
 

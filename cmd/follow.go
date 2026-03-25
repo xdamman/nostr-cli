@@ -135,9 +135,17 @@ func runFollow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+
+	if rawFlag {
+		_, _ = ui.PublishEventSilent(npub, *contacts, relays, timeout)
+		cacheFollowingFromTags(npub, contacts.Tags)
+		ui.PrintRawEvent(*contacts)
+		return nil
+	}
+
 	// Publish using the shared interactive relay publishing
 	fmt.Println("Publishing updated contact list...")
-	timeout := time.Duration(timeoutFlag) * time.Millisecond
 	_, err = ui.PublishEventToRelays(npub, *contacts, relays, timeout)
 	if err != nil {
 		return err
@@ -305,9 +313,17 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+
+	if rawFlag {
+		_, _ = ui.PublishEventSilent(npub, *contacts, relays, timeout)
+		cacheFollowingFromTags(npub, contacts.Tags)
+		ui.PrintRawEvent(*contacts)
+		return nil
+	}
+
 	// Publish using the shared interactive relay publishing
 	fmt.Println("Publishing updated contact list...")
-	timeout := time.Duration(timeoutFlag) * time.Millisecond
 	_, err = ui.PublishEventToRelays(npub, *contacts, relays, timeout)
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -124,6 +125,12 @@ func PublishEventToRelays(npub string, event nostr.Event, relays []string, timeo
 		SuccessURLs: successURLs,
 		TotalCount:  len(relays),
 	}, nil
+}
+
+// PrintRawEvent outputs the raw Nostr event as JSON (wire format).
+func PrintRawEvent(event nostr.Event) {
+	data, _ := json.MarshalIndent(event, "", "  ")
+	fmt.Println(string(data))
 }
 
 // PublishJSONRelay is a per-relay result for JSON output.

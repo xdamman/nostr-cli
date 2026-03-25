@@ -199,7 +199,13 @@ nostr nip05
 - `--profile <npub|alias>` — Execute command under a specific profile
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 - `--no-color` — Strip ANSI color codes
-- `--json` — Output as JSON (where supported)
+- `--raw` — Output raw Nostr event JSON (wire format, as relays see it)
+- `--json` — Enriched JSON output with event + relay publish results
+
+### `--raw` vs `--json`
+
+- `--raw` returns the **standard Nostr event object** — the exact JSON that relays receive. Useful for piping into other nostr tools or storing events.
+- `--json` returns an **enriched object** with the event plus metadata like relay publish status, timing, etc. Useful for automation and scripting.
 
 ## User Resolution
 
@@ -211,11 +217,31 @@ In commands accepting a `<user>` argument, you can specify:
 ## Best Practices for Scriptable Usage
 
 ### Output Parsing
-Always use `--json` when you need to parse output programmatically:
+Use `--raw` for the standard event format or `--json` for enriched output:
 ```bash
-nostr post "Message" --json | jq '.id'
+# Raw event (wire format)
+nostr post "Message" --raw | jq '.id'
+
+# Enriched JSON with relay results
+nostr post "Message" --json | jq '.relays[] | select(.ok) | .url'
+
+# Profile as JSON
 nostr profile alice --json | jq '.about'
 nostr relays --json | jq '.[]'
+```
+
+### Streaming Events
+```bash
+# Stream all notes from followed accounts
+nostr --watch --raw              # raw event per line (JSONL)
+nostr --watch --json             # enriched JSON per line
+
+# Stream all incoming DMs
+nostr dm --watch --raw           # raw encrypted events
+nostr dm --watch --json          # decrypted with sender info
+
+# Stream DMs with specific user
+nostr dm alice --watch --json
 ```
 
 ### Clean Output

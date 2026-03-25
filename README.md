@@ -208,14 +208,32 @@ me> Can't wait 🎉
 | `--profile <npub\|alias>` | Use a specific profile instead of the active one |
 | `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
+| `--raw` | Output raw Nostr event JSON (wire format) |
 
 ## Bot / LLM Integration
 
-nostr-cli is designed to be used by bots and LLMs. Use `--json` for structured output, `--no-color` to strip ANSI codes, and pipe content for posting.
+nostr-cli is designed to be used by bots and LLMs.
+
+- `--raw` — output the standard Nostr event JSON (wire format, as relays see it)
+- `--json` — output enriched JSON with the event + relay publish results
+- `--no-color` — strip ANSI codes for piped output
+- `--watch` — stream events as they arrive (works with `--raw` and `--json`)
 
 ```bash
-# Post and capture event ID
-nostr post "Hello from my bot" --json | jq -r '.id'
+# Post and get the raw event (standard Nostr wire format)
+nostr post "Hello from my bot" --raw | jq -r '.id'
+
+# Post and get event + relay results
+nostr post "Hello" --json | jq '.relays[] | select(.ok) | .url'
+
+# Stream all new notes from followed accounts (JSONL)
+nostr --watch --json
+
+# Stream all incoming DMs as raw events
+nostr dm --watch --raw
+
+# Stream DMs with a specific user
+nostr dm alice --watch --json
 
 # Fetch a profile as JSON
 nostr profile alice@example.com --json

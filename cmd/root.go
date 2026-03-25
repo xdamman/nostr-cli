@@ -18,6 +18,7 @@ var (
 	profileFlag string
 	noColorFlag bool
 	timeoutFlag int
+	rawFlag     bool
 )
 
 var rootCmd = &cobra.Command{
@@ -52,6 +53,10 @@ Most commands support --json for machine-readable output.`,
 				return fetchAndDisplayNIP(args[0])
 			}
 			return runUserLookup(args)
+		}
+		// nostr --watch: stream all events from followed accounts
+		if userWatchFlag {
+			return runWatchFeed()
 		}
 		// If stdin is piped, read it and post as a note
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -274,6 +279,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub of the profile to use (default: active profile)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().IntVar(&timeoutFlag, "timeout", 2000, "Timeout per relay in milliseconds")
+	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event JSON (wire format)")
 
 	// Command groups
 	rootCmd.AddGroup(

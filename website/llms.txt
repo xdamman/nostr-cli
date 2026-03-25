@@ -13,6 +13,7 @@ brew install xdamman/tap/nostr
 
 - **Pipe-friendly**: `echo "hello" | nostr` posts a note, `echo "msg" | nostr dm user` sends a DM
 - **Structured output**: All commands support `--json` for machine-readable output
+- **Raw events**: `--raw` outputs standard Nostr event JSON (wire format)
 - **Customizable display**: `--no-color` disables ANSI colors, `--timeout <ms>` sets relay timeout
 - **Non-interactive**: Supports flags for headless operation: `nostr login --nsec <key>`, `nostr post "msg"`, `nostr dm user "msg"`
 

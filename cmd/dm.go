@@ -29,18 +29,22 @@ import (
 	"golang.org/x/term"
 )
 
-var dmJSONFlag bool
+var (
+	dmJSONFlag  bool
+	dmWatchFlag bool
+)
 
 var dmCmd = &cobra.Command{
 	Use:     "dm [profile] [message]",
 	Short:   "Send an encrypted direct message",
 	GroupID: "social",
-	Long:  "Send a DM to a profile (npub, alias, or nip05). Without a message, enters interactive chat mode.\nWithout arguments, shows your aliases.",
+	Long:  "Send a DM to a profile (npub, alias, or nip05). Without a message, enters interactive chat mode.\nWith --watch, listens for incoming DMs without a send prompt.\nWithout arguments, shows your aliases.",
 	RunE:  runDM,
 }
 
 func init() {
 	dmCmd.Flags().BoolVar(&dmJSONFlag, "json", false, "Output event and relay results as JSON")
+	dmCmd.Flags().BoolVar(&dmWatchFlag, "watch", false, "Listen for DMs without sending")
 	rootCmd.AddCommand(dmCmd)
 }
 
@@ -50,16 +54,9 @@ func runDM(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	dim := color.New(color.Faint)
-	name := resolveProfileName(npub)
-	short := npub
-	if len(short) > 20 {
-		short = short[:20] + "..."
-	}
-	if name != "" {
-		dim.Printf("Sending direct message as %s (%s)\n", name, short)
-	} else {
-		dim.Printf("Sending direct message as %s\n", short)
+	// nostr dm --watch: watch all incoming DMs
+	if dmWatchFlag && len(args) == 0 {
+		return watchAllDMs(npub)
 	}
 
 	if len(args) == 0 {
@@ -89,13 +86,11 @@ func runDM(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// One-shot message (from args or piped stdin)
 	if len(args) >= 2 {
-		// One-shot message
 		message := strings.Join(args[1:], " ")
 		return sendDM(npub, skHex, myHex, targetHex, message, relays)
 	}
-
-	// If stdin is piped, read message from it
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -108,7 +103,11 @@ func runDM(cmd *cobra.Command, args []string) error {
 		return sendDM(npub, skHex, myHex, targetHex, message, relays)
 	}
 
-	// Interactive mode — pass the original input as initial display name
+	if dmWatchFlag {
+		return watchDM(npub, skHex, myHex, targetHex, args[0], relays)
+	}
+
+	// Interactive mode
 	return interactiveDM(npub, skHex, myHex, targetHex, args[0], relays)
 }
 
@@ -132,6 +131,12 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
+
+	if rawFlag {
+		_, _ = ui.PublishEventSilent(npub, event, relays, timeout)
+		ui.PrintRawEvent(event)
+		return nil
+	}
 
 	if dmJSONFlag {
 		result, err := ui.PublishEventSilent(npub, event, relays, timeout)
@@ -207,6 +212,13 @@ func (t *dmTargetName) set(name string) {
 func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []string) error {
 	cyan := color.New(color.FgCyan)
 	dim := color.New(color.Faint)
+	greenPrompt := color.New(color.FgGreen)
+
+	// Resolve own name for prompt
+	promptName := resolveProfileName(npub)
+	if promptName == "" {
+		promptName = myHex[:8] + "..."
+	}
 
 	// Use alias/input as initial name — show prompt immediately
 	target := &dmTargetName{name: inputName}
@@ -308,6 +320,9 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		}
 	}()
 
+	// Build prompt prefix: "name> " in green
+	promptPrefix := greenPrompt.Sprintf("%s> ", promptName)
+
 	// Fetch recent DM history from relays (fills the gap between cache and real-time)
 	go func() {
 		since := nostr.Timestamp(time.Now().Add(-7 * 24 * time.Hour).Unix())
@@ -385,13 +400,13 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 				cyan.Printf("%-*s: ", nameWidth, tName)
 			}
 			dim.Printf("%s\n", content)
-			fmt.Print("> ")
+			fmt.Print(promptPrefix)
 		}
 	}()
 
 	// Subscribe for incoming DMs in background
 	for _, url := range relays {
-		go subscribeRelayWithStatus(ctx, npub, url, skHex, myHex, targetHex, target, cyan, &seenMu, seen, onConnected)
+		go subscribeRelayWithStatus(ctx, npub, url, skHex, myHex, targetHex, target, cyan, promptPrefix, &seenMu, seen, onConnected)
 	}
 
 	fmt.Println() // blank line after header
@@ -413,7 +428,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	for {
 		// Show pending status from previous sends before the prompt
 		drainStatus(statusCh)
-		fmt.Print("> ")
+		fmt.Print(promptPrefix)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			break
@@ -429,6 +444,197 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	return nil
 }
 
+// watchAllDMs subscribes to all incoming DMs for the active profile.
+// Output: timestamp:sender:message (or JSONL with --json).
+func watchAllDMs(npub string) error {
+	nsec, err := config.LoadNsec(npub)
+	if err != nil {
+		return err
+	}
+	skHex, err := crypto.NsecToHex(nsec)
+	if err != nil {
+		return err
+	}
+	myHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return err
+	}
+	relays, err := config.LoadRelays(npub)
+	if err != nil {
+		return err
+	}
+
+	cache.LoadProfileCache(npub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var seenMu sync.Mutex
+	seen := make(map[string]bool)
+	var printMu sync.Mutex
+
+	since := nostr.Now()
+
+	for _, url := range relays {
+		go func(url string) {
+			connectCtx, connectCancel := context.WithTimeout(ctx, internalRelay.ConnectTimeout)
+			defer connectCancel()
+
+			relay, err := nostr.RelayConnect(connectCtx, url)
+			if err != nil {
+				return
+			}
+			defer relay.Close()
+
+			sub, err := relay.Subscribe(ctx, nostr.Filters{
+				{
+					Kinds: []int{nostr.KindEncryptedDirectMessage},
+					Tags:  nostr.TagMap{"p": []string{myHex}},
+					Since: &since,
+				},
+			})
+			if err != nil {
+				return
+			}
+			defer sub.Unsub()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ev, ok := <-sub.Events:
+					if !ok {
+						return
+					}
+
+					seenMu.Lock()
+					if seen[ev.ID] {
+						seenMu.Unlock()
+						continue
+					}
+					seen[ev.ID] = true
+					seenMu.Unlock()
+
+					_ = cache.LogEvent(npub, *ev)
+
+					// Decrypt
+					sharedSecret := generateSharedSecret(skHex, ev.PubKey)
+					plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
+					if err != nil {
+						continue
+					}
+
+					// Resolve sender name
+					senderNpub, _ := nip19.EncodePublicKey(ev.PubKey)
+					senderName := cache.ResolveNameByHex(ev.PubKey)
+					if senderName == "" {
+						senderName = resolveProfileName(senderNpub)
+					}
+					if senderName == "" {
+						if len(senderNpub) > 20 {
+							senderName = senderNpub[:20] + "..."
+						} else {
+							senderName = senderNpub
+						}
+					}
+
+					ts := time.Unix(int64(ev.CreatedAt), 0)
+
+					printMu.Lock()
+					if rawFlag {
+						data, _ := json.Marshal(ev)
+						fmt.Println(string(data))
+					} else if dmJSONFlag {
+						entry := map[string]interface{}{
+							"timestamp": ts.Format(time.RFC3339),
+							"from":      senderName,
+							"from_npub": senderNpub,
+							"message":   plaintext,
+							"event_id":  ev.ID,
+							"pubkey":    ev.PubKey,
+						}
+						data, _ := json.Marshal(entry)
+						fmt.Println(string(data))
+					} else {
+						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
+					}
+					printMu.Unlock()
+				}
+			}
+		}(url)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	cancel()
+	return nil
+}
+
+// watchDM subscribes to DMs with the target user and streams them.
+// Output is pipe-friendly: timestamp:name:message (or JSONL with --json).
+func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) error {
+	targetName := inputName
+	if targetNpub, err := nip19.EncodePublicKey(targetHex); err == nil {
+		if meta, _ := profile.LoadCached(targetNpub); meta != nil {
+			if meta.Name != "" {
+				targetName = meta.Name
+			} else if meta.DisplayName != "" {
+				targetName = meta.DisplayName
+			}
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var seenMu sync.Mutex
+	seen := make(map[string]bool)
+
+	var printMu sync.Mutex
+
+	onConnected := func() {}
+
+	onMessage := func(ev *nostr.Event, plaintext string) {
+		ts := time.Unix(int64(ev.CreatedAt), 0)
+		senderName := targetName
+		if ev.PubKey == myHex {
+			senderName = "you"
+		}
+
+		printMu.Lock()
+		defer printMu.Unlock()
+
+		if rawFlag {
+			data, _ := json.Marshal(ev)
+			fmt.Println(string(data))
+		} else if dmJSONFlag {
+			entry := map[string]interface{}{
+				"timestamp": ts.Format(time.RFC3339),
+				"from":      senderName,
+				"message":   plaintext,
+				"event_id":  ev.ID,
+				"pubkey":    ev.PubKey,
+			}
+			data, _ := json.Marshal(entry)
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
+		}
+	}
+
+	for _, url := range relays {
+		go subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, &seenMu, seen, onConnected, onMessage)
+	}
+
+	// Wait for Ctrl+C
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	cancel()
+	return nil
+}
+
 // drainStatus prints all pending status messages from the channel.
 func drainStatus(ch <-chan string) {
 	for {
@@ -441,7 +647,10 @@ func drainStatus(ch <-chan string) {
 	}
 }
 
-func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targetHex string, target *dmTargetName, cyan *color.Color, seenMu *sync.Mutex, seen map[string]bool, onConnected func()) {
+// dmEventCallback is called when a new DM event is received and decrypted.
+type dmEventCallback func(ev *nostr.Event, plaintext string)
+
+func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex string, seenMu *sync.Mutex, seen map[string]bool, onConnected func(), onMessage dmEventCallback) {
 	connectCtx, cancel := context.WithTimeout(ctx, internalRelay.ConnectTimeout)
 	defer cancel()
 
@@ -479,7 +688,6 @@ func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targ
 				return
 			}
 
-			// Deduplicate across relays
 			seenMu.Lock()
 			if seen[ev.ID] {
 				seenMu.Unlock()
@@ -495,21 +703,28 @@ func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targ
 				continue
 			}
 
-			ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
-			dim := color.New(color.Faint)
-			name := target.get()
-			nameWidth := len(name)
-			if nameWidth < 3 {
-				nameWidth = 3
-			}
-			prefixLen := 14 + 2 + nameWidth + 2
-			content := wrapNote(plaintext, prefixLen)
-			fmt.Print("\r")
-			dim.Printf("%s  ", ts)
-			cyan.Printf("%-*s: ", nameWidth, name)
-			fmt.Printf("%s\n> ", content)
+			onMessage(ev, plaintext)
 		}
 	}
+}
+
+// subscribeRelayWithStatus wraps subscribeDMRelay with interactive formatting.
+func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targetHex string, target *dmTargetName, cyan *color.Color, promptPrefix string, seenMu *sync.Mutex, seen map[string]bool, onConnected func()) {
+	subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, seenMu, seen, onConnected, func(ev *nostr.Event, plaintext string) {
+		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
+		dim := color.New(color.Faint)
+		name := target.get()
+		nameWidth := len(name)
+		if nameWidth < 3 {
+			nameWidth = 3
+		}
+		prefixLen := 14 + 2 + nameWidth + 2
+		content := wrapNote(plaintext, prefixLen)
+		fmt.Print("\r")
+		dim.Printf("%s  ", ts)
+		cyan.Printf("%-*s: ", nameWidth, name)
+		fmt.Printf("%s\n%s", content, promptPrefix)
+	})
 }
 
 func showDMHistory(npub, myHex, targetHex, targetName string, cyan, dim *color.Color) int {

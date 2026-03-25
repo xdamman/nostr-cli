@@ -123,6 +123,18 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign event: %w", err)
 	}
 
+	// --raw: publish and output raw event JSON (wire format)
+	if rawFlag {
+		timeout := time.Duration(timeoutFlag) * time.Millisecond
+		_, err := ui.PublishEventSilent(npub, event, relays, timeout)
+		if err != nil {
+			// Still output the event even if publish failed
+		}
+		_ = cache.LogFeedEvent(npub, event)
+		ui.PrintRawEvent(event)
+		return nil
+	}
+
 	// --json: publish and output event + relay results as JSON
 	if postJSONOut {
 		timeout := time.Duration(timeoutFlag) * time.Millisecond

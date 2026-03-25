@@ -75,6 +75,12 @@ func requireFlag(t *testing.T, cmd *cobra.Command, name string) {
 // Global flags  (cmd/root.go)
 // ---------------------------------------------------------------------------
 
+func TestLLM_GlobalFlags_Raw(t *testing.T) {
+	if rootCmd.PersistentFlags().Lookup("raw") == nil {
+		t.Error("missing --raw global flag")
+	}
+}
+
 func TestLLM_GlobalFlags(t *testing.T) {
 	t.Run("--profile exists", func(t *testing.T) {
 		if rootCmd.PersistentFlags().Lookup("profile") == nil {
@@ -105,7 +111,7 @@ func TestLLM_GlobalFlags(t *testing.T) {
 func TestLLM_GlobalFlagsInherited(t *testing.T) {
 	// LLMs use: nostr post "msg" --timeout 5000 --no-color --profile alice
 	commands := []string{"post", "dm", "profile", "follow", "unfollow", "following", "relays", "sync"}
-	globals := []string{"profile", "timeout", "no-color"}
+	globals := []string{"profile", "timeout", "no-color", "raw"}
 
 	for _, name := range commands {
 		cmd := findCmd(rootCmd, name)
