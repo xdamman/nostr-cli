@@ -132,7 +132,6 @@ Run `nostr` with no arguments to enter the interactive shell. You'll see your fe
 
 ```
 $ nostr
-xavier  following 42  7/7 relays
 
 23/03 10:15  fiatjaf     working on a new relay implementation
 23/03 10:18  jb55        zaps are underrated for micropayments
@@ -140,6 +139,7 @@ xavier  following 42  7/7 relays
 23/03 10:30  gigi        nostr is the social layer bitcoin needed
 
 xavier> this is amazing!
+  enter to post a public note to 5 relays, ctrl+c to exit
 ✓ Published!
 ```
 
@@ -147,12 +147,12 @@ xavier> this is amazing!
 
 ```
 $ nostr dm xavier
-Chatting with xavier
 
 23/03 14:01  xavier   Hey, are you coming to the meetup?
 23/03 14:05  me       Yes! See you there
 
 me> Can't wait 🎉
+  enter to send an encrypted message to xavier over 5 relays, ctrl+c to exit
 ✓ Sent!
 ```
 
@@ -205,7 +205,7 @@ me> Can't wait 🎉
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias>` | Use a specific profile instead of the active one |
+| `--profile <npub\|alias\|username>` | Use a specific profile instead of the active one |
 | `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
 | `--raw` | Output raw Nostr event JSON (wire format) |

@@ -191,7 +191,8 @@ func runUserLookup(args []string) error {
 		for _, ev := range events {
 			ts := time.Unix(int64(ev.CreatedAt), 0).Format("2006-01-02 15:04")
 			dim.Printf("  %s\n", ts)
-			fmt.Printf("  %s\n\n", ev.Content)
+			content := wrapNote(ev.Content, 2)
+			fmt.Printf("  %s\n\n", content)
 		}
 	}
 
@@ -261,7 +262,8 @@ func watchUserNotes(npub, targetHex string, relays []string, dim *color.Color) e
 					}
 					ts := time.Unix(int64(ev.CreatedAt), 0).Format("2006-01-02 15:04")
 					dim.Printf("  %s\n", ts)
-					fmt.Printf("  %s\n\n", ev.Content)
+					content := wrapNote(ev.Content, 2)
+					fmt.Printf("  %s\n\n", content)
 				}
 			}
 		}(url)

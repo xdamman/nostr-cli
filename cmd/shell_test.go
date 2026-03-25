@@ -71,17 +71,56 @@ func TestWrapNoteWithSep_ContinuationIndent(t *testing.T) {
 	}
 }
 
-func TestWrapNoteWithSep_NewlinesReplacedWithSpaces(t *testing.T) {
+func TestWrapNoteWithSep_NewlinesPreserved(t *testing.T) {
 	content := "line1\nline2\nline3"
 	result := wrapNoteWithSep(content, 20, "\n")
-	// The original newlines should be replaced with spaces
-	if strings.Contains(result, "line1\n") {
-		// If it wraps, make sure original newlines were collapsed
-		flat := strings.ReplaceAll(result, "\n", "")
-		flat = strings.ReplaceAll(flat, " ", "")
-		if !strings.Contains(flat, "line1line2line3") {
-			t.Error("original content newlines should be replaced with spaces")
+	// Original newlines should be preserved (with indent on continuation lines)
+	indent := strings.Repeat(" ", 20)
+	expected := "line1\n" + indent + "line2\n" + indent + "line3"
+	if result != expected {
+		t.Errorf("expected newlines preserved with indent, got %q", result)
+	}
+}
+
+func TestRenderInlineMarkdown(t *testing.T) {
+	tests := []struct {
+		input    string
+		contains string
+		desc     string
+	}{
+		{"**bold**", "\033[1mbold\033[22m", "bold"},
+		{"*italic*", "\033[3mitalic\033[23m", "italic"},
+		{"__underline__", "\033[4munderline\033[24m", "underline"},
+		{"~~strike~~", "\033[9mstrike\033[29m", "strikethrough"},
+		{"no markdown here", "no markdown here", "plain text"},
+		{"**bold** and *italic*", "\033[1mbold\033[22m", "mixed"},
+	}
+	for _, tt := range tests {
+		result := renderInlineMarkdown(tt.input)
+		if !strings.Contains(result, tt.contains) {
+			t.Errorf("%s: expected %q to contain %q", tt.desc, result, tt.contains)
 		}
+	}
+}
+
+func TestVisibleLen(t *testing.T) {
+	if n := visibleLen("hello"); n != 5 {
+		t.Errorf("expected 5, got %d", n)
+	}
+	// ANSI bold "hi" = \033[1mhi\033[22m — visible length should be 2
+	if n := visibleLen("\033[1mhi\033[22m"); n != 2 {
+		t.Errorf("expected 2, got %d", n)
+	}
+}
+
+func TestSprintPromptPrefix(t *testing.T) {
+	prefix := sprintPromptPrefix("alice")
+	// Should contain "alice" and end with "> "
+	if !strings.Contains(prefix, "alice") {
+		t.Errorf("expected prefix to contain 'alice', got %q", prefix)
+	}
+	if !strings.HasSuffix(prefix, "> ") {
+		t.Errorf("expected prefix to end with '> ', got %q", prefix)
 	}
 }
 

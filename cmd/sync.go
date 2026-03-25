@@ -146,13 +146,14 @@ func syncableEvents(events []nostr.Event) (syncable []nostr.Event, skipped int) 
 
 // relayFetchState tracks what we've learned from fetching a relay.
 type relayFetchState struct {
-	done     bool
-	ok       bool
-	count    int
-	eventIDs map[string]bool
-	missing  int
-	duration time.Duration
-	err      error
+	done       bool
+	ok         bool
+	count      int
+	eventIDs   map[string]bool
+	missing    int // local events missing from relay (need to push)
+	remoteOnly int // relay events missing from local (need to pull)
+	duration   time.Duration
+	err        error
 }
 
 // --- JSON output types ---
@@ -229,7 +230,7 @@ func runSyncJSON(cmd *cobra.Command, args []string) error {
 
 	// Fetch from all selected relays
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
-	filter := nostr.Filter{Authors: []string{pubHex}, Limit: 500}
+	filter := nostr.Filter{Authors: []string{pubHex}}
 	fetchCh := internalRelay.FetchEventsPerRelay(context.Background(), filter, relays, timeout)
 
 	fetchStates := make(map[string]*relayFetchState)
@@ -240,6 +241,9 @@ func runSyncJSON(cmd *cobra.Command, args []string) error {
 			st.count = len(res.Events)
 			for _, ev := range res.Events {
 				st.eventIDs[ev.ID] = true
+				if !localIDs[ev.ID] {
+					st.remoteOnly++
+				}
 			}
 			for _, ev := range localSyncable {
 				if !st.eventIDs[ev.ID] {
@@ -397,7 +401,6 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
 	filter := nostr.Filter{
 		Authors: []string{pubHex},
-		Limit:   500,
 	}
 	fetchCh := internalRelay.FetchEventsPerRelay(context.Background(), filter, allRelays, timeout)
 
@@ -418,6 +421,9 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 			st.count = len(res.Events)
 			for _, ev := range res.Events {
 				st.eventIDs[ev.ID] = true
+				if !localIDs[ev.ID] {
+					st.remoteOnly++
+				}
 			}
 			for _, ev := range localSyncable {
 				if !st.eventIDs[ev.ID] {
@@ -462,8 +468,19 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 				if res.URL == matched {
 					fmt.Print("\033[1A\r\033[K")
 					if st := fetchStates[matched]; st.ok {
+						syncInfo := fmt.Sprintf("%d event%s", st.count, plural(st.count))
+						if st.missing > 0 {
+							syncInfo += fmt.Sprintf(", %d to push", st.missing)
+						}
+						if st.remoteOnly > 0 {
+							syncInfo += fmt.Sprintf(", %d to pull", st.remoteOnly)
+						}
+						if st.missing == 0 && st.remoteOnly == 0 {
+							syncInfo += ", in sync"
+						}
+						syncInfo += fmt.Sprintf(", %dms", st.duration.Milliseconds())
 						fmt.Printf("  %s %s  %s\n", greenFn("✓"), host,
-							dimFn.Sprintf("%d event%s, %d missing, %dms", st.count, plural(st.count), st.missing, st.duration.Milliseconds()))
+							dimFn.Sprint(syncInfo))
 					} else {
 						fmt.Printf("  %s %s  %s\n", redFn("✗"), host,
 							dimFn.Sprintf("%dms", st.duration.Milliseconds()))
@@ -689,7 +706,7 @@ func syncRelayChecklist(
 		}
 		var selected []string
 		for _, r := range relays {
-			if st, ok := fetchStates[r]; ok && st.done && st.ok && st.missing > 0 {
+			if st, ok := fetchStates[r]; ok && st.done && st.ok && (st.missing > 0 || st.remoteOnly > 0) {
 				selected = append(selected, r)
 			}
 		}
@@ -754,7 +771,7 @@ func syncRelayChecklist(
 
 			if st, ok := fetchStates[r]; ok && st.done {
 				// Fetched — auto-uncheck if in sync (only on first render after fetch)
-				if st.ok && st.missing == 0 {
+				if st.ok && st.missing == 0 && st.remoteOnly == 0 {
 					checked[i] = false
 				}
 				if checked[i] {
@@ -763,10 +780,17 @@ func syncRelayChecklist(
 					check = dimSprint("[ ]")
 				}
 				if st.ok {
-					if st.missing == 0 {
+					if st.missing == 0 && st.remoteOnly == 0 {
 						status = dimSprint(fmt.Sprintf("  %d event%s, in sync", st.count, plural(st.count)))
 					} else {
-						status = dimSprint(fmt.Sprintf("  %d event%s, %d missing", st.count, plural(st.count), st.missing))
+						parts := fmt.Sprintf("  %d event%s", st.count, plural(st.count))
+						if st.missing > 0 {
+							parts += fmt.Sprintf(", %d to push", st.missing)
+						}
+						if st.remoteOnly > 0 {
+							parts += fmt.Sprintf(", %d to pull", st.remoteOnly)
+						}
+						status = dimSprint(parts)
 					}
 				} else {
 					status = color.New(color.FgRed).Sprintf("  failed")
@@ -999,10 +1023,17 @@ func syncChecklistRenderTo(w *strings.Builder, relays []string, checked []bool, 
 		status := ""
 		if st, ok := fetchStates[r]; ok && st.done {
 			if st.ok {
-				if st.missing == 0 {
+				if st.missing == 0 && st.remoteOnly == 0 {
 					status = fmt.Sprintf("  %d event%s, in sync", st.count, plural(st.count))
 				} else {
-					status = fmt.Sprintf("  %d event%s, %d missing", st.count, plural(st.count), st.missing)
+					parts := fmt.Sprintf("  %d event%s", st.count, plural(st.count))
+					if st.missing > 0 {
+						parts += fmt.Sprintf(", %d to push", st.missing)
+					}
+					if st.remoteOnly > 0 {
+						parts += fmt.Sprintf(", %d to pull", st.remoteOnly)
+					}
+					status = parts
 				}
 			} else {
 				status = "  failed"

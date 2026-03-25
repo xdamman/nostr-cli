@@ -51,6 +51,18 @@ var slashCommands = []slashCmd{
 var shellPromptName string
 var shellRelayCount int
 
+// formatPrompt prints "name> " in green and returns the visible length.
+func formatPrompt(name string) int {
+	color.New(color.FgGreen).Print(name)
+	fmt.Print("> ")
+	return len(name) + 2
+}
+
+// sprintPromptPrefix returns the "name> " prompt string with ANSI colors.
+func sprintPromptPrefix(name string) string {
+	return color.New(color.FgGreen).Sprint(name) + "> "
+}
+
 // feedNameWidth tracks the widest author name seen, for uniform column alignment.
 var feedNameWidth int
 var feedNameWidthMu sync.Mutex
@@ -77,7 +89,6 @@ func runShell() error {
 
 	cyan := color.New(color.FgCyan)
 	dim := color.New(color.Faint)
-	green := color.New(color.FgGreen)
 
 	myHex, err := crypto.NpubToHex(npub)
 	if err != nil {
@@ -104,11 +115,6 @@ func runShell() error {
 		}
 	}
 
-	// Show header
-	fmt.Printf("nostr  ")
-	dim.Print("connecting...")
-	fmt.Println()
-
 	// Display cached feed immediately (no relay needed)
 	cachedEvents, _ := cache.LoadFeed(npub, 20)
 	if len(cachedEvents) > 0 {
@@ -132,34 +138,6 @@ func runShell() error {
 	shellCtx, shellCancel := context.WithCancel(context.Background())
 	defer shellCancel()
 
-	var connMu sync.Mutex
-	var connCount int
-	totalRelays := len(relays)
-
-	headerUpdate := func() {
-		connMu.Lock()
-		count := connCount
-		connMu.Unlock()
-		followMu.Lock()
-		nFollowing := len(followedHexes)
-		followMu.Unlock()
-		printMu.Lock()
-		fmt.Print("\0337") // save cursor
-		fmt.Print("\033[H") // move to row 1, col 1
-		fmt.Print("\r\033[K")
-		fmt.Printf("nostr  ")
-		if nFollowing > 0 {
-			cyan.Printf("following %d", nFollowing)
-			fmt.Print("  ")
-		}
-		if count >= totalRelays {
-			green.Printf("%d/%d relays", count, totalRelays)
-		} else {
-			dim.Printf("%d/%d relays", count, totalRelays)
-		}
-		fmt.Print("\0338") // restore cursor
-		printMu.Unlock()
-	}
 
 	// printNewEvent deduplicates, caches, and prints a new feed event.
 	// Returns true if the event was new and printed.
@@ -179,7 +157,8 @@ func runShell() error {
 		dim.Printf("%s  ", ts)
 		cyan.Printf("%-*s: ", nw, name)
 		fmt.Printf("%s\r\n", content)
-		fmt.Printf("\r%s> ", color.New(color.FgGreen).Sprint(shellPromptName))
+		fmt.Print("\r")
+		formatPrompt(shellPromptName)
 		printMu.Unlock()
 		return true
 	}
@@ -207,8 +186,6 @@ func runShell() error {
 		// Cache the following list
 		_ = cache.SaveFollowing(npub, hexes)
 
-		headerUpdate()
-
 		// Queue profile fetches for all followed users
 		for _, hex := range hexes {
 			queueProfileFetch(hex)
@@ -221,7 +198,8 @@ func runShell() error {
 				dim.Print("You're not following anyone yet.\r\n")
 				dim.Print("  Use /follow <npub|alias|nip05> to follow someone.\r\n")
 				fmt.Print("\r\n")
-				fmt.Printf("\r%s> ", color.New(color.FgGreen).Sprint(shellPromptName))
+				fmt.Print("\r")
+				formatPrompt(shellPromptName)
 				printMu.Unlock()
 			}
 			return
@@ -269,7 +247,8 @@ func runShell() error {
 			dim.Printf("%s  ", ts)
 			cyan.Printf("%-*s: ", nw, name)
 			fmt.Printf("%s\r\n", content)
-			fmt.Printf("\r%s> ", color.New(color.FgGreen).Sprint(shellPromptName))
+			fmt.Print("\r")
+			formatPrompt(shellPromptName)
 			printMu.Unlock()
 		}
 	}()
@@ -285,11 +264,6 @@ func runShell() error {
 				return
 			}
 			defer relay.Close()
-
-			connMu.Lock()
-			connCount++
-			connMu.Unlock()
-			headerUpdate()
 
 			// Wait for follow list to be available
 			select {
@@ -505,7 +479,7 @@ func termWidth() int {
 }
 
 // wrapNote wraps content to fit within the available columns after the prefix.
-// It replaces newlines with spaces, then wraps long lines with an indented continuation.
+// It preserves newlines and wraps long lines with an indented continuation.
 func wrapNote(content string, prefixLen int) string {
 	return wrapNoteWithSep(content, prefixLen, "\n")
 }
@@ -516,9 +490,12 @@ func wrapNoteRaw(content string, prefixLen int) string {
 }
 
 func wrapNoteWithSep(content string, prefixLen int, newline string) string {
-	content = strings.ReplaceAll(content, "\n", " ")
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "")
 	content = strings.TrimSpace(content)
+
+	// Apply basic markdown rendering
+	content = renderInlineMarkdown(content)
 
 	w := termWidth()
 	avail := w - prefixLen
@@ -526,32 +503,130 @@ func wrapNoteWithSep(content string, prefixLen int, newline string) string {
 		avail = 20
 	}
 
-	if len(content) <= avail {
-		return content
-	}
-
-	// Wrap into multiple lines with indent matching the prefix
 	indent := strings.Repeat(" ", prefixLen)
 	var sb strings.Builder
-	for len(content) > 0 {
-		lineLen := avail
-		if lineLen > len(content) {
-			lineLen = len(content)
-		}
-		// Try to break at a space
-		if lineLen < len(content) {
-			if idx := strings.LastIndex(content[:lineLen], " "); idx > avail/3 {
-				lineLen = idx + 1
-			}
-		}
-		if sb.Len() > 0 {
+
+	// Process each paragraph line separately to preserve newlines
+	paragraphs := strings.Split(content, "\n")
+	for pi, para := range paragraphs {
+		if pi > 0 {
 			sb.WriteString(newline)
 			sb.WriteString(indent)
 		}
-		sb.WriteString(strings.TrimRight(content[:lineLen], " "))
-		content = content[lineLen:]
+		// Wrap this line within avail width
+		// Use visible length (excluding ANSI escape codes) for wrapping
+		for len(para) > 0 {
+			vis := visibleLen(para)
+			if vis <= avail {
+				sb.WriteString(para)
+				break
+			}
+			// Find a break point at avail visible characters
+			lineLen := visibleIndex(para, avail)
+			if lineLen <= 0 {
+				lineLen = len(para)
+			}
+			// Try to break at a space
+			if lineLen < len(para) {
+				cutoff := visibleIndex(para, avail/3)
+				if idx := strings.LastIndex(para[:lineLen], " "); idx > cutoff {
+					lineLen = idx + 1
+				}
+			}
+			sb.WriteString(strings.TrimRight(para[:lineLen], " "))
+			para = para[lineLen:]
+			if len(para) > 0 {
+				sb.WriteString(newline)
+				sb.WriteString(indent)
+			}
+		}
 	}
 	return sb.String()
+}
+
+// renderInlineMarkdown applies basic inline markdown formatting using ANSI escape codes.
+// Supports: **bold**, *italic*, __underline__, ~~strikethrough~~
+func renderInlineMarkdown(s string) string {
+	// Process in order: bold before italic to avoid conflicts
+	s = applyInlineStyle(s, "**", "\033[1m", "\033[22m")       // bold
+	s = applyInlineStyle(s, "__", "\033[4m", "\033[24m")        // underline
+	s = applyInlineStyle(s, "~~", "\033[9m", "\033[29m")        // strikethrough
+	s = applyInlineStyle(s, "*", "\033[3m", "\033[23m")         // italic
+	return s
+}
+
+// applyInlineStyle finds pairs of the given marker and wraps the content in ANSI codes.
+func applyInlineStyle(s, marker, ansiOn, ansiOff string) string {
+	var sb strings.Builder
+	for {
+		start := strings.Index(s, marker)
+		if start == -1 {
+			sb.WriteString(s)
+			break
+		}
+		end := strings.Index(s[start+len(marker):], marker)
+		if end == -1 {
+			sb.WriteString(s)
+			break
+		}
+		end += start + len(marker) // absolute index of closing marker
+		inner := s[start+len(marker) : end]
+		// Skip empty markers or markers spanning newlines
+		if inner == "" || strings.Contains(inner, "\n") {
+			sb.WriteString(s[:end+len(marker)])
+			s = s[end+len(marker):]
+			continue
+		}
+		sb.WriteString(s[:start])
+		sb.WriteString(ansiOn)
+		sb.WriteString(inner)
+		sb.WriteString(ansiOff)
+		s = s[end+len(marker):]
+	}
+	return sb.String()
+}
+
+// visibleLen returns the length of a string excluding ANSI escape sequences.
+func visibleLen(s string) int {
+	n := 0
+	inEsc := false
+	for _, r := range s {
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// visibleIndex returns the byte index in s where the visible character count reaches n.
+func visibleIndex(s string, n int) int {
+	vis := 0
+	inEsc := false
+	for i, r := range s {
+		if vis >= n {
+			return i
+		}
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		vis++
+	}
+	return len(s)
 }
 
 func postNoteAsync(npub, myHex, message string, relays []string, statusCh chan<- string) {
@@ -1015,7 +1090,7 @@ func readShellLine() (string, error) {
 	if !term.IsTerminal(fd) {
 		// Fallback for non-TTY
 		var line string
-		fmt.Printf("%s> ", shellPromptName)
+		formatPrompt(shellPromptName)
 		_, err := fmt.Scanln(&line)
 		return line, err
 	}
@@ -1024,7 +1099,7 @@ func readShellLine() (string, error) {
 	if err != nil {
 		// Fallback
 		var line string
-		fmt.Printf("%s> ", shellPromptName)
+		formatPrompt(shellPromptName)
 		_, err := fmt.Scanln(&line)
 		return line, err
 	}
@@ -1164,7 +1239,7 @@ func filterCommands(buf []byte) []slashCmd {
 	return result
 }
 
-func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, relayCount int) {
+func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, totalRelays int) {
 	dim := color.New(color.Faint)
 	cyan := color.New(color.FgCyan)
 
@@ -1179,9 +1254,7 @@ func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, rel
 	}
 
 	// Draw prompt
-	promptPrefix := shellPromptName + "> "
-	color.New(color.FgGreen).Print(shellPromptName)
-	fmt.Print("> ")
+	promptPrefixLen := formatPrompt(shellPromptName)
 	fmt.Print(string(buf))
 
 	if showMenu {
@@ -1205,9 +1278,9 @@ func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, rel
 		// Show hint below prompt
 		fmt.Print("\r\n\033[K")
 		if len(buf) == 0 {
-			dim.Print("  type / for commands, start typing to post a note, ctrl+c to exit")
+			dim.Printf("  type / for commands, enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
 		} else if buf[0] != '/' {
-			dim.Printf("  press enter to post to %d relays, ctrl+c to exit", relayCount)
+			dim.Printf("  enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
 		}
 		// Move cursor back to prompt line
 		fmt.Print("\033[1A")
@@ -1224,7 +1297,7 @@ func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, rel
 	}
 
 	// Position cursor at end of input on prompt line
-	fmt.Printf("\r\033[%dC", len(promptPrefix)+len(buf))
+	fmt.Printf("\r\033[%dC", promptPrefixLen+len(buf))
 }
 
 // shellInteractiveSelect shows an interactive profile picker using arrow keys.

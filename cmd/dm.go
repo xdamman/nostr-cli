@@ -212,8 +212,6 @@ func (t *dmTargetName) set(name string) {
 func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []string) error {
 	cyan := color.New(color.FgCyan)
 	dim := color.New(color.Faint)
-	greenPrompt := color.New(color.FgGreen)
-
 	// Resolve own name for prompt
 	promptName := resolveProfileName(npub)
 	if promptName == "" {
@@ -234,12 +232,8 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		}
 	}
 
-	fmt.Printf("Chat with %s  ", cyan.Sprint(target.get()))
-	dim.Print("connecting...")
-	fmt.Println()
-
 	// Show recent DM history from cache
-	historyLines := showDMHistory(npub, myHex, targetHex, target.get(), cyan, dim)
+	showDMHistory(npub, myHex, targetHex, target.get(), cyan, dim)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -271,33 +265,13 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		seen[ev.ID] = true
 	}
 
-	// Track relay connection status
-	var connectedCount int32
-	var connMu sync.Mutex
 	totalRelays := len(relays)
 
-	// Lines below the header: history + blank line + prompt
-	// We need to jump back this many lines to rewrite the header
-	linesBelow := historyLines + 2 // blank line + "> " prompt line
-
-	onConnected := func() {
-		connMu.Lock()
-		connectedCount++
-		count := connectedCount
-		connMu.Unlock()
-
-		// Save cursor, jump to header line, rewrite it, restore cursor
-		fmt.Printf("\0337")                    // save cursor
-		fmt.Printf("\033[%dA", linesBelow)     // move up to header
-		fmt.Printf("\r\033[K")                 // clear line
-		fmt.Printf("Chat with %s  ", cyan.Sprint(target.get()))
-		if int(count) >= totalRelays {
-			color.New(color.FgGreen).Printf("%d/%d relays", count, totalRelays)
-		} else {
-			dim.Printf("%d/%d relays", count, totalRelays)
-		}
-		fmt.Printf("\0338") // restore cursor
+	getPromptPrefix := func() string {
+		return sprintPromptPrefix(promptName)
 	}
+
+	onConnected := func() {}
 
 	// Resolve full name from relays in background
 	go func() {
@@ -320,8 +294,6 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		}
 	}()
 
-	// Build prompt prefix: "name> " in green
-	promptPrefix := greenPrompt.Sprintf("%s> ", promptName)
 
 	// Fetch recent DM history from relays (fills the gap between cache and real-time)
 	go func() {
@@ -400,13 +372,13 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 				cyan.Printf("%-*s: ", nameWidth, tName)
 			}
 			dim.Printf("%s\n", content)
-			fmt.Print(promptPrefix)
+			fmt.Print(getPromptPrefix())
 		}
 	}()
 
 	// Subscribe for incoming DMs in background
 	for _, url := range relays {
-		go subscribeRelayWithStatus(ctx, npub, url, skHex, myHex, targetHex, target, cyan, promptPrefix, &seenMu, seen, onConnected)
+		go subscribeRelayWithStatus(ctx, npub, url, skHex, myHex, targetHex, target, cyan, getPromptPrefix, &seenMu, seen, onConnected)
 	}
 
 	fmt.Println() // blank line after header
@@ -428,8 +400,14 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	for {
 		// Show pending status from previous sends before the prompt
 		drainStatus(statusCh)
-		fmt.Print(promptPrefix)
+		fmt.Print(getPromptPrefix())
+		fmt.Println()
+		dim.Printf("  enter to send an encrypted message to %s over %d relays, ctrl+c to exit", target.get(), totalRelays)
+		fmt.Print("\033[1A") // move cursor back up to prompt line
+		fmt.Printf("\r")
+		fmt.Print(getPromptPrefix())
 		line, err := reader.ReadString('\n')
+		fmt.Print("\033[K") // clear hint line remnants
 		if err != nil {
 			break
 		}
@@ -709,7 +687,7 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 }
 
 // subscribeRelayWithStatus wraps subscribeDMRelay with interactive formatting.
-func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targetHex string, target *dmTargetName, cyan *color.Color, promptPrefix string, seenMu *sync.Mutex, seen map[string]bool, onConnected func()) {
+func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targetHex string, target *dmTargetName, cyan *color.Color, getPromptPrefix func() string, seenMu *sync.Mutex, seen map[string]bool, onConnected func()) {
 	subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, seenMu, seen, onConnected, func(ev *nostr.Event, plaintext string) {
 		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
 		dim := color.New(color.Faint)
@@ -723,7 +701,7 @@ func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targ
 		fmt.Print("\r")
 		dim.Printf("%s  ", ts)
 		cyan.Printf("%-*s: ", nameWidth, name)
-		fmt.Printf("%s\n%s", content, promptPrefix)
+		fmt.Printf("%s\n%s", content, getPromptPrefix())
 	})
 }
 

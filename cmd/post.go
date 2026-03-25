@@ -75,12 +75,12 @@ func runPost(cmd *cobra.Command, args []string) error {
 		message = strings.TrimSpace(string(data))
 	} else {
 		dim := color.New(color.Faint)
-		color.New(color.FgGreen).Printf("%s> ", promptName)
+		formatPrompt(promptName)
 		fmt.Println()
-		dim.Printf("  type your message then hit enter to send to %d relays, ctrl+c to cancel", len(relays))
+		dim.Printf("  enter to post a public note to %d relays, ctrl+c to cancel", len(relays))
 		fmt.Print("\033[1A") // move cursor back up to prompt line
 		fmt.Printf("\r")
-		color.New(color.FgGreen).Printf("%s> ", promptName)
+		formatPrompt(promptName)
 		var line string
 		fmt.Scanln(&line)
 		message = strings.TrimSpace(line)
