@@ -185,6 +185,57 @@ func TestLoadResolvedProfile_UnknownAlias(t *testing.T) {
 	}
 }
 
+func TestLoadResolvedProfile_WithUsername(t *testing.T) {
+	dir := setupTestDir(t)
+	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npub)
+	SetActiveProfile(npub)
+
+	// Write a profile.json with a name
+	profDir := filepath.Join(dir, "profiles", npub)
+	os.WriteFile(filepath.Join(profDir, "profile.json"),
+		[]byte(`{"name":"alice","display_name":"Alice Wonder"}`), 0644)
+
+	// Resolve by name
+	resolved, err := LoadResolvedProfile("alice")
+	if err != nil {
+		t.Fatalf("LoadResolvedProfile(\"alice\") failed: %v", err)
+	}
+	if resolved != npub {
+		t.Errorf("got %q, want %q", resolved, npub)
+	}
+
+	// Resolve by display_name (case-insensitive)
+	resolved, err = LoadResolvedProfile("alice wonder")
+	if err != nil {
+		t.Fatalf("LoadResolvedProfile(\"alice wonder\") failed: %v", err)
+	}
+	if resolved != npub {
+		t.Errorf("got %q, want %q", resolved, npub)
+	}
+}
+
+func TestLoadResolvedProfile_UsernameInCacheDir(t *testing.T) {
+	dir := setupTestDir(t)
+	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npub)
+	SetActiveProfile(npub)
+
+	// Write profile.json in cache subdir (non-local profile pattern)
+	cacheDir := filepath.Join(dir, "profiles", npub, "cache")
+	os.MkdirAll(cacheDir, 0700)
+	os.WriteFile(filepath.Join(cacheDir, "profile.json"),
+		[]byte(`{"name":"bob"}`), 0644)
+
+	resolved, err := LoadResolvedProfile("bob")
+	if err != nil {
+		t.Fatalf("LoadResolvedProfile(\"bob\") failed: %v", err)
+	}
+	if resolved != npub {
+		t.Errorf("got %q, want %q", resolved, npub)
+	}
+}
+
 func TestMigrateAliases_CSV(t *testing.T) {
 	dir, npub := setupTestDirWithProfile(t)
 

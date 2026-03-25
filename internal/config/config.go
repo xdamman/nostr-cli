@@ -539,7 +539,7 @@ func MigrateAliases() error {
 }
 
 // LoadResolvedProfile returns the npub to use, considering the --profile flag.
-// If the flag doesn't start with "npub1", it tries to resolve it as an alias.
+// Resolution order: npub → alias → username (from cached profile metadata).
 func LoadResolvedProfile(profileFlag string) (string, error) {
 	if profileFlag != "" {
 		if strings.HasPrefix(profileFlag, "npub1") {
@@ -550,7 +550,52 @@ func LoadResolvedProfile(profileFlag string) (string, error) {
 		if err == nil {
 			return npub, nil
 		}
-		return "", fmt.Errorf("unknown profile or alias: %s", profileFlag)
+		// Try matching by username (name or display_name in profile.json)
+		npub, err = resolveByUsername(profileFlag)
+		if err == nil {
+			return npub, nil
+		}
+		return "", fmt.Errorf("unknown profile, alias, or username: %s", profileFlag)
 	}
 	return ActiveProfile()
+}
+
+// resolveByUsername iterates local profiles and matches by name or display_name
+// from cached profile.json metadata.
+func resolveByUsername(username string) (string, error) {
+	base, err := BaseDir()
+	if err != nil {
+		return "", err
+	}
+	profilesDir := filepath.Join(base, "profiles")
+	entries, err := os.ReadDir(profilesDir)
+	if err != nil {
+		return "", err
+	}
+	lower := strings.ToLower(username)
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "npub1") {
+			continue
+		}
+		npub := e.Name()
+		dir := filepath.Join(profilesDir, npub)
+		data, err := os.ReadFile(filepath.Join(dir, "profile.json"))
+		if err != nil {
+			data, err = os.ReadFile(filepath.Join(dir, "cache", "profile.json"))
+			if err != nil {
+				continue
+			}
+		}
+		var meta struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"display_name"`
+		}
+		if json.Unmarshal(data, &meta) != nil {
+			continue
+		}
+		if strings.ToLower(meta.Name) == lower || strings.ToLower(meta.DisplayName) == lower {
+			return npub, nil
+		}
+	}
+	return "", fmt.Errorf("no profile found with username %q", username)
 }

@@ -163,9 +163,9 @@ func TestSyncChecklistRender_FetchStatusContent(t *testing.T) {
 	if !strings.Contains(output, "1 event, in sync") {
 		t.Errorf("expected '1 event, in sync' (singular), got: %s", output)
 	}
-	// Plural: "42 events, 3 missing"
-	if !strings.Contains(output, "42 events, 3 missing") {
-		t.Errorf("expected '42 events, 3 missing' (plural), got: %s", output)
+	// Plural: "42 events, 3 to push"
+	if !strings.Contains(output, "42 events, 3 to push") {
+		t.Errorf("expected '42 events, 3 to push' (plural), got: %s", output)
 	}
 }
 

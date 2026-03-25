@@ -66,7 +66,7 @@ nostr alias rm alice                        # Remove alias
 
 ## Global Flags
 
-- `--profile <npub|alias>` — Use a specific profile
+- `--profile <npub|alias|username>` — Use a specific profile
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 - `--no-color` — Disable ANSI color codes
 - `--raw` — Output raw Nostr event JSON (wire format, as relays see it)

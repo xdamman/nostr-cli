@@ -196,7 +196,7 @@ nostr nip05
 
 ## Global Flags
 
-- `--profile <npub|alias>` — Execute command under a specific profile
+- `--profile <npub|alias|username>` — Execute command under a specific profile
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 - `--no-color` — Strip ANSI color codes
 - `--raw` — Output raw Nostr event JSON (wire format, as relays see it)
