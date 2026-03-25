@@ -80,6 +80,28 @@ func SentEventsPath(npub string) string {
 	return sentEventsFile(npub)
 }
 
+// CountSentEvents returns the number of lines in the sent events file.
+func CountSentEvents(npub string) int {
+	path := sentEventsFile(npub)
+	if path == "" {
+		return 0
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	n := 0
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	for scanner.Scan() {
+		if len(scanner.Bytes()) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
 // LogSentEvent appends a sent event to the profile-level events.jsonl.
 // This file is NOT in cache/ — it's user data meant for backup.
 func LogSentEvent(npub string, event nostr.Event) error {

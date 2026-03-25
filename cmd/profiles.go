@@ -6,6 +6,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/profile"
 )
@@ -29,6 +30,7 @@ type profileInfo struct {
 	Npub        string `json:"npub"`
 	Name        string `json:"name,omitempty"`
 	Active      bool   `json:"active"`
+	Events      int    `json:"events"`
 	DisplayName string `json:"display_name,omitempty"`
 	About       string `json:"about,omitempty"`
 	Picture     string `json:"picture,omitempty"`
@@ -72,6 +74,7 @@ func runProfiles(cmd *cobra.Command, args []string) error {
 			Npub:   e.npub,
 			Name:   name,
 			Active: e.npub == activeNpub,
+			Events: cache.CountSentEvents(e.npub),
 		}
 		if meta != nil {
 			info.DisplayName = meta.DisplayName
@@ -105,17 +108,31 @@ func runProfiles(cmd *cobra.Command, args []string) error {
 			marker = green("▸ ")
 		}
 
+		// Short npub: first 8 + last 4 chars
+		shortNpub := info.Npub
+		if len(shortNpub) > 16 {
+			shortNpub = shortNpub[:12] + "…" + shortNpub[len(shortNpub)-4:]
+		}
+
+		// Event count suffix
+		var eventStr string
+		if info.Events == 1 {
+			eventStr = "1 event"
+		} else {
+			eventStr = fmt.Sprintf("%d events", info.Events)
+		}
+
 		if info.Name != "" {
 			if info.Active {
-				fmt.Printf("%s%s %s %s\n", marker, cyan(info.Name), info.Npub, bold("(active)"))
+				fmt.Printf("%s%s %s %s %s\n", marker, cyan(info.Name), dim.Sprint(shortNpub), dim.Sprint(eventStr), bold("(active)"))
 			} else {
-				fmt.Printf("%s%s %s\n", marker, cyan(info.Name), info.Npub)
+				fmt.Printf("%s%s %s %s\n", marker, cyan(info.Name), dim.Sprint(shortNpub), dim.Sprint(eventStr))
 			}
 		} else {
 			if info.Active {
-				fmt.Printf("%s%s %s\n", marker, info.Npub, bold("(active)"))
+				fmt.Printf("%s%s %s %s\n", marker, dim.Sprint(shortNpub), dim.Sprint(eventStr), bold("(active)"))
 			} else {
-				fmt.Printf("%s%s\n", marker, info.Npub)
+				fmt.Printf("%s%s %s\n", marker, dim.Sprint(shortNpub), dim.Sprint(eventStr))
 			}
 		}
 	}
