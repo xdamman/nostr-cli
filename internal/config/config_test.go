@@ -379,7 +379,10 @@ func TestProfileDir_NonNpubDir(t *testing.T) {
 	os.WriteFile(filepath.Join(profDir, "aliases.json"),
 		[]byte(`{"bob":"npub1bob00000000000000000000000000000000000000000000000"}`), 0644)
 
-	// ProfileDir with the real npub should find the "alice" directory
+	// Set active symlink to the username dir
+	os.Symlink("profiles/alice", filepath.Join(dir, "active"))
+
+	// ProfileDir with the real npub should find the "alice" directory via active symlink
 	resolved, err := ProfileDir(npub)
 	if err != nil {
 		t.Fatalf("ProfileDir(%q) failed: %v", npub, err)

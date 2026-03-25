@@ -41,27 +41,29 @@ func ProfileDir(npub string) (string, error) {
 	if _, err := os.Stat(dir); err == nil {
 		return dir, nil
 	}
-	// If the npub directory doesn't exist, check if this npub matches a
-	// non-npub directory (e.g. "xdamman") by deriving the npub from its nsec.
-	if strings.HasPrefix(npub, "npub1") {
-		entries, err := os.ReadDir(filepath.Join(base, "profiles"))
-		if err != nil {
-			return dir, nil // fall through to original path
-		}
-		for _, e := range entries {
-			if !e.IsDir() || strings.HasPrefix(e.Name(), "npub1") {
-				continue
-			}
-			candidate := filepath.Join(base, "profiles", e.Name())
-			data, err := os.ReadFile(filepath.Join(candidate, "nsec"))
-			if err != nil {
-				continue
-			}
-			derivedNpub, _, _, err := crypto.NsecToKeys(strings.TrimSpace(string(data)))
-			if err == nil && derivedNpub == npub {
-				return candidate, nil
-			}
-		}
+	// Directory doesn't exist by npub name — check if the active symlink
+	// points to a directory for this npub (e.g. named "xdamman" instead of the npub).
+	if activeDir, err := ActiveProfileDir(); err == nil {
+		return activeDir, nil
+	}
+	return dir, nil
+}
+
+// ActiveProfileDir returns the actual filesystem path of the active profile directory
+// by following the ~/.nostr/active symlink.
+func ActiveProfileDir() (string, error) {
+	base, err := BaseDir()
+	if err != nil {
+		return "", err
+	}
+	link := filepath.Join(base, "active")
+	target, err := os.Readlink(link)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, target)
+	if _, err := os.Stat(dir); err != nil {
+		return "", err
 	}
 	return dir, nil
 }
