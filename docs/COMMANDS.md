@@ -127,7 +127,8 @@ nostr relays rm [url|number]     # Remove a relay
 - Attempt connection to verify
 
 **`relays rm`:**
-- Accept relay URL or the number from `relays` list
+- Accept relay URL, domain name, or the number from `relays` list
+- Ask for confirmation before removing (skip with `--yes`/`-y` or `--json`)
 - Remove from `relays.json`
 
 **Edge cases:**
@@ -248,6 +249,7 @@ nostr dm [user]              # Interactive chat mode
 | Flag | Description |
 |------|-------------|
 | `--nip04` | Force NIP-04 encryption (legacy) |
+| `--json` | Output event and relay results as JSON |
 
 ---
 

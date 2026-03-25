@@ -12,7 +12,7 @@ import (
 const (
 	ConnectTimeout = 5 * time.Second
 	FetchTimeout   = 10 * time.Second
-	PublishTimeout = 10 * time.Second
+	PublishTimeout = 2 * time.Second
 )
 
 // PublishEvent publishes an event to the given relays and returns
@@ -33,10 +33,10 @@ func PublishEvent(ctx context.Context, event nostr.Event, relayURLs []string) ([
 		wg.Add(1)
 		go func(url string) {
 			defer wg.Done()
-			connectCtx, cancel := context.WithTimeout(ctx, ConnectTimeout)
+			relayCtx, cancel := context.WithTimeout(ctx, PublishTimeout)
 			defer cancel()
 
-			relay, err := nostr.RelayConnect(connectCtx, url)
+			relay, err := nostr.RelayConnect(relayCtx, url)
 			if err != nil {
 				mu.Lock()
 				lastErr = fmt.Errorf("connect to %s: %w", url, err)
@@ -45,7 +45,7 @@ func PublishEvent(ctx context.Context, event nostr.Event, relayURLs []string) ([
 			}
 			defer relay.Close()
 
-			if err := relay.Publish(ctx, event); err != nil {
+			if err := relay.Publish(relayCtx, event); err != nil {
 				mu.Lock()
 				lastErr = fmt.Errorf("publish to %s: %w", url, err)
 				mu.Unlock()

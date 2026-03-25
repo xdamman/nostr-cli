@@ -125,3 +125,52 @@ func PublishEventToRelays(npub string, event nostr.Event, relays []string, timeo
 		TotalCount:  len(relays),
 	}, nil
 }
+
+// PublishJSONRelay is a per-relay result for JSON output.
+type PublishJSONRelay struct {
+	URL     string `json:"url"`
+	OK      bool   `json:"ok"`
+	DurMs   int64  `json:"duration_ms"`
+	Error   string `json:"error,omitempty"`
+}
+
+// PublishJSONResult is the JSON output for a published event.
+type PublishJSONResult struct {
+	Event  nostr.Event        `json:"event"`
+	Relays []PublishJSONRelay `json:"relays"`
+}
+
+// PublishEventSilent publishes an event to relays without interactive output.
+// It logs the event locally and returns per-relay results suitable for JSON output.
+func PublishEventSilent(npub string, event nostr.Event, relays []string, timeout time.Duration) (*PublishJSONResult, error) {
+	ctx := context.Background()
+	ch := relay.PublishEventWithProgress(ctx, event, relays, timeout)
+
+	result := &PublishJSONResult{Event: event}
+	anyOK := false
+
+	for res := range ch {
+		jr := PublishJSONRelay{
+			URL:   res.URL,
+			OK:    res.OK,
+			DurMs: res.Duration.Milliseconds(),
+		}
+		if res.Err != nil {
+			jr.Error = res.Err.Error()
+		}
+		result.Relays = append(result.Relays, jr)
+		if res.OK {
+			anyOK = true
+		}
+	}
+
+	if anyOK {
+		_ = cache.LogSentEvent(npub, event)
+	}
+
+	if !anyOK {
+		return result, fmt.Errorf("failed to publish to any relay")
+	}
+
+	return result, nil
+}

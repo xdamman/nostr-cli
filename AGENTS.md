@@ -18,6 +18,7 @@ nostr post "Hello Nostr"                    # Post a note
 nostr post "Reply" --reply <event-id>       # Reply to an event
 echo "My message" | nostr post              # Post from stdin
 nostr dm alice "Hello"                      # Send encrypted DM
+nostr dm alice "Hello" --json               # Send DM, JSON output
 echo "Content" | nostr dm alice             # DM from stdin
 ```
 
@@ -46,6 +47,7 @@ nostr relays --json                         # List relays with status
 nostr relays --relay nos.lol --json         # Show a specific relay
 nostr relays add wss://relay.example.com    # Add a relay
 nostr relays rm wss://relay.example.com     # Remove a relay
+nostr relays rm nos.lol -y                  # Remove by domain, skip confirmation
 ```
 
 ### Sync

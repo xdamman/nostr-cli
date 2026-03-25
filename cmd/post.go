@@ -123,13 +123,19 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign event: %w", err)
 	}
 
-	// --json: output signed event without publishing
+	// --json: publish and output event + relay results as JSON
 	if postJSONOut {
-		data, err := json.MarshalIndent(event, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal event: %w", err)
+		timeout := time.Duration(timeoutFlag) * time.Millisecond
+		result, err := ui.PublishEventSilent(npub, event, relays, timeout)
+		if err != nil && result == nil {
+			return err
 		}
+		_ = cache.LogFeedEvent(npub, event)
+		data, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(data))
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 

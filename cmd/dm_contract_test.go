@@ -32,6 +32,10 @@ func TestLLM_DM_AcceptsUserAndOptionalMessage(t *testing.T) {
 	}
 }
 
+func TestLLM_DM_JSONFlag(t *testing.T) {
+	requireFlag(t, requireCmd(t, "dm"), "json")
+}
+
 func TestLLM_DM_InSocialGroup(t *testing.T) {
 	cmd := requireCmd(t, "dm")
 	if cmd.GroupID != "social" {

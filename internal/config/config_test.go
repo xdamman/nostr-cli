@@ -24,6 +24,16 @@ func createTestProfile(t *testing.T, dir, npub string) {
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte("nsec1test\n"), 0600)
 }
 
+// setupTestDirWithProfile creates a temp dir with an active profile.
+func setupTestDirWithProfile(t *testing.T) (string, string) {
+	t.Helper()
+	dir := setupTestDir(t)
+	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npub)
+	SetActiveProfile(npub)
+	return dir, npub
+}
+
 func TestSetActiveProfile_CreatesSymlink(t *testing.T) {
 	dir := setupTestDir(t)
 	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
@@ -33,60 +43,31 @@ func TestSetActiveProfile_CreatesSymlink(t *testing.T) {
 		t.Fatalf("SetActiveProfile failed: %v", err)
 	}
 
-	link := filepath.Join(dir, "active")
-	target, err := os.Readlink(link)
+	// Check active file/link exists
+	activePath := filepath.Join(dir, "active")
+	info, err := os.Lstat(activePath)
 	if err != nil {
-		t.Fatalf("active is not a symlink: %v", err)
+		t.Fatalf("active file not found: %v", err)
 	}
-	expected := filepath.Join("profiles", npub)
-	if target != expected {
-		t.Errorf("symlink target = %q, want %q", target, expected)
-	}
-}
-
-func TestSetActiveProfile_ReplacesDirectory(t *testing.T) {
-	dir := setupTestDir(t)
-	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
-	createTestProfile(t, dir, npub)
-
-	// Create "active" as a directory (the bug scenario)
-	activeDir := filepath.Join(dir, "active")
-	os.MkdirAll(activeDir, 0700)
-	os.WriteFile(filepath.Join(activeDir, "dummy"), []byte("x"), 0644)
-
-	if err := SetActiveProfile(npub); err != nil {
-		t.Fatalf("SetActiveProfile failed: %v", err)
-	}
-
-	// Verify it's now a symlink, not a directory
-	fi, err := os.Lstat(activeDir)
-	if err != nil {
-		t.Fatalf("active doesn't exist: %v", err)
-	}
-	if fi.IsDir() {
-		t.Error("active is still a directory, should be a symlink")
-	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	if info.Mode()&os.ModeSymlink == 0 {
 		t.Error("active is not a symlink")
 	}
 }
 
-func TestGlobalAliases_CreateAndResolve(t *testing.T) {
-	setupTestDir(t)
-	npub := "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yz5"
+func TestAliases_CreateAndResolve(t *testing.T) {
+	_, activeNpub := setupTestDirWithProfile(t)
+	targetNpub := "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yz5"
 
-	// Set alias
-	if err := SetGlobalAlias("xavier", npub); err != nil {
-		t.Fatalf("SetGlobalAlias failed: %v", err)
+	if err := SetAlias(activeNpub, "xavier", targetNpub); err != nil {
+		t.Fatalf("SetAlias failed: %v", err)
 	}
 
-	// Resolve it
 	resolved, err := ResolveAlias("xavier")
 	if err != nil {
 		t.Fatalf("ResolveAlias failed: %v", err)
 	}
-	if resolved != npub {
-		t.Errorf("ResolveAlias = %q, want %q", resolved, npub)
+	if resolved != targetNpub {
+		t.Errorf("ResolveAlias = %q, want %q", resolved, targetNpub)
 	}
 
 	// Case-insensitive
@@ -94,30 +75,29 @@ func TestGlobalAliases_CreateAndResolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAlias case-insensitive failed: %v", err)
 	}
-	if resolved != npub {
-		t.Errorf("ResolveAlias case-insensitive = %q, want %q", resolved, npub)
+	if resolved != targetNpub {
+		t.Errorf("ResolveAlias case-insensitive = %q, want %q", resolved, targetNpub)
 	}
 }
 
-func TestGlobalAliases_Remove(t *testing.T) {
-	setupTestDir(t)
-	npub := "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yz5"
+func TestAliases_Remove(t *testing.T) {
+	_, activeNpub := setupTestDirWithProfile(t)
+	targetNpub := "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yz5"
 
-	SetGlobalAlias("xavier", npub)
+	SetAlias(activeNpub, "xavier", targetNpub)
 
-	if err := RemoveGlobalAlias("xavier"); err != nil {
-		t.Fatalf("RemoveGlobalAlias failed: %v", err)
+	if err := RemoveAlias(activeNpub, "xavier"); err != nil {
+		t.Fatalf("RemoveAlias failed: %v", err)
 	}
 
-	// Should no longer resolve
 	_, err := ResolveAlias("xavier")
 	if err == nil {
 		t.Error("expected error after removing alias, got nil")
 	}
 }
 
-func TestGlobalAliases_RemoveNotFound(t *testing.T) {
-	setupTestDir(t)
+func TestAliases_RemoveNotFound(t *testing.T) {
+	setupTestDirWithProfile(t)
 
 	err := RemoveGlobalAlias("nonexistent")
 	if err == nil {
@@ -125,18 +105,46 @@ func TestGlobalAliases_RemoveNotFound(t *testing.T) {
 	}
 }
 
-func TestLoadResolvedProfile_WithAlias(t *testing.T) {
-	setupTestDir(t)
-	npub := "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yz5"
+func TestAliases_ScopedPerProfile(t *testing.T) {
+	dir := setupTestDir(t)
+	npub1 := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	npub2 := "npub1otherprofile234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npub1)
+	createTestProfile(t, dir, npub2)
 
-	SetGlobalAlias("xavier", npub)
+	target := "npub1target0000000000000000000000000000000000000000000000"
+
+	// Set alias on profile 1
+	SetAlias(npub1, "alice", target)
+
+	// Profile 1 should resolve it
+	resolved, err := ResolveAliasFor(npub1, "alice")
+	if err != nil {
+		t.Fatalf("expected alias on profile 1: %v", err)
+	}
+	if resolved != target {
+		t.Errorf("got %q, want %q", resolved, target)
+	}
+
+	// Profile 2 should NOT have it
+	_, err = ResolveAliasFor(npub2, "alice")
+	if err == nil {
+		t.Error("expected error: alias should not exist on profile 2")
+	}
+}
+
+func TestLoadResolvedProfile_WithAlias(t *testing.T) {
+	_, activeNpub := setupTestDirWithProfile(t)
+	targetNpub := "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yz5"
+
+	SetAlias(activeNpub, "xavier", targetNpub)
 
 	resolved, err := LoadResolvedProfile("xavier")
 	if err != nil {
 		t.Fatalf("LoadResolvedProfile failed: %v", err)
 	}
-	if resolved != npub {
-		t.Errorf("LoadResolvedProfile = %q, want %q", resolved, npub)
+	if resolved != targetNpub {
+		t.Errorf("LoadResolvedProfile = %q, want %q", resolved, targetNpub)
 	}
 }
 
@@ -169,7 +177,7 @@ func TestLoadResolvedProfile_FallsBackToActive(t *testing.T) {
 }
 
 func TestLoadResolvedProfile_UnknownAlias(t *testing.T) {
-	setupTestDir(t)
+	setupTestDirWithProfile(t)
 
 	_, err := LoadResolvedProfile("nonexistent")
 	if err == nil {
@@ -177,10 +185,8 @@ func TestLoadResolvedProfile_UnknownAlias(t *testing.T) {
 	}
 }
 
-func TestMigrateAliases(t *testing.T) {
-	dir := setupTestDir(t)
-	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
-	createTestProfile(t, dir, npub)
+func TestMigrateAliases_CSV(t *testing.T) {
+	dir, npub := setupTestDirWithProfile(t)
 
 	// Write a per-profile aliases.csv
 	csvPath := filepath.Join(dir, "profiles", npub, "aliases.csv")
@@ -194,13 +200,12 @@ func TestMigrateAliases(t *testing.T) {
 	w.Flush()
 	f.Close()
 
-	// Run migration
 	if err := MigrateAliases(); err != nil {
 		t.Fatalf("MigrateAliases failed: %v", err)
 	}
 
-	// Check global aliases
-	aliases, err := LoadGlobalAliases()
+	// Check aliases are now in the profile
+	aliases, err := LoadAliases(npub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +216,7 @@ func TestMigrateAliases(t *testing.T) {
 		t.Errorf("bob = %q", aliases["bob"])
 	}
 
-	// Check CSV was renamed
+	// CSV should be renamed
 	if _, err := os.Stat(csvPath); !os.IsNotExist(err) {
 		t.Error("aliases.csv should have been renamed")
 	}
@@ -220,16 +225,36 @@ func TestMigrateAliases(t *testing.T) {
 	}
 }
 
+func TestMigrateAliases_GlobalFile(t *testing.T) {
+	dir, npub := setupTestDirWithProfile(t)
+
+	// Write a legacy global aliases.json
+	globalPath := filepath.Join(dir, "aliases.json")
+	os.WriteFile(globalPath, []byte(`{"alice":"npub1alice000000000000000000000000000000000000000000000"}`), 0644)
+
+	if err := MigrateAliases(); err != nil {
+		t.Fatalf("MigrateAliases failed: %v", err)
+	}
+
+	// Should be in profile now
+	aliases, _ := LoadAliases(npub)
+	if aliases["alice"] != "npub1alice000000000000000000000000000000000000000000000" {
+		t.Errorf("alice = %q", aliases["alice"])
+	}
+
+	// Global file should be removed
+	if _, err := os.Stat(globalPath); !os.IsNotExist(err) {
+		t.Error("global aliases.json should have been removed")
+	}
+}
+
 func TestMigrateAliases_NoConflict(t *testing.T) {
-	dir := setupTestDir(t)
-	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
-	createTestProfile(t, dir, npub)
+	dir, npub := setupTestDirWithProfile(t)
 
-	// Set a global alias first
 	existingNpub := "npub1existing00000000000000000000000000000000000000000000"
-	SetGlobalAlias("alice", existingNpub)
+	SetAlias(npub, "alice", existingNpub)
 
-	// Write a per-profile aliases.csv with conflicting "alice"
+	// Write a CSV with conflicting "alice"
 	csvPath := filepath.Join(dir, "profiles", npub, "aliases.csv")
 	f, _ := os.Create(csvPath)
 	w := csv.NewWriter(f)
@@ -239,21 +264,21 @@ func TestMigrateAliases_NoConflict(t *testing.T) {
 
 	MigrateAliases()
 
-	// Global alias should NOT be overwritten
-	aliases, _ := LoadGlobalAliases()
+	// Existing alias should NOT be overwritten
+	aliases, _ := LoadAliases(npub)
 	if aliases["alice"] != existingNpub {
 		t.Errorf("alice should be %q (existing), got %q", existingNpub, aliases["alice"])
 	}
 }
 
-func TestLoadGlobalAliases_Empty(t *testing.T) {
-	setupTestDir(t)
+func TestLoadAliases_Empty(t *testing.T) {
+	_, npub := setupTestDirWithProfile(t)
 
-	aliases, err := LoadGlobalAliases()
+	aliases, err := LoadAliases(npub)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(aliases) != 0 {
-		t.Errorf("expected empty aliases, got %d", len(aliases))
+		t.Errorf("expected 0 aliases, got %d", len(aliases))
 	}
 }

@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -14,6 +17,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
+	"github.com/xdamman/nostr-cli/internal/profile"
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
@@ -131,14 +135,13 @@ func runFollow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
-	sp = ui.NewSpinner("Publishing...")
-	_, err = internalRelay.PublishEvent(ctx, *contacts, relays)
-	sp.Stop()
+	// Publish using the shared interactive relay publishing
+	fmt.Println("Publishing updated contact list...")
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+	_, err = ui.PublishEventToRelays(npub, *contacts, relays, timeout)
 	if err != nil {
 		return err
 	}
-
-	_ = cache.LogSentEvent(npub, *contacts)
 
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
@@ -152,9 +155,73 @@ func runFollow(cmd *cobra.Command, args []string) error {
 		}
 		jsonBytes, _ := json.Marshal(result)
 		fmt.Println(string(jsonBytes))
-	} else {
-		green.Printf("✓ Now following %s\n", targetNpub)
+		return nil
 	}
+
+	green.Printf("✓ Now following %s\n", targetNpub)
+
+	// Show the target's profile
+	fmt.Println()
+	label := color.New(color.FgCyan).SprintFunc()
+	meta, _ := profile.LoadCached(targetNpub)
+	if meta == nil {
+		// Try fetching from relays
+		meta, _ = profile.FetchFromRelays(ctx, targetNpub, relays)
+		if meta != nil {
+			_ = profile.SaveCached(targetNpub, meta)
+		}
+	}
+	if meta != nil {
+		printProfileFields(targetNpub, meta, label)
+		fmt.Println()
+
+		// Prompt for alias — default to profile name
+		defaultName := meta.Name
+		if defaultName == "" {
+			defaultName = meta.DisplayName
+		}
+
+		// Check if alias already exists for this npub
+		existingAlias := ""
+		if aliases, err := config.LoadAliases(npub); err == nil {
+			for a, n := range aliases {
+				if n == targetNpub {
+					existingAlias = a
+					break
+				}
+			}
+		}
+
+		if existingAlias != "" {
+			dim := color.New(color.Faint)
+			dim.Printf("  Alias: %s\n", existingAlias)
+		} else {
+			defaultAlias := ""
+			if defaultName != "" {
+				defaultAlias = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(defaultName), " ", "-"))
+			}
+			if defaultAlias != "" {
+				fmt.Printf("Create an alias for this user [%s]: ", defaultAlias)
+			} else {
+				fmt.Print("Create an alias for this user (enter to skip): ")
+			}
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				alias := strings.TrimSpace(scanner.Text())
+				if alias == "" && defaultAlias != "" {
+					alias = defaultAlias
+				}
+				if alias != "" {
+					if err := config.SetAlias(npub, alias, targetNpub); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
+					} else {
+						green.Printf("✓ Alias %s → %s\n", alias, targetNpub)
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -238,14 +305,13 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
-	sp = ui.NewSpinner("Publishing...")
-	_, err = internalRelay.PublishEvent(ctx, *contacts, relays)
-	sp.Stop()
+	// Publish using the shared interactive relay publishing
+	fmt.Println("Publishing updated contact list...")
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+	_, err = ui.PublishEventToRelays(npub, *contacts, relays, timeout)
 	if err != nil {
 		return err
 	}
-
-	_ = cache.LogSentEvent(npub, *contacts)
 
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)

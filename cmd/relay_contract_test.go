@@ -45,6 +45,16 @@ func TestLLM_Relays_RelayFlag(t *testing.T) {
 	requireFlag(t, requireCmd(t, "relays"), "relay")
 }
 
+func TestLLM_Relays_RmYesFlag(t *testing.T) {
+	cmd := requireCmd(t, "relays", "rm")
+	requireFlag(t, cmd, "yes")
+	// Check short flag -y
+	f := cmd.Flags().ShorthandLookup("y")
+	if f == nil {
+		t.Error("relays rm missing -y short flag")
+	}
+}
+
 func TestLLM_Relays_InInfraGroup(t *testing.T) {
 	cmd := requireCmd(t, "relays")
 	if cmd.GroupID != "infra" {

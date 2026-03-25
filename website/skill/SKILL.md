@@ -45,10 +45,13 @@ nostr dm <user> [message]
 
 Sends NIP-44 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
 
+Flags:
+- `--json` — Output event and relay results as JSON
+
 Examples:
 ```bash
 nostr dm npub1... "Hello"
-nostr dm alice@example.com "Message"
+nostr dm alice@example.com "Message" --json
 echo "Content" | nostr dm alice
 ```
 
@@ -95,18 +98,20 @@ nostr following --json
 ```bash
 nostr relays               # List configured relays
 nostr relays add <url>     # Add a relay (wss://... format)
-nostr relays rm <id|url>   # Remove a relay
+nostr relays rm <id|url|domain>  # Remove a relay (asks confirmation)
 ```
 
 Flags:
 - `--json` — JSON output with connection status and ping
 - `--relay <url|domain>` — Show a specific relay only
+- `--yes` / `-y` — Skip confirmation on `rm` (also skipped with `--json`)
 
 Examples:
 ```bash
 nostr relays --json
 nostr relays --relay nos.lol --json
 nostr relays add wss://relay.example.com
+nostr relays rm nos.lol -y
 nostr relays rm 1
 ```
 

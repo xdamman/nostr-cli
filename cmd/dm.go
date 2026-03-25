@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +29,8 @@ import (
 	"golang.org/x/term"
 )
 
+var dmJSONFlag bool
+
 var dmCmd = &cobra.Command{
 	Use:     "dm [profile] [message]",
 	Short:   "Send an encrypted direct message",
@@ -37,6 +40,7 @@ var dmCmd = &cobra.Command{
 }
 
 func init() {
+	dmCmd.Flags().BoolVar(&dmJSONFlag, "json", false, "Output event and relay results as JSON")
 	rootCmd.AddCommand(dmCmd)
 }
 
@@ -109,8 +113,6 @@ func runDM(cmd *cobra.Command, args []string) error {
 }
 
 func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) error {
-	green := color.New(color.FgGreen)
-
 	ciphertext, err := nip04.Encrypt(message, generateSharedSecret(skHex, targetHex))
 	if err != nil {
 		return fmt.Errorf("encryption failed: %w", err)
@@ -129,18 +131,27 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 	}
 
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
 
-	sp := ui.NewSpinner("Sending...")
-	ctx := context.Background()
-	_, err = internalRelay.PublishEvent(ctx, event, relays)
-	sp.Stop()
+	if dmJSONFlag {
+		result, err := ui.PublishEventSilent(npub, event, relays, timeout)
+		if err != nil && result == nil {
+			return err
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	fmt.Printf("Sending DM to %s...\n", targetNpub)
+	_, err = ui.PublishEventToRelays(npub, event, relays, timeout)
 	if err != nil {
 		return err
 	}
 
-	_ = cache.LogSentEvent(npub, event)
-
-	green.Printf("✓ DM sent to %s\n", targetNpub)
 	return nil
 }
 

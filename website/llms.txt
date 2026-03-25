@@ -20,7 +20,7 @@ brew install xdamman/tap/nostr
 
 ### Posting & Messaging
 - `nostr post [message]` — Post a text note (kind 1). Flags: `--reply`, `--json`, `--timeout`
-- `nostr dm <user> [message]` — Send encrypted DM (NIP-44). User: npub, alias, or nip05
+- `nostr dm <user> [message]` — Send encrypted DM (NIP-44). User: npub, alias, or nip05. Flags: `--json`
 - `nostr [user]` — View user profile and recent notes. Flags: `--watch`, `--json`, `--limit`
 
 ### Profile Management
@@ -41,7 +41,7 @@ brew install xdamman/tap/nostr
 - `nostr alias rm <name>` — Remove an alias
 - `nostr relays` — List relays. Flags: `--json`, `--relay <url|domain>`
 - `nostr relays add <url>` — Add relay
-- `nostr relays rm <url>` — Remove relay
+- `nostr relays rm <url|domain|number>` — Remove relay. Flags: `--yes`/`-y`
 - `nostr sync` — Sync local events with relays. Flags: `--json`, `--relay <url|domain>`
 
 ## User Format

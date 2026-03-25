@@ -489,13 +489,9 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 		}()
 		fmt.Println()
 	} else {
-		// Interactive relay checklist with live fetch status
-		fmt.Printf("Select relays to sync")
-		if len(localEvents) > 0 {
-			fmt.Printf(" (%d local, %d syncable)", len(localEvents), len(localSyncable))
-		}
-		fmt.Println()
-		relays = syncRelayChecklistLive(allRelays, fetchResultCh, fetchStates, processFetchResult)
+		// Interactive checklist with live fetch (spinner shown inside checkbox)
+		fmt.Println("Select relays to sync:")
+		relays = syncRelayChecklist(allRelays, fetchStates, fetchResultCh, processFetchResult)
 		if len(relays) == 0 {
 			go func() {
 				for range fetchResultCh {
@@ -677,13 +673,13 @@ func printSyncSummary(dimFn *color.Color, npub string, saved, published, failed 
 	}
 }
 
-// syncRelayChecklistLive shows an interactive checklist where fetch results
-// update in real time as they arrive. Returns selected relay URLs.
-// Returns nil on ctrl-c.
-func syncRelayChecklistLive(
+// syncRelayChecklist shows an interactive checklist where fetch results
+// appear live. While fetching, the checkbox shows a spinner [⠋].
+// Once fetched, it shows [✓] or [ ] (auto-unchecked if in sync).
+func syncRelayChecklist(
 	relays []string,
-	fetchCh <-chan internalRelay.FetchResult,
 	fetchStates map[string]*relayFetchState,
+	fetchCh <-chan internalRelay.FetchResult,
 	processFn func(internalRelay.FetchResult),
 ) []string {
 	fd := int(os.Stdin.Fd())
@@ -691,7 +687,16 @@ func syncRelayChecklistLive(
 		for res := range fetchCh {
 			processFn(res)
 		}
-		return relays
+		var selected []string
+		for _, r := range relays {
+			if st, ok := fetchStates[r]; ok && st.done && st.ok && st.missing > 0 {
+				selected = append(selected, r)
+			}
+		}
+		if len(selected) == 0 {
+			return relays
+		}
+		return selected
 	}
 
 	checked := make([]bool, len(relays))
@@ -699,6 +704,7 @@ func syncRelayChecklistLive(
 		checked[i] = true
 	}
 	cursor := 0
+	frame := 0
 
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -709,23 +715,53 @@ func syncRelayChecklistLive(
 	}
 	defer term.Restore(fd, oldState)
 
+	termWidth := 80
+	if w, _, err := term.GetSize(fd); err == nil && w > 0 {
+		termWidth = w
+	}
+
 	cyanFn := color.New(color.FgCyan).SprintFunc()
 	dimSprint := color.New(color.Faint).SprintFunc()
 	greenSprint := color.New(color.FgGreen).SprintFunc()
 
-	frame := 0
+	truncLine := func(s string, maxVisible int) string {
+		visible := 0
+		inEsc := false
+		for i, r := range s {
+			if inEsc {
+				if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+					inEsc = false
+				}
+				continue
+			}
+			if r == '\033' {
+				inEsc = true
+				continue
+			}
+			visible++
+			if visible >= maxVisible {
+				return s[:i+1]
+			}
+		}
+		return s
+	}
 
 	render := func() {
 		fmt.Print("\r\033[J")
 		for i, r := range relays {
-			check := greenSprint("[✓]")
-			if !checked[i] {
-				check = dimSprint("[ ]")
-			}
 			host := relayHost(r)
+			var check, status string
 
-			status := ""
 			if st, ok := fetchStates[r]; ok && st.done {
+				// Fetched — auto-uncheck if in sync (only on first render after fetch)
+				if st.ok && st.missing == 0 {
+					checked[i] = false
+				}
+				if checked[i] {
+					check = greenSprint("[✓]")
+				} else {
+					check = dimSprint("[ ]")
+				}
 				if st.ok {
 					if st.missing == 0 {
 						status = dimSprint(fmt.Sprintf("  %d event%s, in sync", st.count, plural(st.count)))
@@ -736,23 +772,28 @@ func syncRelayChecklistLive(
 					status = color.New(color.FgRed).Sprintf("  failed")
 				}
 			} else {
+				// Still fetching — spinner in checkbox
 				f := ui.SpinnerFrames[frame%len(ui.SpinnerFrames)]
-				status = dimSprint(fmt.Sprintf("  %s", f))
+				check = dimSprint(fmt.Sprintf("[%s]", f))
 			}
 
+			var line string
 			if i == cursor {
-				fmt.Printf("  %s %s%s\r\n", check, cyanFn(host), status)
+				line = fmt.Sprintf("  %s %s%s", check, cyanFn(host), status)
 			} else {
-				fmt.Printf("  %s %s%s\r\n", check, dimSprint(host), status)
+				line = fmt.Sprintf("  %s %s%s", check, dimSprint(host), status)
 			}
+			fmt.Printf("%s\r\n", truncLine(line, termWidth-1))
 		}
+
 		selectedCount := 0
 		for i := range relays {
 			if checked[i] {
 				selectedCount++
 			}
 		}
-		fmt.Printf("\r\n  %s\r\n", dimSprint(fmt.Sprintf("↑/↓ select, space toggle, a add relay, enter sync %d selected relay%s", selectedCount, plural(selectedCount))))
+		hint := fmt.Sprintf("  ↑/↓ select, space toggle, a add relay, enter sync %d selected relay%s", selectedCount, plural(selectedCount))
+		fmt.Printf("\r\n%s\r\n", truncLine(dimSprint(hint), termWidth-1))
 	}
 
 	lines := len(relays) + 2
@@ -767,13 +808,13 @@ func syncRelayChecklistLive(
 	// Read stdin one byte at a time in a goroutine
 	inputCh := make(chan byte, 1)
 	go func() {
-		b := make([]byte, 1)
+		buf := make([]byte, 1)
 		for {
-			if _, err := os.Stdin.Read(b); err != nil {
+			if _, err := os.Stdin.Read(buf); err != nil {
 				close(inputCh)
 				return
 			}
-			inputCh <- b[0]
+			inputCh <- buf[0]
 		}
 	}()
 
@@ -786,7 +827,7 @@ func syncRelayChecklistLive(
 		}
 	}
 
-	fetchDone := false
+	fetchDone := fetchCh == nil
 	ticker := time.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -798,13 +839,6 @@ func syncRelayChecklistLive(
 				fetchCh = nil
 			} else {
 				processFn(res)
-				for i, r := range relays {
-					if r == res.URL {
-						if st, ok := fetchStates[r]; ok && st.done && st.ok && st.missing == 0 {
-							checked[i] = false
-						}
-					}
-				}
 			}
 			rerender()
 
@@ -826,7 +860,9 @@ func syncRelayChecklistLive(
 				}
 				return selected
 			case ' ':
-				checked[cursor] = !checked[cursor]
+				if fetchStates[relays[cursor]] != nil && fetchStates[relays[cursor]].done {
+					checked[cursor] = !checked[cursor]
+				}
 				rerender()
 			case 'a':
 				fmt.Print("\r\033[J")
@@ -842,14 +878,14 @@ func syncRelayChecklistLive(
 					}
 				}
 				oldState, _ = term.MakeRaw(fd)
-				render()
+				render() // fresh render after add
 			case 3: // ctrl-c
 				fmt.Print("\r\033[J")
 				if fetchCh != nil {
 					go func() { for range fetchCh {} }()
 				}
 				return nil
-			case 27: // ESC — start of arrow key sequence
+			case 27: // ESC — arrow key sequence
 				b2, ok := readNext()
 				if !ok || b2 != '[' {
 					break

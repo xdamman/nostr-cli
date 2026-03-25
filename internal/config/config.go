@@ -301,18 +301,10 @@ func RemoveProfile(npub string) error {
 		return fmt.Errorf("failed to remove profile directory: %w", err)
 	}
 
-	// Remove any aliases pointing to this npub
-	aliases, _ := LoadGlobalAliases()
-	changed := false
-	for name, target := range aliases {
-		if target == npub {
-			delete(aliases, name)
-			_ = RemoveProfileSymlink(name)
-			changed = true
-		}
-	}
-	if changed {
-		_ = SaveGlobalAliases(aliases)
+	// Remove profile symlinks for aliases that pointed to this profile
+	aliases, _ := LoadAliases(npub)
+	for name := range aliases {
+		_ = RemoveProfileSymlink(name)
 	}
 
 	// If this was the active profile, remove the active symlink
@@ -335,18 +327,18 @@ func HasNsec(npub string) bool {
 	return err == nil
 }
 
-// aliasesFilePath returns the path to the global aliases.json file.
-func aliasesFilePath() (string, error) {
-	base, err := BaseDir()
+// profileAliasesPath returns the path to aliases.json for the given profile.
+func profileAliasesPath(npub string) (string, error) {
+	dir, err := ProfileDir(npub)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "aliases.json"), nil
+	return filepath.Join(dir, "aliases.json"), nil
 }
 
-// LoadGlobalAliases reads the global aliases.json file.
-func LoadGlobalAliases() (map[string]string, error) {
-	path, err := aliasesFilePath()
+// LoadAliases reads the aliases.json for the given profile.
+func LoadAliases(npub string) (map[string]string, error) {
+	path, err := profileAliasesPath(npub)
 	if err != nil {
 		return nil, err
 	}
@@ -364,14 +356,14 @@ func LoadGlobalAliases() (map[string]string, error) {
 	return aliases, nil
 }
 
-// SaveGlobalAliases writes the global aliases.json file.
-func SaveGlobalAliases(aliases map[string]string) error {
-	path, err := aliasesFilePath()
+// SaveAliases writes the aliases.json for the given profile.
+func SaveAliases(npub string, aliases map[string]string) error {
+	path, err := profileAliasesPath(npub)
 	if err != nil {
 		return err
 	}
-	base := filepath.Dir(path)
-	if err := os.MkdirAll(base, 0700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(aliases, "", "  ")
@@ -381,38 +373,23 @@ func SaveGlobalAliases(aliases map[string]string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// ResolveAlias looks up an alias in the global aliases.json and returns the npub.
-func ResolveAlias(alias string) (string, error) {
-	aliases, err := LoadGlobalAliases()
-	if err != nil {
-		return "", err
-	}
-	for name, npub := range aliases {
-		if strings.EqualFold(name, alias) {
-			return npub, nil
-		}
-	}
-	return "", fmt.Errorf("alias %q not found", alias)
-}
-
-// SetGlobalAlias sets an alias in the global aliases.json and creates a profile symlink.
-func SetGlobalAlias(name, npub string) error {
-	aliases, err := LoadGlobalAliases()
+// SetAlias sets an alias in the active profile's aliases.json and creates a profile symlink.
+func SetAlias(npub, name, target string) error {
+	aliases, err := LoadAliases(npub)
 	if err != nil {
 		return err
 	}
-	aliases[name] = npub
-	if err := SaveGlobalAliases(aliases); err != nil {
+	aliases[name] = target
+	if err := SaveAliases(npub, aliases); err != nil {
 		return err
 	}
-	// Create profile symlink (best-effort)
-	_ = CreateProfileSymlink(name, npub)
+	_ = CreateProfileSymlink(name, target)
 	return nil
 }
 
-// RemoveGlobalAlias removes an alias from the global aliases.json and its profile symlink.
-func RemoveGlobalAlias(name string) error {
-	aliases, err := LoadGlobalAliases()
+// RemoveAlias removes an alias from the active profile's aliases.json and its profile symlink.
+func RemoveAlias(npub, name string) error {
+	aliases, err := LoadAliases(npub)
 	if err != nil {
 		return err
 	}
@@ -420,32 +397,107 @@ func RemoveGlobalAlias(name string) error {
 		return fmt.Errorf("alias %q not found", name)
 	}
 	delete(aliases, name)
-	if err := SaveGlobalAliases(aliases); err != nil {
+	if err := SaveAliases(npub, aliases); err != nil {
 		return err
 	}
 	_ = RemoveProfileSymlink(name)
 	return nil
 }
 
-// MigrateAliases merges per-profile aliases.csv files into the global aliases.json.
-// Migrated CSV files are renamed to aliases.csv.migrated.
+// ResolveAlias looks up an alias in the active profile's aliases.json and returns the npub.
+func ResolveAlias(alias string) (string, error) {
+	active, err := ActiveProfile()
+	if err != nil {
+		return "", err
+	}
+	return ResolveAliasFor(active, alias)
+}
+
+// ResolveAliasFor looks up an alias in a specific profile's aliases.json.
+func ResolveAliasFor(npub, alias string) (string, error) {
+	aliases, err := LoadAliases(npub)
+	if err != nil {
+		return "", err
+	}
+	for name, target := range aliases {
+		if strings.EqualFold(name, alias) {
+			return target, nil
+		}
+	}
+	return "", fmt.Errorf("alias %q not found", alias)
+}
+
+// --- Backwards compatibility wrappers ---
+// These use the active profile for callers that don't have a profile in scope.
+
+// LoadGlobalAliases reads aliases from the active profile.
+func LoadGlobalAliases() (map[string]string, error) {
+	active, err := ActiveProfile()
+	if err != nil {
+		return make(map[string]string), nil
+	}
+	return LoadAliases(active)
+}
+
+// SetGlobalAlias sets an alias in the active profile.
+func SetGlobalAlias(name, target string) error {
+	active, err := ActiveProfile()
+	if err != nil {
+		return err
+	}
+	return SetAlias(active, name, target)
+}
+
+// RemoveGlobalAlias removes an alias from the active profile.
+func RemoveGlobalAlias(name string) error {
+	active, err := ActiveProfile()
+	if err != nil {
+		return err
+	}
+	return RemoveAlias(active, name)
+}
+
+// MigrateAliases moves aliases from the legacy global aliases.json and
+// per-profile aliases.csv files into the active profile's aliases.json.
 func MigrateAliases() error {
+	active, err := ActiveProfile()
+	if err != nil {
+		return nil // no active profile, nothing to migrate
+	}
+
+	migrated := false
+
+	// Migrate legacy global aliases.json
 	base, err := BaseDir()
 	if err != nil {
 		return err
 	}
+	globalPath := filepath.Join(base, "aliases.json")
+	if data, err := os.ReadFile(globalPath); err == nil {
+		var globalAliases map[string]string
+		if json.Unmarshal(data, &globalAliases) == nil && len(globalAliases) > 0 {
+			profileAliases, _ := LoadAliases(active)
+			for name, target := range globalAliases {
+				if _, exists := profileAliases[name]; !exists {
+					profileAliases[name] = target
+					migrated = true
+				}
+			}
+			if migrated {
+				_ = SaveAliases(active, profileAliases)
+			}
+			// Remove legacy global file
+			_ = os.Remove(globalPath)
+		}
+	}
+
+	// Migrate legacy per-profile aliases.csv files
 	profilesDir := filepath.Join(base, "profiles")
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
-		return nil // no profiles dir, nothing to migrate
+		return nil
 	}
 
-	globalAliases, err := LoadGlobalAliases()
-	if err != nil {
-		return err
-	}
-
-	migrated := false
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "npub1") {
 			continue
@@ -453,7 +505,7 @@ func MigrateAliases() error {
 		csvPath := filepath.Join(profilesDir, e.Name(), "aliases.csv")
 		f, err := os.Open(csvPath)
 		if err != nil {
-			continue // no aliases.csv
+			continue
 		}
 		reader := csv.NewReader(f)
 		records, err := reader.ReadAll()
@@ -461,23 +513,28 @@ func MigrateAliases() error {
 		if err != nil {
 			continue
 		}
+
+		// Determine which profile to migrate into
+		targetNpub := e.Name()
+		profileAliases, _ := LoadAliases(targetNpub)
+
+		csvMigrated := false
 		for _, rec := range records {
 			if len(rec) >= 2 {
 				name := rec[0]
 				npub := rec[1]
-				if _, exists := globalAliases[name]; !exists {
-					globalAliases[name] = npub
-					migrated = true
+				if _, exists := profileAliases[name]; !exists {
+					profileAliases[name] = npub
+					csvMigrated = true
 				}
 			}
 		}
-		// Rename to .migrated
+		if csvMigrated {
+			_ = SaveAliases(targetNpub, profileAliases)
+		}
 		os.Rename(csvPath, csvPath+".migrated")
 	}
 
-	if migrated {
-		return SaveGlobalAliases(globalAliases)
-	}
 	return nil
 }
 

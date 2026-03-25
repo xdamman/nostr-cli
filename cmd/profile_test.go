@@ -109,24 +109,22 @@ func TestProfileCommand_FlagExists(t *testing.T) {
 	}
 }
 
-func TestProfileCommand_LookupUserProfile_WithoutActiveProfile(t *testing.T) {
-	setupCmdTestDir(t)
-	// No active profile set, no aliases
+func TestProfileCommand_AliasResolution(t *testing.T) {
+	dir := setupCmdTestDir(t)
+	activeNpub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	createCmdTestProfile(t, dir, activeNpub)
+	config.SetActiveProfile(activeNpub)
 
-	// lookupUserProfile should not panic with empty activeNpub
-	// We can't test the full function without relays, but we can test
-	// the resolution path: resolve.ResolveToNpub should work without activeNpub
-	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
+	targetNpub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
 
-	// Set a global alias — this should work even without an active profile
-	config.SetGlobalAlias("xavier", npub)
+	config.SetAlias(activeNpub, "xavier", targetNpub)
 
 	resolved, err := config.ResolveAlias("xavier")
 	if err != nil {
-		t.Fatalf("ResolveAlias failed without active profile: %v", err)
+		t.Fatalf("ResolveAlias failed: %v", err)
 	}
-	if resolved != npub {
-		t.Errorf("resolved = %q, want %q", resolved, npub)
+	if resolved != targetNpub {
+		t.Errorf("resolved = %q, want %q", resolved, targetNpub)
 	}
 }
 

@@ -174,7 +174,7 @@ me> Can't wait 🎉
 |---------|-------------|
 | `nostr post [message]` | Post a text note (interactive if no message given) |
 | `nostr follow [npub\|username]` | Follow a user |
-| `nostr dm [user] [message]` | Send a DM (interactive mode if no message given) |
+| `nostr dm [user] [message]` | Send a DM (interactive mode if no message given). `--json` for structured output |
 | `nostr [npub\|username\|alias]` | View a user's profile and latest 10 notes |
 | `nostr [user] --watch` | Live-stream a user's new notes |
 
@@ -185,7 +185,7 @@ me> Can't wait 🎉
 | `nostr relays` | List current relays with connection status |
 | `nostr relays --relay <url\|domain>` | Show a specific relay |
 | `nostr relays add wss://...` | Add a relay |
-| `nostr relays rm [url\|number]` | Remove a relay |
+| `nostr relays rm [url\|domain\|number]` | Remove a relay (asks for confirmation) |
 | `nostr sync` | Sync local events with relays (interactive) |
 | `nostr sync --relay <url\|domain>` | Sync with a specific relay |
 | `nostr sync --json` | Sync and output results as JSON |

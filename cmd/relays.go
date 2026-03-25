@@ -20,6 +20,7 @@ import (
 var (
 	relaysJSONFlag  bool
 	relaysRelayFlag string
+	relaysYesFlag   bool
 )
 
 var relaysCmd = &cobra.Command{
@@ -46,6 +47,7 @@ var relaysRmCmd = &cobra.Command{
 func init() {
 	relaysCmd.Flags().BoolVar(&relaysJSONFlag, "json", false, "Output as JSON with connection status and ping")
 	relaysCmd.Flags().StringVar(&relaysRelayFlag, "relay", "", "Show a specific relay only (full URL or domain)")
+	relaysRmCmd.Flags().BoolVarP(&relaysYesFlag, "yes", "y", false, "Skip confirmation")
 	relaysCmd.AddCommand(relaysAddCmd)
 	relaysCmd.AddCommand(relaysRmCmd)
 	rootCmd.AddCommand(relaysCmd)
@@ -281,9 +283,9 @@ func runRelaysRm(cmd *cobra.Command, args []string) error {
 		}
 		removeIdx = num - 1
 	} else {
-		// Try as URL
+		// Try as URL or domain name
 		for i, r := range relays {
-			if r == input {
+			if r == input || relayHost(r) == input {
 				removeIdx = i
 				break
 			}
@@ -295,11 +297,23 @@ func runRelaysRm(cmd *cobra.Command, args []string) error {
 	}
 
 	removed := relays[removeIdx]
-	relays = append(relays[:removeIdx], relays[removeIdx+1:]...)
 
-	if len(relays) == 0 {
-		color.Yellow("Warning: removing the last relay. You won't be able to publish or fetch.")
+	// Ask for confirmation unless --yes or --json
+	if !relaysYesFlag && !relaysJSONFlag {
+		if len(relays) == 1 {
+			color.Yellow("Warning: this is your last relay. Removing it means you won't be able to publish or fetch.")
+		}
+		fmt.Printf("Remove %s? [y/N] ", removed)
+		var answer string
+		fmt.Scanln(&answer)
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Cancelled.")
+			return nil
+		}
 	}
+
+	relays = append(relays[:removeIdx], relays[removeIdx+1:]...)
 
 	if err := config.SaveRelays(npub, relays); err != nil {
 		return fmt.Errorf("failed to save relays: %w", err)

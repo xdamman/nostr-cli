@@ -119,12 +119,7 @@ func isHex(s string) bool {
 	return true
 }
 
-// LoadAliases reads all global aliases.
-func LoadAliases(_ string) (map[string]string, error) {
-	return config.LoadGlobalAliases()
-}
-
-// SaveAliases writes global aliases.
-func SaveAliases(_ string, aliases map[string]string) error {
-	return config.SaveGlobalAliases(aliases)
+// LoadAliases reads aliases for the given profile.
+func LoadAliases(npub string) (map[string]string, error) {
+	return config.LoadAliases(npub)
 }
