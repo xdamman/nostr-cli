@@ -34,10 +34,17 @@ func TestLLM_Relays_AddRequiresOneArg(t *testing.T) {
 	}
 }
 
-func TestLLM_Relays_RmRequiresOneArg(t *testing.T) {
+func TestLLM_Relays_RmAcceptsOptionalArg(t *testing.T) {
 	cmd := requireCmd(t, "relays", "rm")
 	if cmd.Args == nil {
-		t.Error("relays rm should require exactly 1 argument (<url|number>)")
+		t.Error("relays rm should have an Args validator")
+	}
+	// Should accept 0 args (interactive) or 1 arg (direct)
+	if err := cmd.Args(cmd, []string{}); err != nil {
+		t.Error("relays rm should accept 0 args (interactive mode)")
+	}
+	if err := cmd.Args(cmd, []string{"1"}); err != nil {
+		t.Error("relays rm should accept 1 arg (direct mode)")
 	}
 }
 
