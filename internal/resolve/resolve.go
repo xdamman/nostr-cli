@@ -14,7 +14,7 @@ import (
 
 // Resolve resolves user input to a hex pubkey.
 // Order: alias lookup → npub/hex detection → NIP-05 resolution.
-// npub is the active profile's npub (for legacy compat, not used for alias lookup).
+// npub is the profile whose aliases to search.
 func Resolve(npub string, input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -24,8 +24,8 @@ func Resolve(npub string, input string) (string, error) {
 	// Strip leading @ if present
 	input = strings.TrimPrefix(input, "@")
 
-	// 1. Try global alias lookup
-	if resolved, err := config.ResolveAlias(input); err == nil {
+	// 1. Try alias lookup for the given profile
+	if resolved, err := config.ResolveAliasFor(npub, input); err == nil {
 		return crypto.NpubToHex(resolved)
 	}
 

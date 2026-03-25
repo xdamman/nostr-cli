@@ -41,12 +41,17 @@ func init() {
 }
 
 func runAlias(cmd *cobra.Command, args []string) error {
+	npub, err := config.LoadResolvedProfile(profileFlag)
+	if err != nil {
+		return err
+	}
+
 	green := color.New(color.FgGreen)
 	cyan := color.New(color.FgCyan).SprintFunc()
 
 	if len(args) == 0 {
 		// List aliases
-		aliases, err := config.LoadGlobalAliases()
+		aliases, err := config.LoadAliases(npub)
 		if err != nil {
 			return err
 		}
@@ -83,14 +88,13 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	target := args[1]
 
-	// Resolve target to npub (need active profile for NIP-05 relay lookup)
-	activeNpub, _ := config.ActiveProfile()
-	targetNpub, err := resolve.ResolveToNpub(activeNpub, target)
+	// Resolve target to npub
+	targetNpub, err := resolve.ResolveToNpub(npub, target)
 	if err != nil {
 		return fmt.Errorf("cannot resolve %q: %w", target, err)
 	}
 
-	if err := config.SetGlobalAlias(name, targetNpub); err != nil {
+	if err := config.SetAlias(npub, name, targetNpub); err != nil {
 		return err
 	}
 
@@ -99,10 +103,15 @@ func runAlias(cmd *cobra.Command, args []string) error {
 }
 
 func runAliasRm(cmd *cobra.Command, args []string) error {
+	npub, err := config.LoadResolvedProfile(profileFlag)
+	if err != nil {
+		return err
+	}
+
 	green := color.New(color.FgGreen)
 
 	name := args[0]
-	if err := config.RemoveGlobalAlias(name); err != nil {
+	if err := config.RemoveAlias(npub, name); err != nil {
 		return err
 	}
 

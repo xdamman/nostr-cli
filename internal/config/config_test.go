@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/xdamman/nostr-cli/internal/crypto"
 )
 
 func setupTestDir(t *testing.T) string {
@@ -331,5 +333,67 @@ func TestLoadAliases_Empty(t *testing.T) {
 	}
 	if len(aliases) != 0 {
 		t.Errorf("expected 0 aliases, got %d", len(aliases))
+	}
+}
+
+func TestActiveProfile_NonNpubDir(t *testing.T) {
+	dir := setupTestDir(t)
+
+	// Generate a real keypair
+	nsec, npub, _, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a profile directory with a username instead of npub
+	profDir := filepath.Join(dir, "profiles", "alice")
+	os.MkdirAll(profDir, 0700)
+	os.WriteFile(filepath.Join(profDir, "nsec"), []byte(nsec), 0600)
+
+	// Set active profile pointing to the username dir
+	os.Symlink("profiles/alice", filepath.Join(dir, "active"))
+
+	// ActiveProfile should derive the real npub from the nsec
+	got, err := ActiveProfile()
+	if err != nil {
+		t.Fatalf("ActiveProfile() failed: %v", err)
+	}
+	if got != npub {
+		t.Errorf("ActiveProfile() = %q, want %q", got, npub)
+	}
+}
+
+func TestProfileDir_NonNpubDir(t *testing.T) {
+	dir := setupTestDir(t)
+
+	// Generate a real keypair
+	nsec, npub, _, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create profile directory with a username
+	profDir := filepath.Join(dir, "profiles", "alice")
+	os.MkdirAll(profDir, 0700)
+	os.WriteFile(filepath.Join(profDir, "nsec"), []byte(nsec), 0600)
+	os.WriteFile(filepath.Join(profDir, "aliases.json"),
+		[]byte(`{"bob":"npub1bob00000000000000000000000000000000000000000000000"}`), 0644)
+
+	// ProfileDir with the real npub should find the "alice" directory
+	resolved, err := ProfileDir(npub)
+	if err != nil {
+		t.Fatalf("ProfileDir(%q) failed: %v", npub, err)
+	}
+	if resolved != profDir {
+		t.Errorf("ProfileDir(%q) = %q, want %q", npub, resolved, profDir)
+	}
+
+	// Aliases should be loadable via the real npub
+	aliases, err := LoadAliases(npub)
+	if err != nil {
+		t.Fatalf("LoadAliases(%q) failed: %v", npub, err)
+	}
+	if aliases["bob"] == "" {
+		t.Error("expected to find alias 'bob' via npub lookup")
 	}
 }

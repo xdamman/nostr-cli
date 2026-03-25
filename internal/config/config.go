@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	_ "embed"
+
+	"github.com/xdamman/nostr-cli/internal/crypto"
 )
 
 //go:embed default-relays.json
@@ -35,7 +37,33 @@ func ProfileDir(npub string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "profiles", npub), nil
+	dir := filepath.Join(base, "profiles", npub)
+	if _, err := os.Stat(dir); err == nil {
+		return dir, nil
+	}
+	// If the npub directory doesn't exist, check if this npub matches a
+	// non-npub directory (e.g. "xdamman") by deriving the npub from its nsec.
+	if strings.HasPrefix(npub, "npub1") {
+		entries, err := os.ReadDir(filepath.Join(base, "profiles"))
+		if err != nil {
+			return dir, nil // fall through to original path
+		}
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), "npub1") {
+				continue
+			}
+			candidate := filepath.Join(base, "profiles", e.Name())
+			data, err := os.ReadFile(filepath.Join(candidate, "nsec"))
+			if err != nil {
+				continue
+			}
+			derivedNpub, _, _, err := crypto.NsecToKeys(strings.TrimSpace(string(data)))
+			if err == nil && derivedNpub == npub {
+				return candidate, nil
+			}
+		}
+	}
+	return dir, nil
 }
 
 // ActiveProfile reads the active profile npub from the ~/.nostr/active symlink target.
@@ -58,8 +86,22 @@ func ActiveProfile() (string, error) {
 		// No symlink and no file — try to auto-resolve
 		return autoResolveProfile(base)
 	}
-	// The symlink target is "profiles/<npub>", extract the npub
-	return filepath.Base(target), nil
+	// The symlink target is "profiles/<name>", extract the name
+	name := filepath.Base(target)
+	if strings.HasPrefix(name, "npub1") {
+		return name, nil
+	}
+	// Non-npub directory name (e.g. username) — derive npub from nsec
+	dir := filepath.Join(base, target)
+	data, err := os.ReadFile(filepath.Join(dir, "nsec"))
+	if err != nil {
+		return "", fmt.Errorf("cannot determine npub for profile %q: %w", name, err)
+	}
+	npub, _, _, err := crypto.NsecToKeys(strings.TrimSpace(string(data)))
+	if err != nil {
+		return "", fmt.Errorf("invalid nsec in profile %q: %w", name, err)
+	}
+	return npub, nil
 }
 
 // autoResolveProfile finds available profiles and either auto-selects or returns a helpful error.
