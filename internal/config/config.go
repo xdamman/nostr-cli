@@ -41,10 +41,24 @@ func ProfileDir(npub string) (string, error) {
 	if _, err := os.Stat(dir); err == nil {
 		return dir, nil
 	}
-	// Directory doesn't exist by npub name — check if the active symlink
-	// points to a directory for this npub (e.g. named "xdamman" instead of the npub).
-	if activeDir, err := ActiveProfileDir(); err == nil {
-		return activeDir, nil
+	// Directory doesn't exist by npub name — scan non-npub directories
+	// and match by deriving the npub from their nsec file.
+	if strings.HasPrefix(npub, "npub1") {
+		entries, _ := os.ReadDir(filepath.Join(base, "profiles"))
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), "npub1") {
+				continue
+			}
+			candidate := filepath.Join(base, "profiles", e.Name())
+			data, err := os.ReadFile(filepath.Join(candidate, "nsec"))
+			if err != nil {
+				continue
+			}
+			derivedNpub, _, _, err := crypto.NsecToKeys(strings.TrimSpace(string(data)))
+			if err == nil && derivedNpub == npub {
+				return candidate, nil
+			}
+		}
 	}
 	return dir, nil
 }
@@ -618,11 +632,26 @@ func resolveByUsername(username string) (string, error) {
 	}
 	lower := strings.ToLower(username)
 	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), "npub1") {
+		if !e.IsDir() {
 			continue
 		}
-		npub := e.Name()
-		dir := filepath.Join(profilesDir, npub)
+		dir := filepath.Join(profilesDir, e.Name())
+
+		// For non-npub directories, also check if the directory name matches
+		if !strings.HasPrefix(e.Name(), "npub1") && strings.ToLower(e.Name()) == lower {
+			// Derive npub from nsec
+			data, err := os.ReadFile(filepath.Join(dir, "nsec"))
+			if err != nil {
+				continue
+			}
+			npub, _, _, err := crypto.NsecToKeys(strings.TrimSpace(string(data)))
+			if err == nil {
+				return npub, nil
+			}
+			continue
+		}
+
+		// Check profile.json metadata for name/display_name match
 		data, err := os.ReadFile(filepath.Join(dir, "profile.json"))
 		if err != nil {
 			data, err = os.ReadFile(filepath.Join(dir, "cache", "profile.json"))
@@ -638,7 +667,18 @@ func resolveByUsername(username string) (string, error) {
 			continue
 		}
 		if strings.ToLower(meta.Name) == lower || strings.ToLower(meta.DisplayName) == lower {
-			return npub, nil
+			if strings.HasPrefix(e.Name(), "npub1") {
+				return e.Name(), nil
+			}
+			// Non-npub dir matched by metadata — derive npub
+			nsecData, err := os.ReadFile(filepath.Join(dir, "nsec"))
+			if err != nil {
+				continue
+			}
+			npub, _, _, err := crypto.NsecToKeys(strings.TrimSpace(string(nsecData)))
+			if err == nil {
+				return npub, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("no profile found with username %q", username)
