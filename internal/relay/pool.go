@@ -178,6 +178,8 @@ type FetchResult struct {
 
 // FetchEventsPerRelay fetches events from each relay independently and sends
 // per-relay results to the returned channel as each completes.
+// When the filter has no Limit set (Limit == 0 and LimitZero == false),
+// it paginates automatically to fetch all matching events from each relay.
 func FetchEventsPerRelay(ctx context.Context, filter nostr.Filter, relayURLs []string, timeout time.Duration) <-chan FetchResult {
 	if timeout <= 0 {
 		timeout = FetchTimeout
@@ -185,28 +187,41 @@ func FetchEventsPerRelay(ctx context.Context, filter nostr.Filter, relayURLs []s
 	ch := make(chan FetchResult, len(relayURLs))
 	var wg sync.WaitGroup
 
+	paginate := filter.Limit == 0 && !filter.LimitZero
+
 	for _, u := range relayURLs {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
 			start := time.Now()
 
-			fetchCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			r, err := nostr.RelayConnect(fetchCtx, u)
+			connCtx, connCancel := context.WithTimeout(ctx, timeout)
+			r, err := nostr.RelayConnect(connCtx, u)
+			connCancel()
 			if err != nil {
 				ch <- FetchResult{URL: u, Err: fmt.Errorf("connect: %w", err), Duration: time.Since(start)}
 				return
 			}
 			defer r.Close()
 
-			events, err := r.QuerySync(fetchCtx, filter)
+			if !paginate {
+				queryCtx, queryCancel := context.WithTimeout(ctx, timeout)
+				defer queryCancel()
+				events, err := r.QuerySync(queryCtx, filter)
+				if err != nil {
+					ch <- FetchResult{URL: u, Err: fmt.Errorf("query: %w", err), Duration: time.Since(start)}
+					return
+				}
+				ch <- FetchResult{URL: u, Events: events, Duration: time.Since(start)}
+				return
+			}
+
+			// No limit: paginate to fetch all events (timeout applies per page)
+			events, err := fetchAllPaginated(ctx, r, filter, timeout)
 			if err != nil {
 				ch <- FetchResult{URL: u, Err: fmt.Errorf("query: %w", err), Duration: time.Since(start)}
 				return
 			}
-
 			ch <- FetchResult{URL: u, Events: events, Duration: time.Since(start)}
 		}(u)
 	}
@@ -217,6 +232,57 @@ func FetchEventsPerRelay(ctx context.Context, filter nostr.Filter, relayURLs []s
 	}()
 
 	return ch
+}
+
+// fetchAllPaginated fetches all events matching the filter by paginating
+// backwards in time using the `until` field. Each page requests up to 500
+// events; pagination stops when a page returns fewer than the page size.
+// The pageTimeout is applied per page query, not to the entire operation.
+func fetchAllPaginated(ctx context.Context, r *nostr.Relay, base nostr.Filter, pageTimeout time.Duration) ([]*nostr.Event, error) {
+	const pageSize = 500
+	var all []*nostr.Event
+	seen := make(map[string]bool)
+
+	page := base
+	page.Limit = pageSize
+
+	for {
+		pageCtx, pageCancel := context.WithTimeout(ctx, pageTimeout)
+		batch, err := r.QuerySync(pageCtx, page)
+		pageCancel()
+		if err != nil {
+			if len(all) > 0 {
+				// Return what we have so far
+				return all, nil
+			}
+			return nil, err
+		}
+
+		newCount := 0
+		var oldest nostr.Timestamp
+		for _, ev := range batch {
+			if seen[ev.ID] {
+				continue
+			}
+			seen[ev.ID] = true
+			all = append(all, ev)
+			newCount++
+			if oldest == 0 || ev.CreatedAt < oldest {
+				oldest = ev.CreatedAt
+			}
+		}
+
+		// Stop if we got fewer new events than page size (no more pages)
+		if newCount < pageSize {
+			break
+		}
+
+		// Next page: fetch events older than the oldest we've seen
+		until := oldest - 1
+		page.Until = &until
+	}
+
+	return all, nil
 }
 
 // FetchEvents fetches all events matching the filter from relays (deduplicated by ID).
