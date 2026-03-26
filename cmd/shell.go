@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
@@ -51,40 +50,6 @@ var slashCommands = []slashCmd{
 var shellPromptName string
 var shellRelayCount int
 
-// shellHintOverride, when non-empty, replaces the default hint text.
-// Used by background goroutines (e.g. publish progress) to show status.
-var shellHintOverride string
-var shellHintMu sync.Mutex
-
-// setShellHint sets the hint override and redraws the hint line.
-// Pass "" to clear the override and revert to the default hint.
-// Safe to call from any goroutine while readShellLine is running.
-func setShellHint(hint string) {
-	shellHintMu.Lock()
-	shellHintOverride = hint
-	shellHintMu.Unlock()
-
-	// Only redraw if stdout is a terminal (ANSI escape codes)
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return
-	}
-
-	dim := color.New(color.Faint)
-	var text string
-	if hint != "" {
-		text = "  " + hint
-	} else {
-		text = defaultHintText(nil, shellRelayCount)
-	}
-	// Move to hint line (1 below prompt), clear and rewrite, move back
-	fmt.Print("\0337")          // save cursor
-	fmt.Print("\033[B\r\033[K") // move down, clear line
-	if text != "" {
-		dim.Print(text)
-	}
-	fmt.Print("\0338") // restore cursor
-}
-
 // formatPrompt prints "name> " in green and returns the visible length.
 func formatPrompt(name string) int {
 	color.New(color.FgGreen).Print(name)
@@ -121,9 +86,6 @@ func runShell() error {
 	feedNameWidth = 0
 	feedNameWidthMu.Unlock()
 
-	cyan := color.New(color.FgCyan)
-	dim := color.New(color.Faint)
-
 	myHex, err := crypto.NpubToHex(npub)
 	if err != nil {
 		return err
@@ -140,7 +102,6 @@ func runShell() error {
 
 	// Resolve own username for prompt
 	shellPromptName = resolveAuthorName(myHex)
-	// Try cached profile metadata if resolveAuthorName returned truncated npub
 	if meta, _ := profile.LoadCached(npub); meta != nil {
 		if meta.Name != "" {
 			shellPromptName = meta.Name
@@ -149,27 +110,13 @@ func runShell() error {
 		}
 	}
 
-	// Display cached feed immediately (no relay needed)
-	cachedEvents, _ := cache.LoadFeed(npub, 20)
-	if len(cachedEvents) > 0 {
-		printFeedEvents(cachedEvents, dim, cyan)
-	}
-
 	// Preload feed seen set so FeedSeenID works without re-reading disk
 	cache.LoadFeedSeen(npub)
 
 	// Start background profile fetcher
 	startProfileFetcher(npub, relays)
 
-	// Mutex for all terminal output from background goroutines
-	var printMu sync.Mutex
-
-	// Shared followed hexes (updated when contact list arrives)
-	var followMu sync.Mutex
-	var followedHexes []string
-	followReady := make(chan struct{})
-
-	// Load secret key for signing events in the main loop
+	// Load secret key for signing events
 	nsec, err := config.LoadNsec(npub)
 	if err != nil {
 		return err
@@ -179,48 +126,28 @@ func runShell() error {
 		return err
 	}
 
+	// Create the Bubble Tea model
+	m := newShellModel(npub, myHex, skHex, relays, shellPromptName)
+
+	// Load cached feed into model
+	cachedEvents, _ := cache.LoadFeed(npub, 20)
+	for _, ev := range cachedEvents {
+		queueProfileFetch(ev.PubKey)
+		line := sprintFeedEvent(ev, myHex, shellPromptName, 80)
+		m.feedLines = append(m.feedLines, line)
+	}
+
+	// Create the Bubble Tea program with alt screen
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	shellProgram = p
+
 	shellCtx, shellCancel := context.WithCancel(context.Background())
 	defer shellCancel()
 
-
-	// printFeedEventRaw prints a single event in the feed area (raw terminal mode).
-	// If dimmed is true, the entire line is printed in faint style.
-	// Caller must hold printMu.
-	printFeedEventRaw := func(ev nostr.Event, dimmed bool) {
-		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
-		name := resolveAuthorName(ev.PubKey)
-		// Use shellPromptName for our own events if cache missed
-		if ev.PubKey == myHex && name != shellPromptName && shellPromptName != "" {
-			name = shellPromptName
-		}
-		nw := updateFeedNameWidth(name)
-		prefixLen := 14 + 2 + nw + 2
-		content := wrapNoteRaw(ev.Content, prefixLen)
-		fmt.Print("\r\033[K")
-		if dimmed {
-			dim.Printf("%s  %-*s: %s\r\n", ts, nw, name, content)
-		} else {
-			dim.Printf("%s  ", ts)
-			cyan.Printf("%-*s: ", nw, name)
-			fmt.Printf("%s\r\n", content)
-		}
-	}
-
-	// printNewEvent deduplicates, caches, and prints a new feed event.
-	// Returns true if the event was new and printed.
-	printNewEvent := func(ev nostr.Event) bool {
-		if cache.FeedSeenID(npub, ev.ID) {
-			return false
-		}
-		_ = cache.LogFeedEvent(npub, ev)
-		queueProfileFetch(ev.PubKey)
-		printMu.Lock()
-		printFeedEventRaw(ev, false)
-		fmt.Print("\r")
-		formatPrompt(shellPromptName)
-		printMu.Unlock()
-		return true
-	}
+	// Shared followed hexes (updated when contact list arrives)
+	var followMu sync.Mutex
+	var followedHexes []string
+	followReady := make(chan struct{})
 
 	// Fetch contact list and new feed events in background
 	go func() {
@@ -242,24 +169,17 @@ func runShell() error {
 		copy(hexes, followedHexes)
 		followMu.Unlock()
 
-		// Cache the following list
 		_ = cache.SaveFollowing(npub, hexes)
 
-		// Queue profile fetches for all followed users
 		for _, hex := range hexes {
 			queueProfileFetch(hex)
 		}
 
+		p.Send(followReadyMsg{Hexes: hexes})
+
 		if len(hexes) == 0 {
 			if len(cachedEvents) == 0 {
-				printMu.Lock()
-				fmt.Print("\r\033[K")
-				dim.Print("You're not following anyone yet.\r\n")
-				dim.Print("  Use /follow <npub|alias|nip05> to follow someone.\r\n")
-				fmt.Print("\r\n")
-				fmt.Print("\r")
-				formatPrompt(shellPromptName)
-				printMu.Unlock()
+				p.Send(infoMsg{Text: "You're not following anyone yet.\n  Use /follow <npub|alias|nip05> to follow someone."})
 			}
 			return
 		}
@@ -275,15 +195,13 @@ func runShell() error {
 			return
 		}
 
-		// Collect only genuinely new events
-		var newEvents []*nostr.Event
+		var newEvents []nostr.Event
 		for _, ev := range fetched {
 			if !cache.FeedSeenID(npub, ev.ID) {
-				newEvents = append(newEvents, ev)
+				newEvents = append(newEvents, *ev)
 			}
 		}
 
-		// Cache all fetched (LogFeedEvents deduplicates internally)
 		cache.LogFeedEvents(npub, fetched)
 
 		if len(newEvents) == 0 {
@@ -296,20 +214,9 @@ func runShell() error {
 
 		for _, ev := range newEvents {
 			queueProfileFetch(ev.PubKey)
-			printMu.Lock()
-			ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
-			name := resolveAuthorName(ev.PubKey)
-			nw := updateFeedNameWidth(name)
-			prefixLen := 14 + 2 + nw + 2
-			content := wrapNoteRaw(ev.Content, prefixLen)
-			fmt.Print("\r\033[K")
-			dim.Printf("%s  ", ts)
-			cyan.Printf("%-*s: ", nw, name)
-			fmt.Printf("%s\r\n", content)
-			fmt.Print("\r")
-			formatPrompt(shellPromptName)
-			printMu.Unlock()
 		}
+
+		p.Send(batchEventsMsg{Events: newEvents})
 	}()
 
 	// Connect relays and subscribe to real-time events
@@ -324,7 +231,6 @@ func runShell() error {
 			}
 			defer relay.Close()
 
-			// Wait for follow list to be available
 			select {
 			case <-shellCtx.Done():
 				return
@@ -364,123 +270,25 @@ func runShell() error {
 					if !ok {
 						return
 					}
-					printNewEvent(*ev)
+					if !cache.FeedSeenID(npub, ev.ID) {
+						_ = cache.LogFeedEvent(npub, *ev)
+						queueProfileFetch(ev.PubKey)
+						p.Send(newEventMsg{Event: *ev})
+					}
 				}
 			}
 		}(url)
 	}
 
-	// Handle Ctrl+C
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Println()
-		shellCancel()
-		os.Exit(0)
-	}()
-
-	// Async post status channel
-	statusCh := make(chan string, 16)
-
-	// Interactive loop
-	for {
-		// Drain pending statuses
-		drainShellStatus(statusCh)
-
-		line, err := readShellLine()
-		if err != nil {
-			break
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		if strings.HasPrefix(line, "/") {
-			executeSlashCommand(npub, myHex, line, relays, statusCh)
-		} else {
-			// Create and sign event synchronously
-			event := nostr.Event{
-				PubKey:    myHex,
-				CreatedAt: nostr.Now(),
-				Kind:      nostr.KindTextNote,
-				Tags:      nostr.Tags{},
-				Content:   line,
-			}
-			if signErr := event.Sign(skHex); signErr != nil {
-				color.Red("✗ sign failed: %v", signErr)
-				continue
-			}
-
-			// Show event in feed immediately and mark as seen
-			// so it won't print again when it arrives from relay subscriptions
-			_ = cache.LogFeedEvent(npub, event)
-			_ = cache.LogSentEvent(npub, event)
-			printMu.Lock()
-			printFeedEventRaw(event, false)
-			fmt.Print("\r")
-			printMu.Unlock()
-
-			// Publish with per-relay progress — updates the hint in real time
-			total := len(relays)
-			timeout := time.Duration(timeoutFlag) * time.Millisecond
-			pubCh := internalRelay.PublishEventWithProgress(context.Background(), event, relays, timeout)
-
-			go func() {
-				confirmed := 0
-				for res := range pubCh {
-					if res.OK {
-						confirmed++
-					}
-					setShellHint(fmt.Sprintf("Posting... (%d/%d relays)", confirmed, total))
-				}
-				setShellHint("")
-			}()
-		}
+	// Run the Bubble Tea program (blocks until quit)
+	if _, err := p.Run(); err != nil {
+		return err
 	}
-
+	shellCancel()
 	return nil
 }
 
 
-func printFeedEvents(events []nostr.Event, dim, cyan *color.Color) int {
-	if len(events) == 0 {
-		return 0
-	}
-
-	// Compute name column width and seed the global feedNameWidth
-	nameWidth := 3
-	for _, ev := range events {
-		name := resolveAuthorName(ev.PubKey)
-		if len(name) > nameWidth {
-			nameWidth = len(name)
-		}
-	}
-	feedNameWidthMu.Lock()
-	if nameWidth > feedNameWidth {
-		feedNameWidth = nameWidth
-	}
-	feedNameWidthMu.Unlock()
-
-	fmt.Println()
-	lines := 1
-	for _, ev := range events {
-		queueProfileFetch(ev.PubKey)
-		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
-		name := resolveAuthorName(ev.PubKey)
-		// Prefix: "03/20 14:19:32  Name: " — timestamp(14) + 2 spaces + name(padded) + ": "
-		prefixLen := 14 + 2 + nameWidth + 2
-		content := wrapNote(ev.Content, prefixLen)
-		dim.Printf("%s  ", ts)
-		cyan.Printf("%-*s: ", nameWidth, name)
-		fmt.Printf("%s\n", content)
-		lines++
-	}
-	fmt.Println()
-	lines++
-	return lines
-}
 
 func resolveAuthorName(pubHex string) string {
 	// Fast path: in-memory profile cache
@@ -1035,41 +843,24 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			}
 			return
 		}
-		// Interactive selection
-		selected := 0
-		for i, e := range entries {
+		// List available profiles
+		cyanFn := color.New(color.FgCyan).SprintFunc()
+		dimFn := color.New(color.Faint).SprintFunc()
+		fmt.Println("Available profiles (use /switch <name> to switch):")
+		for _, e := range entries {
+			active := ""
 			if e.npub == npub {
-				selected = i
-				break
+				active = " (active)"
 			}
-		}
-		chosen := shellInteractiveSelect(entries, selected)
-		if chosen < 0 {
-			return
-		}
-		target := entries[chosen]
-		if target.npub == npub {
-			fmt.Println("Already on this profile.")
-			return
-		}
-		if err := config.SetActiveProfile(target.npub); err != nil {
-			color.Red("Error: %v", err)
-			return
-		}
-		// Update shell prompt name
-		newNpub := target.npub
-		newHex, _ := crypto.NpubToHex(newNpub)
-		if name := cache.ResolveNameByHex(newHex); name != "" {
-			shellPromptName = name
-		} else if meta, _ := profile.LoadCached(newNpub); meta != nil && meta.Name != "" {
-			shellPromptName = meta.Name
-		} else {
-			shellPromptName = newNpub[:16] + "..."
-		}
-		if target.name != "" {
-			color.New(color.FgGreen).Printf("Switched to %s (%s)\n", target.name, target.npub)
-		} else {
-			color.New(color.FgGreen).Printf("Switched to %s\n", target.npub)
+			if e.name != "" {
+				short := e.npub
+				if len(short) > 20 {
+					short = short[:20] + "..."
+				}
+				fmt.Printf("  %s %s%s\n", cyanFn(e.name), dimFn(short), active)
+			} else {
+				fmt.Printf("  %s%s\n", e.npub, active)
+			}
 		}
 
 	case "alias":
@@ -1166,153 +957,7 @@ func mergeWithDefaults(relays []string) []string {
 	return merged
 }
 
-func drainShellStatus(ch <-chan string) {
-	for {
-		select {
-		case status := <-ch:
-			fmt.Println(status)
-		default:
-			return
-		}
-	}
-}
-
-// --- Raw terminal prompt with slash command autocomplete ---
-
-func readShellLine() (string, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		// Fallback for non-TTY
-		var line string
-		formatPrompt(shellPromptName)
-		_, err := fmt.Scanln(&line)
-		return line, err
-	}
-
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		// Fallback
-		var line string
-		formatPrompt(shellPromptName)
-		_, err := fmt.Scanln(&line)
-		return line, err
-	}
-	defer term.Restore(fd, oldState)
-
-	var buf []byte
-	selected := 0
-	showMenu := false
-	prevMenuSize := 0
-
-	renderPrompt(buf, showMenu, selected, prevMenuSize, shellRelayCount)
-
-	b := make([]byte, 3)
-	for {
-		n, err := os.Stdin.Read(b)
-		if err != nil {
-			return "", err
-		}
-
-		if n == 1 {
-			switch b[0] {
-			case 3: // Ctrl-C
-				clearMenu(prevMenuSize)
-				fmt.Print("\r\n")
-				return "", fmt.Errorf("interrupted")
-
-			case 4: // Ctrl-D
-				clearMenu(prevMenuSize)
-				fmt.Print("\r\n")
-				return "", fmt.Errorf("exit")
-
-			case 13: // Enter
-				if showMenu {
-					cmds := filterCommands(buf)
-					if selected >= 0 && selected < len(cmds) {
-						buf = []byte("/" + cmds[selected].name + " ")
-						showMenu = false
-						renderPrompt(buf, showMenu, selected, prevMenuSize, shellRelayCount)
-						prevMenuSize = 1 // hint line
-						continue
-					}
-				}
-				clearMenu(prevMenuSize)
-				fmt.Print("\r\n")
-				return string(buf), nil
-
-			case 9: // Tab
-				if showMenu {
-					cmds := filterCommands(buf)
-					if selected >= 0 && selected < len(cmds) {
-						buf = []byte("/" + cmds[selected].name + " ")
-						showMenu = false
-					}
-				}
-
-			case 127, 8: // Backspace
-				if len(buf) > 0 {
-					buf = buf[:len(buf)-1]
-				}
-				if len(buf) == 0 {
-					showMenu = false
-				} else if buf[0] == '/' && !strings.Contains(string(buf), " ") {
-					showMenu = true
-					selected = 0
-				} else {
-					showMenu = false
-				}
-
-			default:
-				if b[0] >= 32 { // printable
-					buf = append(buf, b[0])
-					if len(buf) == 1 && buf[0] == '/' {
-						showMenu = true
-						selected = 0
-					} else if len(buf) > 1 && buf[0] == '/' && strings.Contains(string(buf), " ") {
-						showMenu = false
-					} else if showMenu {
-						// Re-filter, reset selection
-						cmds := filterCommands(buf)
-						if selected >= len(cmds) {
-							selected = 0
-						}
-					}
-				}
-			}
-		}
-
-		if n == 3 && b[0] == 27 && b[1] == '[' {
-			if showMenu {
-				cmds := filterCommands(buf)
-				switch b[2] {
-				case 'A': // Up
-					if selected > 0 {
-						selected--
-					}
-				case 'B': // Down
-					if selected < len(cmds)-1 {
-						selected++
-					}
-				}
-			}
-		}
-
-		// Handle bare Escape (n==1, b[0]==27) — cancel menu
-		if n == 1 && b[0] == 27 {
-			showMenu = false
-		}
-
-		cmds := filterCommands(buf)
-		if showMenu && len(cmds) == 0 {
-			showMenu = false
-		}
-
-		newMenuSize := hintLinesForInput(buf, showMenu, cmds, shellRelayCount)
-		renderPrompt(buf, showMenu, selected, prevMenuSize, shellRelayCount)
-		prevMenuSize = newMenuSize
-	}
-}
-
+// filterCommands returns slash commands matching the current input prefix.
 func filterCommands(buf []byte) []slashCmd {
 	if len(buf) == 0 || buf[0] != '/' {
 		return nil
@@ -1328,251 +973,4 @@ func filterCommands(buf []byte) []slashCmd {
 		}
 	}
 	return result
-}
-
-func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, totalRelays int) {
-	dim := color.New(color.Faint)
-	cyan := color.New(color.FgCyan)
-
-	// Clear the prompt line and any previous menu lines below
-	fmt.Print("\r\033[K") // clear current line
-	if prevMenuSize > 0 {
-		for i := 0; i < prevMenuSize; i++ {
-			fmt.Print("\r\n\033[K") // move down and clear
-		}
-		// Move back up
-		fmt.Printf("\033[%dA", prevMenuSize)
-	}
-
-	// Draw prompt
-	promptPrefixLen := formatPrompt(shellPromptName)
-	fmt.Print(string(buf))
-
-	if showMenu {
-		cmds := filterCommands(buf)
-		for i, cmd := range cmds {
-			fmt.Print("\r\n\033[K")
-			if i == selected {
-				fmt.Print("  ")
-				cyan.Printf("> %-12s", cmd.name)
-				dim.Printf(" %s", cmd.desc)
-			} else {
-				fmt.Print("    ")
-				dim.Printf("%-12s %s", cmd.name, cmd.desc)
-			}
-		}
-		// Move cursor back to prompt line
-		if len(cmds) > 0 {
-			fmt.Printf("\033[%dA", len(cmds))
-		}
-	} else {
-		// Show hint below prompt
-		hint := hintTextForInput(buf, totalRelays)
-		hintLines := hintLineCount(hint, termWidth())
-		if hintLines == 0 {
-			hintLines = 1
-		}
-		fmt.Print("\r\n\033[K")
-		if hint != "" {
-			dim.Print(hint)
-		}
-		// Clear any extra lines from previous render that extend beyond current hint
-		if prevMenuSize > hintLines {
-			for i := 0; i < prevMenuSize-hintLines; i++ {
-				fmt.Print("\r\n\033[K")
-			}
-			// Move back up to end of hint
-			fmt.Printf("\033[%dA", prevMenuSize-hintLines)
-		}
-		// Move cursor back to prompt line (up past all hint lines)
-		fmt.Printf("\033[%dA", hintLines)
-	}
-
-	// Position cursor at end of input on prompt line
-	fmt.Printf("\r\033[%dC", promptPrefixLen+len(buf))
-}
-
-// shellInteractiveSelect shows an interactive profile picker using arrow keys.
-// Returns the chosen index, or -1 if cancelled.
-func shellInteractiveSelect(entries []profileEntry, selected int) int {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		// Non-TTY fallback: just list them
-		cyanFn := color.New(color.FgCyan).SprintFunc()
-		dimFn := color.New(color.Faint).SprintFunc()
-		for _, e := range entries {
-			if e.name != "" {
-				fmt.Printf("  %s %s\n", cyanFn(e.name), dimFn(e.npub[:20]+"..."))
-			} else {
-				fmt.Printf("  %s\n", e.npub)
-			}
-		}
-		return -1
-	}
-
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return -1
-	}
-	defer term.Restore(fd, oldState)
-
-	cyan := color.New(color.FgCyan).SprintFunc()
-	dim := color.New(color.Faint).SprintFunc()
-	activeNpub, _ := config.ActiveProfile()
-
-	render := func() {
-		fmt.Print("\r\033[J") // clear from cursor to end of screen
-		fmt.Print("Select a profile (↑↓ to move, enter to select, q to cancel):\r\n\r\n")
-		for i, e := range entries {
-			label := e.npub
-			short := e.npub
-			if len(short) > 20 {
-				short = short[:20] + "..."
-			}
-			if e.name != "" {
-				label = fmt.Sprintf("%s (%s)", cyan(e.name), short)
-			}
-			active := ""
-			if e.npub == activeNpub {
-				active = " (active)"
-			}
-			if i == selected {
-				fmt.Printf("  > %s%s\r\n", label, active)
-			} else {
-				if e.name != "" {
-					fmt.Printf("    %s\r\n", dim(fmt.Sprintf("%s (%s)%s", e.name, short, active)))
-				} else {
-					fmt.Printf("    %s\r\n", dim(fmt.Sprintf("%s%s", e.npub, active)))
-				}
-			}
-		}
-	}
-
-	render()
-
-	b := make([]byte, 1)
-	for {
-		if _, err := os.Stdin.Read(b); err != nil {
-			return -1
-		}
-
-		switch b[0] {
-		case 13: // enter
-			fmt.Print("\r\033[J")
-			return selected
-		case 'q', 3: // q or Ctrl-C
-			fmt.Print("\r\033[J")
-			return -1
-		case 27: // ESC — could be arrow key or bare Esc
-			// Read next two bytes to check for arrow sequence
-			seq := make([]byte, 2)
-			n, _ := os.Stdin.Read(seq)
-			if n == 2 && seq[0] == '[' {
-				switch seq[1] {
-				case 'A': // up arrow
-					if selected > 0 {
-						selected--
-					}
-				case 'B': // down arrow
-					if selected < len(entries)-1 {
-						selected++
-					}
-				}
-			} else if n == 1 && seq[0] == '[' {
-				// Got '[', read one more for the letter
-				if _, err := os.Stdin.Read(seq[:1]); err == nil {
-					switch seq[0] {
-					case 'A':
-						if selected > 0 {
-							selected--
-						}
-					case 'B':
-						if selected < len(entries)-1 {
-							selected++
-						}
-					}
-				}
-			} else {
-				// Bare Esc
-				fmt.Print("\r\033[J")
-				return -1
-			}
-		case 'k': // vim up
-			if selected > 0 {
-				selected--
-			}
-		case 'j': // vim down
-			if selected < len(entries)-1 {
-				selected++
-			}
-		}
-
-		// Re-render: move cursor up to overwrite
-		lines := len(entries) + 2 // header + blank + entries
-		fmt.Printf("\033[%dA", lines)
-		render()
-	}
-}
-
-func clearMenu(menuSize int) {
-	if menuSize > 0 {
-		for i := 0; i < menuSize; i++ {
-			fmt.Print("\r\n\033[K")
-		}
-		fmt.Printf("\033[%dA", menuSize)
-	}
-}
-
-// hintLineCount returns the number of terminal lines a hint string occupies,
-// accounting for wrapping at the given terminal width.
-func hintLineCount(hint string, tw int) int {
-	if hint == "" || tw <= 0 {
-		return 0
-	}
-	n := len(hint)
-	return (n + tw - 1) / tw
-}
-
-// hintTextForInput returns the hint text that would be shown below the prompt
-// for the given input buffer state. If shellHintOverride is set, it takes priority.
-func hintTextForInput(buf []byte, totalRelays int) string {
-	shellHintMu.Lock()
-	override := shellHintOverride
-	shellHintMu.Unlock()
-	if override != "" {
-		return "  " + override
-	}
-	if len(buf) == 0 {
-		return fmt.Sprintf("  type / for commands, enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
-	}
-	if buf[0] != '/' {
-		return fmt.Sprintf("  enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
-	}
-	return ""
-}
-
-// defaultHintText returns the default hint (ignoring override) for a given input state.
-func defaultHintText(buf []byte, totalRelays int) string {
-	if len(buf) == 0 {
-		return fmt.Sprintf("  type / for commands, enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
-	}
-	if buf[0] != '/' {
-		return fmt.Sprintf("  enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
-	}
-	return ""
-}
-
-// hintLinesForInput returns the number of terminal lines occupied by the hint
-// or menu below the prompt.
-func hintLinesForInput(buf []byte, showMenu bool, cmds []slashCmd, totalRelays int) int {
-	if showMenu {
-		return len(cmds)
-	}
-	hint := hintTextForInput(buf, totalRelays)
-	tw := termWidth()
-	lines := hintLineCount(hint, tw)
-	if lines == 0 {
-		return 1 // at minimum reserve 1 line for the hint area
-	}
-	return lines
 }
