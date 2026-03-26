@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
@@ -71,7 +71,7 @@ type shellModel struct {
 	height    int
 
 	// Input
-	input    textarea.Model
+	input    textinput.Model
 	showMenu bool
 	menuSel  int
 
@@ -86,23 +86,14 @@ type shellModel struct {
 }
 
 func newShellModel(npub, myHex, skHex string, relays []string, promptName string) shellModel {
-	ta := textarea.New()
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.Prompt = greenStyle.Render(promptName) + "> "
-	ta.ShowLineNumbers = false
-	ta.SetHeight(1) // start as single line, grows with content
-	ta.MaxHeight = 10
-	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter submits, not newline
-
-	// Remove default borders/padding so it looks like a simple prompt
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Base = lipgloss.NewStyle()
-	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	ta.BlurredStyle.Base = lipgloss.NewStyle()
+	ti := textinput.New()
+	ti.Focus()
+	ti.CharLimit = 0 // no limit
+	ti.Prompt = greenStyle.Render(promptName) + "> "
+	ti.Width = 0 // will be set on WindowSizeMsg
 
 	return shellModel{
-		input:      ta,
+		input:      ti,
 		npub:       npub,
 		myHex:      myHex,
 		skHex:      skHex,
@@ -112,7 +103,7 @@ func newShellModel(npub, myHex, skHex string, relays []string, promptName string
 }
 
 func (m shellModel) Init() tea.Cmd {
-	return textarea.Blink
+	return textinput.Blink
 }
 
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -121,7 +112,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.SetWidth(msg.Width)
+		m.input.Width = msg.Width - len(m.promptName) - 3 // "name> " + margin
 		return m, nil
 
 	case tea.KeyMsg:
@@ -170,7 +161,6 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		line := strings.TrimSpace(m.input.Value())
 		m.input.Reset()
-		m.input.SetHeight(1)
 
 		if line == "" {
 			return m, nil
@@ -246,12 +236,9 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Let textarea handle the key
+	// Let textinput handle the key
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-
-	// Auto-grow/shrink textarea height based on content lines
-	m.resizeInput()
 
 	// Check if we should show/hide slash menu
 	val := m.input.Value()
@@ -266,19 +253,6 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, cmd
-}
-
-// resizeInput adjusts the textarea height to fit its content (1..MaxHeight).
-func (m *shellModel) resizeInput() {
-	lines := m.input.LineCount()
-	if lines < 1 {
-		lines = 1
-	}
-	max := m.input.MaxHeight
-	if max > 0 && lines > max {
-		lines = max
-	}
-	m.input.SetHeight(lines)
 }
 
 // appendFeed adds a line to the feed buffer and caps at maxFeedLines.
@@ -299,17 +273,15 @@ func (m shellModel) View() string {
 		return "Loading..."
 	}
 
-	// Layout: feed | menu | input (wrapping) | status bar
+	// Layout: feed area | status line | input line
+	// If menu is shown, it sits between status and input
 	menuLines := m.renderMenu()
 	menuHeight := len(menuLines)
 
 	statusLine := m.renderStatus()
 
-	// Textarea height grows with content
-	inputHeight := m.input.Height()
-
-	// Calculate feed height: total - input - status(1) - menu
-	feedHeight := m.height - inputHeight - 1 - menuHeight
+	// Calculate feed height
+	feedHeight := m.height - 2 - menuHeight // 1 for status, 1 for input
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
