@@ -274,13 +274,13 @@ func (m shellModel) View() string {
 	// Render feed: take last feedHeight lines
 	feed := m.renderFeed(feedHeight)
 
-	// Build the view: feed | menu | input | status bar
+	// Build the view: feed | input | menu | status bar
 	var parts []string
 	parts = append(parts, feed)
+	parts = append(parts, m.input.View())
 	if menuHeight > 0 {
 		parts = append(parts, strings.Join(menuLines, "\n"))
 	}
-	parts = append(parts, m.input.View())
 	parts = append(parts, statusLine)
 
 	return strings.Join(parts, "\n")
