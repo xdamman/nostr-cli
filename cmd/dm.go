@@ -422,10 +422,17 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		atomic.StoreInt32(&feedDirty, 1)
 	}
 
-	// Initial render
+	// Initial render — no prompt exists yet, so render with 0 extra lines
 	fmt.Println() // blank line before feed
-	feed.renderedLines = 0
-	renderFeed()
+	{
+		dimSentMu.Lock()
+		ds := make(map[string]bool, len(dimSent))
+		for k, v := range dimSent {
+			ds[k] = v
+		}
+		dimSentMu.Unlock()
+		feed.render(0, ds)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
