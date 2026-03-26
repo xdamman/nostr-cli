@@ -405,8 +405,8 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	defaultHint := fmt.Sprintf("enter to send an encrypted message to %s over %d relays, ctrl+c to exit", target.get(), totalRelays)
 
 	reader := bufio.NewReader(os.Stdin)
+	printPromptWithHint()
 	for {
-		printPromptWithHint()
 		line, err := reader.ReadString('\n')
 		// Clear hint line below (cursor is now on hint line after enter)
 		fmt.Print("\r\033[K")
@@ -416,6 +416,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
+			printPromptWithHint()
 			continue
 		}
 
@@ -437,7 +438,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		// Count lines the message occupies (for cursor positioning)
 		msgLines := 1 + strings.Count(content, "\n")
 
-		// Show prompt + posting hint
+		// Show prompt + posting hint below message
 		fmt.Print(getPromptPrefix())
 		fmt.Println()
 		dim.Printf("  Posting... (0/%d relays)", totalRelays)
