@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -283,17 +284,16 @@ func (f *dmFeed) render(extraLines int, dimSent map[string]bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	tw := termWidth()
+
 	// Clear previous feed + extra lines (prompt + hint)
 	totalClear := f.renderedLines + extraLines
 	if totalClear > 0 {
-		// Move to top of feed
 		fmt.Printf("\033[%dA", totalClear)
 	}
-	// Clear all lines
 	for i := 0; i < totalClear; i++ {
 		fmt.Print("\r\033[K\n")
 	}
-	// Move back to top
 	if totalClear > 0 {
 		fmt.Printf("\033[%dA", totalClear)
 	}
@@ -308,9 +308,8 @@ func (f *dmFeed) render(extraLines int, dimSent map[string]bool) {
 	youColor := color.New(color.FgGreen)
 	youColorDim := color.New(color.FgGreen, color.Faint)
 
-	lineCount := 0
+	termLines := 0
 
-	// Only show last 20 messages
 	events := f.events
 	if len(events) > 20 {
 		events = events[len(events)-20:]
@@ -338,10 +337,18 @@ func (f *dmFeed) render(extraLines int, dimSent map[string]bool) {
 			}
 			fmt.Printf("%s\n", content)
 		}
-		lineCount += 1 + strings.Count(content, "\n")
+		// Count actual terminal lines: each content line may wrap
+		for _, line := range strings.Split(content, "\n") {
+			lineLen := prefixLen + visibleLen(line)
+			if lineLen <= tw {
+				termLines++
+			} else {
+				termLines += (lineLen-1)/tw + 1
+			}
+		}
 	}
 
-	f.renderedLines = lineCount
+	f.renderedLines = termLines
 }
 
 func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []string) error {
@@ -388,7 +395,12 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	var currentEditor *ui.LineEditor
 	var editorMu sync.Mutex
 
-	// renderFeed re-renders the entire feed + prompt + hint.
+	// feedDirty is set when background goroutines add events; the input loop
+	// re-renders between editor sessions.
+	var feedDirty int32
+
+	// renderFeed re-renders the feed + prompt + hint.
+	// Only safe to call when no LineEditor is active.
 	renderFeed := func() {
 		dimSentMu.Lock()
 		ds := make(map[string]bool, len(dimSent))
@@ -396,16 +408,18 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			ds[k] = v
 		}
 		dimSentMu.Unlock()
-		editorMu.Lock()
-		extraLines := 2 // prompt + hint
-		editorMu.Unlock()
-		feed.render(extraLines, ds)
-		// Redraw prompt + hint (editor will be recreated in the loop)
+		feed.render(2, ds) // 2 = prompt + hint lines to clear
+		// Draw static prompt + hint (editor will overwrite on next ReadLine)
 		fmt.Print(prompt)
 		fmt.Print("\r\n")
 		dim.Printf("  %s", defaultHint)
 		fmt.Print("\033[1A\r")
 		fmt.Print(prompt)
+	}
+
+	// markDirty signals that the feed needs re-rendering.
+	markDirty := func() {
+		atomic.StoreInt32(&feedDirty, 1)
 	}
 
 	// Initial render
@@ -467,7 +481,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			}
 		}
 		if feed.addEvents(all) {
-			renderFeed()
+			markDirty()
 		}
 	}()
 
@@ -483,7 +497,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	for _, url := range relays {
 		go subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, &subSeenMu, subSeen, func() {}, func(ev *nostr.Event, plaintext string) {
 			if feed.addEvents([]nostr.Event{*ev}) {
-				renderFeed()
+				markDirty()
 			}
 		})
 	}
@@ -499,6 +513,11 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	}()
 
 	for {
+		// Re-render feed if background goroutines changed it
+		if atomic.CompareAndSwapInt32(&feedDirty, 1, 0) {
+			renderFeed()
+		}
+
 		editor := ui.NewLineEditor(prompt, promptLen, defaultHint)
 		if editor == nil {
 			break
@@ -517,14 +536,12 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
-			renderFeed()
 			continue
 		}
 
 		// Encrypt and sign
 		ciphertext, encErr := nip04.Encrypt(line, generateSharedSecret(skHex, targetHex))
 		if encErr != nil {
-			renderFeed()
 			continue
 		}
 		event := nostr.Event{
@@ -535,7 +552,6 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			Content:   ciphertext,
 		}
 		if signErr := event.Sign(skHex); signErr != nil {
-			renderFeed()
 			continue
 		}
 
@@ -563,7 +579,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 					dimSentMu.Lock()
 					delete(dimSent, eventID)
 					dimSentMu.Unlock()
-					renderFeed()
+					markDirty()
 				}
 				editorMu.Lock()
 				if currentEditor != nil {
