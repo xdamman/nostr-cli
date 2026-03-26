@@ -4,7 +4,7 @@ MODULE := github.com/xdamman/nostr-cli
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 COMMIT_DATE ?= $(shell git log -1 --format=%ci 2>/dev/null || echo "unknown")
-COMMIT_MSG ?= $(shell git log -1 --format=%s 2>/dev/null || echo "unknown")
+COMMIT_MSG ?= $(shell git log -1 --format=%s 2>/dev/null | tr "'" " " || echo "unknown")
 
 LDFLAGS := -X '$(MODULE)/cmd.Version=$(VERSION)' \
            -X '$(MODULE)/cmd.CommitSHA=$(COMMIT_SHA)' \
