@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/xdamman/nostr-cli/internal/config"
 )
 
@@ -179,7 +180,7 @@ func LogEvent(npub string, event nostr.Event) error {
 }
 
 // dmEventsFile returns the path to a DM conversation file:
-// ~/.nostr/profiles/:npub/directmessages/:counterpartyHex.jsonl
+// ~/.nostr/profiles/:npub/directmessages/:counterpartyNpub.jsonl
 func dmEventsFile(npub, counterpartyHex string) string {
 	dir, err := config.ProfileDir(npub)
 	if err != nil {
@@ -187,7 +188,11 @@ func dmEventsFile(npub, counterpartyHex string) string {
 	}
 	dmDir := filepath.Join(dir, "directmessages")
 	os.MkdirAll(dmDir, 0700)
-	return filepath.Join(dmDir, counterpartyHex+".jsonl")
+	counterpartyNpub, err := nip19.EncodePublicKey(counterpartyHex)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dmDir, counterpartyNpub+".jsonl")
 }
 
 // LogDMEvent stores a DM event in the per-counterparty conversation file.
