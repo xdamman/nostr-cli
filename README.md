@@ -279,8 +279,10 @@ All state lives in `~/.nostr/`:
         ├── nsec              # Private key (chmod 600)
         ├── profile.json      # Kind 0 metadata
         ├── relays.json       # Preferred relay list
-        ├── aliases.csv       # Contact aliases
+        ├── aliases.json      # Contact aliases
         ├── events.jsonl      # Sent events (for backup)
+        ├── directmessages/   # Encrypted DM conversations (for backup)
+        │   └── <hex>.jsonl   # All messages with one counterparty
         └── cache/
             ├── events.jsonl      # Received events (safe to delete)
             ├── relays.json       # Cached relay list

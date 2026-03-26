@@ -11,11 +11,14 @@ All cache data lives under `~/.nostr/profiles/<npub>/cache/`:
 ├── nsec                    # Private key (local profiles only)
 ├── relays.json             # Configured relays
 ├── profile.json            # Profile metadata (local profiles)
-├── events.jsonl            # Sent events (your posts, DMs, follows — NOT cache)
+├── aliases.json            # Contact aliases (e.g. "alice" → npub1...)
+├── events.jsonl            # Sent events (your posts, follows, profile updates — NOT cache)
+├── directmessages/         # Encrypted DM conversations (NOT cache)
+│   └── <counterparty>.jsonl  # All events (sent & received) with one counterparty
 └── cache/
     ├── profile.json        # Cached profile metadata (non-local profiles)
     ├── relays.json         # Cached relay list from NIP-65 (non-local profiles)
-    ├── events.jsonl        # Received events (feed, DMs from others)
+    ├── events.jsonl        # Received events (feed events from others)
     ├── feed.jsonl          # Feed events from followed users
     ├── following.json      # List of followed pubkeys
     └── profiles.jsonl      # Cached profile metadata for other users
@@ -43,6 +46,11 @@ Your contact list (kind 3) is cached in `cache/following.json` so the shell can 
 
 Profile metadata cache is considered fresh for 1 hour. After that, `nostr profile` will still show cached data but indicate its age. Use `--refresh` to force a fresh fetch.
 
+### Direct messages
+DM conversations are stored per-counterparty in `directmessages/<hex>.jsonl`. Each file contains all encrypted DM events (both sent and received) with a single counterparty, sorted by arrival time. The filename is the counterparty's hex public key.
+
+These are **user data, not cache** — they are not re-fetched from relays and should be backed up.
+
 ## Safely clearing cache
 
 The `cache/` directory can be safely deleted at any time. It will be rebuilt on next use. This does NOT affect:
@@ -50,6 +58,7 @@ The `cache/` directory can be safely deleted at any time. It will be rebuilt on 
 - Your private keys (`nsec`)
 - Your relay configuration (`relays.json`)
 - Your sent events (`events.jsonl`)
+- Your DM conversations (`directmessages/`)
 
 ```bash
 # Clear cache for a specific profile
