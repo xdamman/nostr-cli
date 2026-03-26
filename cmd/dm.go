@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -381,25 +380,15 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		return sprintPromptPrefix(promptName)
 	}
 
+	prompt := getPromptPrefix()
+	promptLen := len(promptName) + 2
 	defaultHint := fmt.Sprintf("enter to send an encrypted message to %s over %d relays, ctrl+c to exit", target.get(), totalRelays)
 
-	printPromptWithHint := func() {
-		fmt.Print(getPromptPrefix())
-		fmt.Println()
-		dim.Printf("  %s", defaultHint)
-		fmt.Print("\033[1A\r")
-		fmt.Print(getPromptPrefix())
-	}
-
-	updateHint := func(text string) {
-		fmt.Print("\0337")      // save cursor
-		fmt.Print("\n\r\033[K") // move to hint line, clear it
-		dim.Print("  " + text)
-		fmt.Print("\0338") // restore cursor
-	}
+	// Current editor (may be nil between inputs)
+	var currentEditor *ui.LineEditor
+	var editorMu sync.Mutex
 
 	// renderFeed re-renders the entire feed + prompt + hint.
-	// Must be called when feed content changes.
 	renderFeed := func() {
 		dimSentMu.Lock()
 		ds := make(map[string]bool, len(dimSent))
@@ -407,8 +396,16 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			ds[k] = v
 		}
 		dimSentMu.Unlock()
-		feed.render(2, ds) // 2 = prompt + hint lines
-		printPromptWithHint()
+		editorMu.Lock()
+		extraLines := 2 // prompt + hint
+		editorMu.Unlock()
+		feed.render(extraLines, ds)
+		// Redraw prompt + hint (editor will be recreated in the loop)
+		fmt.Print(prompt)
+		fmt.Print("\r\n")
+		dim.Printf("  %s", defaultHint)
+		fmt.Print("\033[1A\r")
+		fmt.Print(prompt)
 	}
 
 	// Initial render
@@ -501,26 +498,33 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		os.Exit(0)
 	}()
 
-	reader := bufio.NewReader(os.Stdin)
 	for {
-		line, err := reader.ReadString('\n')
-		// Clear hint line below (cursor is now on hint line after enter)
-		fmt.Print("\r\033[K")
-		fmt.Print("\033[1A\r\033[K") // go up to prompt line and clear it too
-		if err != nil {
+		editor := ui.NewLineEditor(prompt, promptLen, defaultHint)
+		if editor == nil {
+			break
+		}
+		editorMu.Lock()
+		currentEditor = editor
+		editorMu.Unlock()
+
+		line, ok := editor.ReadLine()
+		editorMu.Lock()
+		currentEditor = nil
+		editorMu.Unlock()
+
+		if !ok {
 			break
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
-			printPromptWithHint()
+			renderFeed()
 			continue
 		}
 
 		// Encrypt and sign
 		ciphertext, encErr := nip04.Encrypt(line, generateSharedSecret(skHex, targetHex))
 		if encErr != nil {
-			updateHint(fmt.Sprintf("send failed: %v", encErr))
-			printPromptWithHint()
+			renderFeed()
 			continue
 		}
 		event := nostr.Event{
@@ -531,8 +535,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			Content:   ciphertext,
 		}
 		if signErr := event.Sign(skHex); signErr != nil {
-			updateHint(fmt.Sprintf("sign failed: %v", signErr))
-			printPromptWithHint()
+			renderFeed()
 			continue
 		}
 
@@ -545,10 +548,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		feed.addEventDirect(event)
 		renderFeed()
 
-		// Update hint to show posting progress
-		updateHint(fmt.Sprintf("Posting... (0/%d relays)", totalRelays))
-
-		// Publish with progress
+		// Publish with progress — update hint on next editor
 		timeout := time.Duration(timeoutFlag) * time.Millisecond
 		pubCh := internalRelay.PublishEventWithProgress(context.Background(), event, relays, timeout)
 
@@ -560,15 +560,22 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 					confirmed++
 				}
 				if confirmed == 1 {
-					// First confirmation: remove dim, re-render
 					dimSentMu.Lock()
 					delete(dimSent, eventID)
 					dimSentMu.Unlock()
 					renderFeed()
 				}
-				updateHint(fmt.Sprintf("Posting... (%d/%d relays)", confirmed, total))
+				editorMu.Lock()
+				if currentEditor != nil {
+					currentEditor.SetHint(fmt.Sprintf("Posting... (%d/%d relays)", confirmed, total))
+				}
+				editorMu.Unlock()
 			}
-			updateHint(defaultHint)
+			editorMu.Lock()
+			if currentEditor != nil {
+				currentEditor.SetHint(defaultHint)
+			}
+			editorMu.Unlock()
 		}(event.ID)
 	}
 	return nil

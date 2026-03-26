@@ -74,16 +74,19 @@ func runPost(cmd *cobra.Command, args []string) error {
 		}
 		message = strings.TrimSpace(string(data))
 	} else {
-		dim := color.New(color.Faint)
-		formatPrompt(promptName)
-		fmt.Println()
-		dim.Printf("  enter to post a public note to %d relays, ctrl+c to cancel", len(relays))
-		fmt.Print("\033[1A") // move cursor back up to prompt line
-		fmt.Printf("\r")
-		formatPrompt(promptName)
-		var line string
-		fmt.Scanln(&line)
-		message = strings.TrimSpace(line)
+		prompt := sprintPromptPrefix(promptName)
+		promptLen := len(promptName) + 2
+		hint := fmt.Sprintf("enter to post a public note to %d relays, ctrl+c to cancel", len(relays))
+		editor := ui.NewLineEditor(prompt, promptLen, hint)
+		if editor != nil {
+			line, ok := editor.ReadLine()
+			if !ok {
+				return nil
+			}
+			message = strings.TrimSpace(line)
+		} else {
+			message, _ = ui.ReadLineSimple(prompt)
+		}
 	}
 
 	if message == "" {
