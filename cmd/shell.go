@@ -51,6 +51,40 @@ var slashCommands = []slashCmd{
 var shellPromptName string
 var shellRelayCount int
 
+// shellHintOverride, when non-empty, replaces the default hint text.
+// Used by background goroutines (e.g. publish progress) to show status.
+var shellHintOverride string
+var shellHintMu sync.Mutex
+
+// setShellHint sets the hint override and redraws the hint line.
+// Pass "" to clear the override and revert to the default hint.
+// Safe to call from any goroutine while readShellLine is running.
+func setShellHint(hint string) {
+	shellHintMu.Lock()
+	shellHintOverride = hint
+	shellHintMu.Unlock()
+
+	// Only redraw if stdout is a terminal (ANSI escape codes)
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return
+	}
+
+	dim := color.New(color.Faint)
+	var text string
+	if hint != "" {
+		text = "  " + hint
+	} else {
+		text = defaultHintText(nil, shellRelayCount)
+	}
+	// Move to hint line (1 below prompt), clear and rewrite, move back
+	fmt.Print("\0337")          // save cursor
+	fmt.Print("\033[B\r\033[K") // move down, clear line
+	if text != "" {
+		dim.Print(text)
+	}
+	fmt.Print("\0338") // restore cursor
+}
+
 // formatPrompt prints "name> " in green and returns the visible length.
 func formatPrompt(name string) int {
 	color.New(color.FgGreen).Print(name)
@@ -135,9 +169,42 @@ func runShell() error {
 	var followedHexes []string
 	followReady := make(chan struct{})
 
+	// Load secret key for signing events in the main loop
+	nsec, err := config.LoadNsec(npub)
+	if err != nil {
+		return err
+	}
+	skHex, err := crypto.NsecToHex(nsec)
+	if err != nil {
+		return err
+	}
+
 	shellCtx, shellCancel := context.WithCancel(context.Background())
 	defer shellCancel()
 
+
+	// printFeedEventRaw prints a single event in the feed area (raw terminal mode).
+	// If dimmed is true, the entire line is printed in faint style.
+	// Caller must hold printMu.
+	printFeedEventRaw := func(ev nostr.Event, dimmed bool) {
+		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
+		name := resolveAuthorName(ev.PubKey)
+		// Use shellPromptName for our own events if cache missed
+		if ev.PubKey == myHex && name != shellPromptName && shellPromptName != "" {
+			name = shellPromptName
+		}
+		nw := updateFeedNameWidth(name)
+		prefixLen := 14 + 2 + nw + 2
+		content := wrapNoteRaw(ev.Content, prefixLen)
+		fmt.Print("\r\033[K")
+		if dimmed {
+			dim.Printf("%s  %-*s: %s\r\n", ts, nw, name, content)
+		} else {
+			dim.Printf("%s  ", ts)
+			cyan.Printf("%-*s: ", nw, name)
+			fmt.Printf("%s\r\n", content)
+		}
+	}
 
 	// printNewEvent deduplicates, caches, and prints a new feed event.
 	// Returns true if the event was new and printed.
@@ -148,15 +215,7 @@ func runShell() error {
 		_ = cache.LogFeedEvent(npub, ev)
 		queueProfileFetch(ev.PubKey)
 		printMu.Lock()
-		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
-		name := resolveAuthorName(ev.PubKey)
-		nw := updateFeedNameWidth(name)
-		prefixLen := 14 + 2 + nw + 2
-		content := wrapNoteRaw(ev.Content, prefixLen)
-		fmt.Print("\r\033[K")
-		dim.Printf("%s  ", ts)
-		cyan.Printf("%-*s: ", nw, name)
-		fmt.Printf("%s\r\n", content)
+		printFeedEventRaw(ev, false)
 		fmt.Print("\r")
 		formatPrompt(shellPromptName)
 		printMu.Unlock()
@@ -341,8 +400,43 @@ func runShell() error {
 		if strings.HasPrefix(line, "/") {
 			executeSlashCommand(npub, myHex, line, relays, statusCh)
 		} else {
-			// Post a note
-			go postNoteAsync(npub, myHex, line, relays, statusCh)
+			// Create and sign event synchronously
+			event := nostr.Event{
+				PubKey:    myHex,
+				CreatedAt: nostr.Now(),
+				Kind:      nostr.KindTextNote,
+				Tags:      nostr.Tags{},
+				Content:   line,
+			}
+			if signErr := event.Sign(skHex); signErr != nil {
+				color.Red("✗ sign failed: %v", signErr)
+				continue
+			}
+
+			// Show event in feed immediately and mark as seen
+			// so it won't print again when it arrives from relay subscriptions
+			_ = cache.LogFeedEvent(npub, event)
+			_ = cache.LogSentEvent(npub, event)
+			printMu.Lock()
+			printFeedEventRaw(event, false)
+			fmt.Print("\r")
+			printMu.Unlock()
+
+			// Publish with per-relay progress — updates the hint in real time
+			total := len(relays)
+			timeout := time.Duration(timeoutFlag) * time.Millisecond
+			pubCh := internalRelay.PublishEventWithProgress(context.Background(), event, relays, timeout)
+
+			go func() {
+				confirmed := 0
+				for res := range pubCh {
+					if res.OK {
+						confirmed++
+					}
+					setShellHint(fmt.Sprintf("Posting... (%d/%d relays)", confirmed, total))
+				}
+				setShellHint("")
+			}()
 		}
 	}
 
@@ -1213,10 +1307,7 @@ func readShellLine() (string, error) {
 			showMenu = false
 		}
 
-		newMenuSize := 1 // hint line
-		if showMenu {
-			newMenuSize = len(cmds)
-		}
+		newMenuSize := hintLinesForInput(buf, showMenu, cmds, shellRelayCount)
 		renderPrompt(buf, showMenu, selected, prevMenuSize, shellRelayCount)
 		prevMenuSize = newMenuSize
 	}
@@ -1276,24 +1367,25 @@ func renderPrompt(buf []byte, showMenu bool, selected int, prevMenuSize int, tot
 		}
 	} else {
 		// Show hint below prompt
-		fmt.Print("\r\n\033[K")
-		if len(buf) == 0 {
-			dim.Printf("  type / for commands, enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
-		} else if buf[0] != '/' {
-			dim.Printf("  enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
+		hint := hintTextForInput(buf, totalRelays)
+		hintLines := hintLineCount(hint, termWidth())
+		if hintLines == 0 {
+			hintLines = 1
 		}
-		// Move cursor back to prompt line
-		fmt.Print("\033[1A")
-
-		// Clear any leftover menu lines (below hint)
-		if prevMenuSize > 1 {
-			// hint takes 1 line, clear the rest
-			fmt.Print("\033[s") // save cursor
-			for i := 0; i < prevMenuSize; i++ {
+		fmt.Print("\r\n\033[K")
+		if hint != "" {
+			dim.Print(hint)
+		}
+		// Clear any extra lines from previous render that extend beyond current hint
+		if prevMenuSize > hintLines {
+			for i := 0; i < prevMenuSize-hintLines; i++ {
 				fmt.Print("\r\n\033[K")
 			}
-			fmt.Print("\033[u") // restore cursor
+			// Move back up to end of hint
+			fmt.Printf("\033[%dA", prevMenuSize-hintLines)
 		}
+		// Move cursor back to prompt line (up past all hint lines)
+		fmt.Printf("\033[%dA", hintLines)
 	}
 
 	// Position cursor at end of input on prompt line
@@ -1429,4 +1521,58 @@ func clearMenu(menuSize int) {
 		}
 		fmt.Printf("\033[%dA", menuSize)
 	}
+}
+
+// hintLineCount returns the number of terminal lines a hint string occupies,
+// accounting for wrapping at the given terminal width.
+func hintLineCount(hint string, tw int) int {
+	if hint == "" || tw <= 0 {
+		return 0
+	}
+	n := len(hint)
+	return (n + tw - 1) / tw
+}
+
+// hintTextForInput returns the hint text that would be shown below the prompt
+// for the given input buffer state. If shellHintOverride is set, it takes priority.
+func hintTextForInput(buf []byte, totalRelays int) string {
+	shellHintMu.Lock()
+	override := shellHintOverride
+	shellHintMu.Unlock()
+	if override != "" {
+		return "  " + override
+	}
+	if len(buf) == 0 {
+		return fmt.Sprintf("  type / for commands, enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
+	}
+	if buf[0] != '/' {
+		return fmt.Sprintf("  enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
+	}
+	return ""
+}
+
+// defaultHintText returns the default hint (ignoring override) for a given input state.
+func defaultHintText(buf []byte, totalRelays int) string {
+	if len(buf) == 0 {
+		return fmt.Sprintf("  type / for commands, enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
+	}
+	if buf[0] != '/' {
+		return fmt.Sprintf("  enter to post a public note to %d relays, ctrl+c to exit", totalRelays)
+	}
+	return ""
+}
+
+// hintLinesForInput returns the number of terminal lines occupied by the hint
+// or menu below the prompt.
+func hintLinesForInput(buf []byte, showMenu bool, cmds []slashCmd, totalRelays int) int {
+	if showMenu {
+		return len(cmds)
+	}
+	hint := hintTextForInput(buf, totalRelays)
+	tw := termWidth()
+	lines := hintLineCount(hint, tw)
+	if lines == 0 {
+		return 1 // at minimum reserve 1 line for the hint area
+	}
+	return lines
 }

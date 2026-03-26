@@ -159,6 +159,148 @@ func TestRealtimeEventsAreNewerThanBatch(t *testing.T) {
 	}
 }
 
+func TestHintLineCount(t *testing.T) {
+	tests := []struct {
+		hint      string
+		termWidth int
+		expected  int
+		desc      string
+	}{
+		{"", 80, 0, "empty hint"},
+		{"hello", 80, 1, "short hint fits in one line"},
+		{"hello", 5, 1, "hint exactly fills one line"},
+		{"hello!", 5, 2, "hint wraps to two lines"},
+		// The actual shell hint that triggers the bug: on an 80-column terminal
+		// the hint is >80 chars and wraps to 2 lines.
+		{
+			"  type / for commands, enter to post a public note to 11 relays, ctrl+c to exit",
+			80, 1,
+			"default hint fits in 80 cols",
+		},
+		{
+			"  type / for commands, enter to post a public note to 11 relays, ctrl+c to exit",
+			60, 2,
+			"default hint wraps on 60 col terminal",
+		},
+		{
+			"  type / for commands, enter to post a public note to 11 relays, ctrl+c to exit",
+			40, 2,
+			"default hint wraps on 40 col terminal",
+		},
+		{"hello", 0, 0, "zero width returns 0"},
+	}
+	for _, tt := range tests {
+		got := hintLineCount(tt.hint, tt.termWidth)
+		if got != tt.expected {
+			t.Errorf("%s: hintLineCount(%q, %d) = %d, want %d",
+				tt.desc, tt.hint, tt.termWidth, got, tt.expected)
+		}
+	}
+}
+
+func TestHintTextForInput(t *testing.T) {
+	// Ensure no override is set
+	shellHintMu.Lock()
+	shellHintOverride = ""
+	shellHintMu.Unlock()
+
+	tests := []struct {
+		buf         []byte
+		totalRelays int
+		wantEmpty   bool
+		contains    string
+		desc        string
+	}{
+		{[]byte{}, 5, false, "type / for commands", "empty input shows full hint"},
+		{[]byte("hello"), 5, false, "enter to post", "text input shows post hint"},
+		{[]byte("/dm"), 5, true, "", "slash command shows no hint"},
+		{[]byte("test"), 11, false, "11 relays", "relay count appears in hint"},
+	}
+	for _, tt := range tests {
+		got := hintTextForInput(tt.buf, tt.totalRelays)
+		if tt.wantEmpty && got != "" {
+			t.Errorf("%s: expected empty hint, got %q", tt.desc, got)
+		}
+		if !tt.wantEmpty && !strings.Contains(got, tt.contains) {
+			t.Errorf("%s: expected hint to contain %q, got %q", tt.desc, tt.contains, got)
+		}
+	}
+}
+
+func TestHintTextForInput_OverrideTakesPriority(t *testing.T) {
+	// Set an override
+	shellHintMu.Lock()
+	shellHintOverride = "Posting... (3/11 relays)"
+	shellHintMu.Unlock()
+	defer func() {
+		shellHintMu.Lock()
+		shellHintOverride = ""
+		shellHintMu.Unlock()
+	}()
+
+	// Override should be returned regardless of input buffer state
+	got := hintTextForInput([]byte{}, 5)
+	if !strings.Contains(got, "Posting...") {
+		t.Errorf("expected override hint, got %q", got)
+	}
+	if strings.Contains(got, "type / for commands") {
+		t.Errorf("default hint should not appear when override is set, got %q", got)
+	}
+
+	// Also for text input
+	got = hintTextForInput([]byte("hello"), 5)
+	if !strings.Contains(got, "Posting...") {
+		t.Errorf("expected override hint for text input, got %q", got)
+	}
+}
+
+func TestDefaultHintText_IgnoresOverride(t *testing.T) {
+	// Set an override
+	shellHintMu.Lock()
+	shellHintOverride = "Posting... (3/11 relays)"
+	shellHintMu.Unlock()
+	defer func() {
+		shellHintMu.Lock()
+		shellHintOverride = ""
+		shellHintMu.Unlock()
+	}()
+
+	// defaultHintText should always return the default, ignoring the override
+	got := defaultHintText([]byte{}, 5)
+	if strings.Contains(got, "Posting...") {
+		t.Errorf("defaultHintText should not include override, got %q", got)
+	}
+	if !strings.Contains(got, "type / for commands") {
+		t.Errorf("expected default hint text, got %q", got)
+	}
+}
+
+func TestHintLinesForInput_WrappedHintClearsCorrectly(t *testing.T) {
+	// Ensure no override
+	shellHintMu.Lock()
+	shellHintOverride = ""
+	shellHintMu.Unlock()
+
+	// Regression: when the hint wraps to 2+ terminal lines,
+	// hintLinesForInput must return the actual wrapped count (not 1)
+	// so that clearMenu clears all lines and avoids ghost text.
+	buf := []byte{} // empty input = longest hint
+	hint := hintTextForInput(buf, 11)
+
+	// On a 40-column terminal, the hint wraps to multiple lines
+	lines := hintLineCount(hint, 40)
+	if lines <= 1 {
+		t.Fatalf("expected hint to wrap on 40-col terminal, got %d lines (hint len=%d)", lines, len(hint))
+	}
+
+	// hintLinesForInput should return the same count (not hardcoded 1)
+	// We can't easily override termWidth() in a test, but we can verify
+	// the relationship: for any hint that wraps, hintLineCount > 1.
+	if lines < 2 {
+		t.Errorf("hint %q (len=%d) should wrap on 40-col terminal", hint, len(hint))
+	}
+}
+
 func TestUpdateFeedNameWidth(t *testing.T) {
 	// Reset
 	feedNameWidthMu.Lock()

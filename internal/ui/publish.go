@@ -23,9 +23,65 @@ type PublishResult struct {
 
 // PublishEventToRelays publishes a signed event to the given relays with an
 // interactive per-relay spinner UI showing progress, success/failure, and timing.
+// When stdout is not a TTY, it falls back to simple line-based output.
 // It also logs the event locally and shows the backup path.
 // timeout is the per-relay deadline; pass 0 to use the default (10s).
 func PublishEventToRelays(npub string, event nostr.Event, relays []string, timeout time.Duration) (*PublishResult, error) {
+	isTTY := isStdoutTTY()
+
+	// Publish with per-relay progress
+	ctx := context.Background()
+	ch := relay.PublishEventWithProgress(ctx, event, relays, timeout)
+
+	if !isTTY {
+		return publishNonInteractive(npub, event, relays, ch)
+	}
+
+	return publishInteractive(npub, event, relays, ch)
+}
+
+// isStdoutTTY returns true if stdout is connected to a terminal.
+func isStdoutTTY() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// publishNonInteractive publishes without ANSI escape codes.
+func publishNonInteractive(npub string, event nostr.Event, relays []string, ch <-chan relay.RelayResult) (*PublishResult, error) {
+	var successURLs []string
+	for res := range ch {
+		host := res.URL
+		if u, uErr := url.Parse(res.URL); uErr == nil && u.Host != "" {
+			host = u.Host
+		}
+		ms := res.Duration.Milliseconds()
+		if res.OK {
+			fmt.Fprintf(os.Stderr, "  ✓ %s  %dms\n", host, ms)
+			successURLs = append(successURLs, res.URL)
+		} else {
+			fmt.Fprintf(os.Stderr, "  ✗ %s  %dms\n", host, ms)
+		}
+	}
+
+	if len(successURLs) == 0 {
+		return nil, fmt.Errorf("failed to publish to any relay")
+	}
+
+	_ = cache.LogSentEvent(npub, event)
+
+	fmt.Fprintf(os.Stderr, "Published to %d/%d relays\n", len(successURLs), len(relays))
+
+	return &PublishResult{
+		SuccessURLs: successURLs,
+		TotalCount:  len(relays),
+	}, nil
+}
+
+// publishInteractive publishes with ANSI spinner UI.
+func publishInteractive(npub string, event nostr.Event, relays []string, ch <-chan relay.RelayResult) (*PublishResult, error) {
 	dim := color.New(color.Faint)
 	greenFn := color.New(color.FgGreen).SprintFunc()
 	redFn := color.New(color.FgRed).SprintFunc()
@@ -44,10 +100,6 @@ func PublishEventToRelays(npub string, event nostr.Event, relays []string, timeo
 		rl[i] = relayLine{host: host, url: r}
 		fmt.Printf("  %s %s\n", dim.Sprint(SpinnerFrames[0]), dim.Sprint(host))
 	}
-
-	// Publish with per-relay progress
-	ctx := context.Background()
-	ch := relay.PublishEventWithProgress(ctx, event, relays, timeout)
 
 	// Track results by URL
 	results := make(map[string]relay.RelayResult)
