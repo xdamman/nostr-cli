@@ -129,6 +129,7 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 		return fmt.Errorf("failed to sign: %w", err)
 	}
 
+	_ = cache.LogDMEvent(npub, targetHex, event)
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
 
@@ -187,6 +188,7 @@ func sendDMAsync(npub, skHex, myHex, targetHex, message string, relays []string,
 		return
 	}
 
+	_ = cache.LogDMEvent(npub, targetHex, event)
 	_ = cache.LogSentEvent(npub, event)
 	statusCh <- "✓"
 }
@@ -238,29 +240,10 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Deduplication: track seen event IDs (seed with cached history)
+	// Deduplication: track seen event IDs (seed with stored history)
 	var seenMu sync.Mutex
 	seen := make(map[string]bool)
-	cachedEvents, _ := cache.QueryEvents(npub, func(ev nostr.Event) bool {
-		if ev.Kind != nostr.KindEncryptedDirectMessage {
-			return false
-		}
-		if ev.PubKey == myHex {
-			for _, tag := range ev.Tags {
-				if len(tag) >= 2 && tag[0] == "p" && tag[1] == targetHex {
-					return true
-				}
-			}
-		}
-		if ev.PubKey == targetHex {
-			for _, tag := range ev.Tags {
-				if len(tag) >= 2 && tag[0] == "p" && tag[1] == myHex {
-					return true
-				}
-			}
-		}
-		return false
-	})
+	cachedEvents, _ := cache.QueryDMEvents(npub, targetHex)
 	for _, ev := range cachedEvents {
 		seen[ev.ID] = true
 	}
@@ -269,6 +252,17 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 
 	getPromptPrefix := func() string {
 		return sprintPromptPrefix(promptName)
+	}
+
+	// printPromptWithHint prints the prompt line and hint below it,
+	// then moves the cursor back to the prompt input position.
+	printPromptWithHint := func() {
+		fmt.Print(getPromptPrefix())
+		fmt.Println()
+		dim.Printf("  enter to send an encrypted message to %s over %d relays, ctrl+c to exit", target.get(), totalRelays)
+		fmt.Print("\033[1A") // move cursor back up to prompt line
+		fmt.Printf("\r")
+		fmt.Print(getPromptPrefix())
 	}
 
 	onConnected := func() {}
@@ -336,7 +330,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			if alreadySeen {
 				continue
 			}
-			_ = cache.LogEvent(npub, *evp)
+			_ = cache.LogDMEvent(npub, targetHex, *evp)
 			allNew = append(allNew, *evp)
 		}
 
@@ -357,6 +351,12 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		youColor := color.New(color.FgGreen)
 
 		prefixLen := 14 + 2 + nameWidth + 2
+		// Clear prompt + hint lines before printing new messages
+		// Sort new events chronologically before displaying
+		sortEventsByTime(allNew)
+		fmt.Print("\r\033[K")   // clear prompt line
+		fmt.Print("\n\033[K")   // clear hint line
+		fmt.Print("\033[1A\r")  // back to prompt line
 		for _, ev := range allNew {
 			plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
 			if err != nil {
@@ -372,13 +372,14 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 				cyan.Printf("%-*s: ", nameWidth, tName)
 			}
 			dim.Printf("%s\n", content)
-			fmt.Print(getPromptPrefix())
 		}
+		// Redraw prompt + hint after all new messages
+		printPromptWithHint()
 	}()
 
 	// Subscribe for incoming DMs in background
 	for _, url := range relays {
-		go subscribeRelayWithStatus(ctx, npub, url, skHex, myHex, targetHex, target, cyan, getPromptPrefix, &seenMu, seen, onConnected)
+		go subscribeRelayWithStatus(ctx, npub, url, skHex, myHex, targetHex, target, cyan, printPromptWithHint, &seenMu, seen, onConnected)
 	}
 
 	fmt.Println() // blank line after header
@@ -400,14 +401,11 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	for {
 		// Show pending status from previous sends before the prompt
 		drainStatus(statusCh)
-		fmt.Print(getPromptPrefix())
-		fmt.Println()
-		dim.Printf("  enter to send an encrypted message to %s over %d relays, ctrl+c to exit", target.get(), totalRelays)
-		fmt.Print("\033[1A") // move cursor back up to prompt line
-		fmt.Printf("\r")
-		fmt.Print(getPromptPrefix())
+		printPromptWithHint()
 		line, err := reader.ReadString('\n')
-		fmt.Print("\033[K") // clear hint line remnants
+		// Clear hint line below (cursor is now on hint line after enter)
+		fmt.Print("\r\033[K")
+		fmt.Print("\033[1A\r\033[K") // go up to prompt line and clear it too
 		if err != nil {
 			break
 		}
@@ -493,7 +491,7 @@ func watchAllDMs(npub string) error {
 					seen[ev.ID] = true
 					seenMu.Unlock()
 
-					_ = cache.LogEvent(npub, *ev)
+					_ = cache.LogDMEvent(npub, ev.PubKey, *ev)
 
 					// Decrypt
 					sharedSecret := generateSharedSecret(skHex, ev.PubKey)
@@ -674,7 +672,7 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 			seen[ev.ID] = true
 			seenMu.Unlock()
 
-			_ = cache.LogEvent(npub, *ev)
+			_ = cache.LogDMEvent(npub, targetHex, *ev)
 
 			plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
 			if err != nil {
@@ -687,7 +685,7 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 }
 
 // subscribeRelayWithStatus wraps subscribeDMRelay with interactive formatting.
-func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targetHex string, target *dmTargetName, cyan *color.Color, getPromptPrefix func() string, seenMu *sync.Mutex, seen map[string]bool, onConnected func()) {
+func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targetHex string, target *dmTargetName, cyan *color.Color, redrawPrompt func(), seenMu *sync.Mutex, seen map[string]bool, onConnected func()) {
 	subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, seenMu, seen, onConnected, func(ev *nostr.Event, plaintext string) {
 		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
 		dim := color.New(color.Faint)
@@ -698,36 +696,21 @@ func subscribeRelayWithStatus(ctx context.Context, npub, url, skHex, myHex, targ
 		}
 		prefixLen := 14 + 2 + nameWidth + 2
 		content := wrapNote(plaintext, prefixLen)
-		fmt.Print("\r")
+		// Clear prompt line and hint line below, then print message
+		fmt.Print("\r\033[K")   // clear prompt line
+		fmt.Print("\n\033[K")   // move to hint line and clear it
+		fmt.Print("\033[1A")    // move back up
+		fmt.Print("\r")         // start of line
 		dim.Printf("%s  ", ts)
 		cyan.Printf("%-*s: ", nameWidth, name)
-		fmt.Printf("%s\n%s", content, getPromptPrefix())
+		fmt.Printf("%s\n", content)
+		// Redraw prompt + hint
+		redrawPrompt()
 	})
 }
 
 func showDMHistory(npub, myHex, targetHex, targetName string, cyan, dim *color.Color) int {
-	events, err := cache.QueryEvents(npub, func(ev nostr.Event) bool {
-		if ev.Kind != nostr.KindEncryptedDirectMessage {
-			return false
-		}
-		// Messages I sent to them
-		if ev.PubKey == myHex {
-			for _, tag := range ev.Tags {
-				if len(tag) >= 2 && tag[0] == "p" && tag[1] == targetHex {
-					return true
-				}
-			}
-		}
-		// Messages they sent to me
-		if ev.PubKey == targetHex {
-			for _, tag := range ev.Tags {
-				if len(tag) >= 2 && tag[0] == "p" && tag[1] == myHex {
-					return true
-				}
-			}
-		}
-		return false
-	})
+	events, err := cache.QueryDMEvents(npub, targetHex)
 	if err != nil || len(events) == 0 {
 		return 0
 	}

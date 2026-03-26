@@ -178,6 +178,82 @@ func LogEvent(npub string, event nostr.Event) error {
 	return err
 }
 
+// dmEventsFile returns the path to a DM conversation file:
+// ~/.nostr/profiles/:npub/directmessages/:counterpartyHex.jsonl
+func dmEventsFile(npub, counterpartyHex string) string {
+	dir, err := config.ProfileDir(npub)
+	if err != nil {
+		return ""
+	}
+	dmDir := filepath.Join(dir, "directmessages")
+	os.MkdirAll(dmDir, 0700)
+	return filepath.Join(dmDir, counterpartyHex+".jsonl")
+}
+
+// LogDMEvent stores a DM event in the per-counterparty conversation file.
+// This is user data (not cache) and is included in backups.
+func LogDMEvent(npub, counterpartyHex string, event nostr.Event) error {
+	if npub == "" || event.ID == "" || counterpartyHex == "" {
+		return nil
+	}
+
+	s := loadSeen(npub)
+
+	seenMu.Lock()
+	if s[event.ID] {
+		seenMu.Unlock()
+		return nil
+	}
+	s[event.ID] = true
+	seenMu.Unlock()
+
+	path := dmEventsFile(npub, counterpartyHex)
+	if path == "" {
+		return fmt.Errorf("cannot determine DM events path")
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
+
+// QueryDMEvents reads all events from a DM conversation file.
+func QueryDMEvents(npub, counterpartyHex string) ([]nostr.Event, error) {
+	path := dmEventsFile(npub, counterpartyHex)
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var result []nostr.Event
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		var ev nostr.Event
+		if json.Unmarshal(scanner.Bytes(), &ev) == nil {
+			result = append(result, ev)
+		}
+	}
+	return result, nil
+}
+
 // LogEvents caches multiple events at once.
 func LogEvents(npub string, events []*nostr.Event) {
 	for _, ev := range events {
