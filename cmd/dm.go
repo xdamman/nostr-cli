@@ -394,13 +394,18 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 		os.Exit(0)
 	}()
 
-	// Channel for async send status (buffered to avoid blocking senders)
-	statusCh := make(chan string, 16)
+	// updateHint rewrites only the hint line (below prompt) without moving the prompt.
+	updateHint := func(text string) {
+		fmt.Print("\0337")      // save cursor
+		fmt.Print("\n\r\033[K") // move to hint line, clear it
+		dim.Print("  " + text)
+		fmt.Print("\0338") // restore cursor
+	}
+
+	defaultHint := fmt.Sprintf("enter to send an encrypted message to %s over %d relays, ctrl+c to exit", target.get(), totalRelays)
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		// Show pending status from previous sends before the prompt
-		drainStatus(statusCh)
 		printPromptWithHint()
 		line, err := reader.ReadString('\n')
 		// Clear hint line below (cursor is now on hint line after enter)
@@ -414,8 +419,90 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 			continue
 		}
 
-		// Send in background, show prompt immediately
-		go sendDMAsync(npub, skHex, myHex, targetHex, line, relays, statusCh)
+		// Show the sent message immediately in dim
+		tName := target.get()
+		nameWidth := len("you")
+		if len(tName) > nameWidth {
+			nameWidth = len(tName)
+		}
+		prefixLen := 14 + 2 + nameWidth + 2
+		ts := formatLocalTimestamp(time.Now())
+		content := wrapNote(line, prefixLen)
+		// Print message line in dim (unconfirmed)
+		dim.Printf("%s  ", ts)
+		youColor := color.New(color.FgGreen, color.Faint)
+		youColor.Printf("%-*s: ", nameWidth, "you")
+		dim.Printf("%s\n", content)
+
+		// Count lines the message occupies (for cursor positioning)
+		msgLines := 1 + strings.Count(content, "\n")
+
+		// Show prompt + posting hint
+		fmt.Print(getPromptPrefix())
+		fmt.Println()
+		dim.Printf("  Posting... (0/%d relays)", totalRelays)
+		fmt.Print("\033[1A\r")
+		fmt.Print(getPromptPrefix())
+
+		// Publish with progress in background
+		ciphertext, encErr := nip04.Encrypt(line, generateSharedSecret(skHex, targetHex))
+		if encErr != nil {
+			updateHint(fmt.Sprintf("send failed: %v", encErr))
+			continue
+		}
+		event := nostr.Event{
+			PubKey:    myHex,
+			CreatedAt: nostr.Now(),
+			Kind:      nostr.KindEncryptedDirectMessage,
+			Tags:      nostr.Tags{nostr.Tag{"p", targetHex}},
+			Content:   ciphertext,
+		}
+		if signErr := event.Sign(skHex); signErr != nil {
+			updateHint(fmt.Sprintf("sign failed: %v", signErr))
+			continue
+		}
+
+		_ = cache.LogDMEvent(npub, targetHex, event)
+		_ = cache.LogSentEvent(npub, event)
+
+		timeout := time.Duration(timeoutFlag) * time.Millisecond
+		pubCh := internalRelay.PublishEventWithProgress(context.Background(), event, relays, timeout)
+
+		// Consume relay results, update hint and message color
+		go func(msgLines int) {
+			confirmed := 0
+			total := len(relays)
+			firstConfirm := false
+			for res := range pubCh {
+				if res.OK {
+					confirmed++
+				}
+				if confirmed > 0 && !firstConfirm {
+					firstConfirm = true
+					// Redraw message in normal color (move up past hint + prompt + message)
+					up := msgLines + 2 // message lines + prompt + hint
+					fmt.Printf("\0337")  // save cursor
+					fmt.Printf("\033[%dA", up)
+					for i := 0; i < msgLines; i++ {
+						fmt.Print("\r\033[K")
+						if i == 0 {
+							dim.Printf("%s  ", ts)
+							color.New(color.FgGreen).Printf("%-*s: ", nameWidth, "you")
+						}
+					}
+					// Re-print content in normal (not dim)
+					fmt.Printf("\033[%dA", msgLines) // back to first line of message
+					fmt.Print("\r")
+					dim.Printf("%s  ", ts)
+					color.New(color.FgGreen).Printf("%-*s: ", nameWidth, "you")
+					fmt.Printf("%s", content)
+					fmt.Print("\0338") // restore cursor
+				}
+				updateHint(fmt.Sprintf("Posting... (%d/%d relays)", confirmed, total))
+			}
+			// Restore default hint
+			updateHint(defaultHint)
+		}(msgLines)
 	}
 	return nil
 }
