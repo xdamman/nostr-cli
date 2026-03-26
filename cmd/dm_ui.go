@@ -79,7 +79,7 @@ func (f *dmFeedBT) render(myHex, myName, targetName string, dimSent map[string]b
 		return nil
 	}
 
-	nameWidth := len("you")
+	nameWidth := len(myName)
 	if len(targetName) > nameWidth {
 		nameWidth = len(targetName)
 	}
@@ -105,7 +105,7 @@ func (f *dmFeedBT) render(myHex, myName, targetName string, dimSent map[string]b
 
 		var name string
 		if ev.PubKey == myHex {
-			name = "you"
+			name = myName
 		} else {
 			name = targetName
 		}
@@ -143,6 +143,7 @@ type dmModel struct {
 	input      textinput.Model
 	npub       string
 	myHex      string
+	myName     string
 	skHex      string
 	targetHex  string
 	targetName string
@@ -153,11 +154,11 @@ type dmModel struct {
 // dmProgram holds the running tea.Program for DM mode.
 var dmProgram *tea.Program
 
-func newDMModel(npub, myHex, skHex, targetHex, targetName string, relays []string, sharedSecret []byte) dmModel {
+func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays []string, sharedSecret []byte) dmModel {
 	ti := textinput.New()
 	ti.Focus()
 	ti.CharLimit = 0
-	ti.Prompt = greenStyle.Render("you") + "> "
+	ti.Prompt = greenStyle.Render(myName) + "> "
 
 	return dmModel{
 		feed:       newDMFeedBT(sharedSecret, 200),
@@ -165,6 +166,7 @@ func newDMModel(npub, myHex, skHex, targetHex, targetName string, relays []strin
 		input:      ti,
 		npub:       npub,
 		myHex:      myHex,
+		myName:     myName,
 		skHex:      skHex,
 		targetHex:  targetHex,
 		targetName: targetName,
@@ -301,7 +303,7 @@ func (m dmModel) View() string {
 		feedHeight = 1
 	}
 
-	rendered := m.feed.render(m.myHex, "you", m.targetName, m.dimSent, m.width)
+	rendered := m.feed.render(m.myHex, m.myName, m.targetName, m.dimSent, m.width)
 
 	// Take last feedHeight lines
 	feed := padFeed(rendered, feedHeight)
@@ -350,6 +352,12 @@ func padFeed(rendered []string, height int) string {
 func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, relays []string) error {
 	cache.LoadProfileCache(npub)
 
+	// Resolve own name
+	myName := resolveProfileName(npub)
+	if myName == "" {
+		myName = myHex[:8] + "..."
+	}
+
 	// Resolve target name
 	targetName := inputName
 	if targetNpub, err := nip19.EncodePublicKey(targetHex); err == nil {
@@ -364,7 +372,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 
 	sharedSecret := generateSharedSecret(skHex, targetHex)
 
-	m := newDMModel(npub, myHex, skHex, targetHex, targetName, relays, sharedSecret)
+	m := newDMModel(npub, myHex, myName, skHex, targetHex, targetName, relays, sharedSecret)
 
 	// Load cached DM history into model
 	storedEvents, _ := cache.QueryDMEvents(npub, targetHex)
