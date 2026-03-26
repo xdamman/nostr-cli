@@ -228,10 +228,12 @@ func runSyncJSON(cmd *cobra.Command, args []string) error {
 		localIDs[ev.ID] = true
 	}
 
-	// Fetch from all selected relays
+	myHex := pubHex
+
+	// Fetch authored events from all selected relays
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
-	filter := nostr.Filter{Authors: []string{pubHex}}
-	fetchCh := internalRelay.FetchEventsPerRelay(context.Background(), filter, relays, timeout)
+	authorFilter := nostr.Filter{Authors: []string{pubHex}}
+	fetchCh := internalRelay.FetchEventsPerRelay(context.Background(), authorFilter, relays, timeout)
 
 	fetchStates := make(map[string]*relayFetchState)
 	for res := range fetchCh {
@@ -277,9 +279,26 @@ func runSyncJSON(cmd *cobra.Command, args []string) error {
 		fetched, fErr := internalRelay.FetchEvents(context.Background(), idFilter, relays)
 		if fErr == nil {
 			for _, ev := range fetched {
-				_ = cache.LogSentEvent(npub, *ev)
+				saveSyncedEvent(npub, myHex, *ev)
 				savedLocally++
 			}
+		}
+	}
+
+	// Fetch incoming DMs (sent to this profile)
+	dmFilter := nostr.Filter{
+		Kinds: []int{nostr.KindEncryptedDirectMessage},
+		Tags:  nostr.TagMap{"p": []string{pubHex}},
+	}
+	dmFetchCh := internalRelay.FetchEventsPerRelay(context.Background(), dmFilter, relays, timeout)
+	dmSaved := 0
+	for res := range dmFetchCh {
+		if res.Err != nil {
+			continue
+		}
+		for _, ev := range res.Events {
+			saveSyncedEvent(npub, myHex, *ev)
+			dmSaved++
 		}
 	}
 
@@ -396,6 +415,8 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 	for _, ev := range localEvents {
 		localIDs[ev.ID] = true
 	}
+
+	myHex := pubHex
 
 	// Start fetching from ALL relays immediately (before user selects)
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
@@ -581,12 +602,36 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 		sp.Stop()
 		if fErr == nil {
 			for _, ev := range fetched {
-				_ = cache.LogSentEvent(npub, *ev)
+				saveSyncedEvent(npub, myHex, *ev)
 				newFromRelays++
 			}
 		}
 		if newFromRelays > 0 {
 			fmt.Printf("Saved %s new event%s from relays locally\n", cyan(fmt.Sprintf("%d", newFromRelays)), plural(newFromRelays))
+		}
+	}
+
+	// Fetch incoming DMs (sent to this profile)
+	{
+		sp := ui.NewSpinner("Fetching incoming direct messages...")
+		dmFilter := nostr.Filter{
+			Kinds: []int{nostr.KindEncryptedDirectMessage},
+			Tags:  nostr.TagMap{"p": []string{pubHex}},
+		}
+		dmFetchCh := internalRelay.FetchEventsPerRelay(context.Background(), dmFilter, relays, timeout)
+		dmSaved := 0
+		for res := range dmFetchCh {
+			if res.Err != nil {
+				continue
+			}
+			for _, ev := range res.Events {
+				saveSyncedEvent(npub, myHex, *ev)
+				dmSaved++
+			}
+		}
+		sp.Stop()
+		if dmSaved > 0 {
+			fmt.Printf("Saved %s incoming direct message%s\n", cyan(fmt.Sprintf("%d", dmSaved)), plural(dmSaved))
 		}
 	}
 
@@ -957,6 +1002,35 @@ done:
 		}
 	}
 	return selected
+}
+
+// saveSyncedEvent saves an event fetched during sync to the right storage.
+// Authored events go to events.jsonl. DM events also go to directmessages/.
+func saveSyncedEvent(npub, myHex string, ev nostr.Event) {
+	// All authored events go to the sent events backup
+	if ev.PubKey == myHex {
+		_ = cache.LogSentEvent(npub, ev)
+	}
+
+	// Route DM events to per-counterparty conversation files
+	if ev.Kind == nostr.KindEncryptedDirectMessage {
+		var counterparty string
+		if ev.PubKey == myHex {
+			// I sent this DM — counterparty is in the "p" tag
+			for _, tag := range ev.Tags {
+				if len(tag) >= 2 && tag[0] == "p" {
+					counterparty = tag[1]
+					break
+				}
+			}
+		} else {
+			// Someone sent this DM to me — counterparty is the author
+			counterparty = ev.PubKey
+		}
+		if counterparty != "" {
+			_ = cache.LogDMEvent(npub, counterparty, ev)
+		}
+	}
 }
 
 // eventKindLabel returns a human-readable label for event kinds.
