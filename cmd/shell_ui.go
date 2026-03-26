@@ -65,10 +65,10 @@ const maxFeedLines = 1000
 
 type shellModel struct {
 	// Display
-	feedLines []string // rendered feed lines with ANSI
-	status    string   // dynamic status text (empty = show default hint)
-	width     int
-	height    int
+	feed   feed   // deduplicated, sorted event feed
+	status string // dynamic status text (empty = show default hint)
+	width  int
+	height int
 
 	// Input
 	input    textinput.Model
@@ -93,6 +93,7 @@ func newShellModel(npub, myHex, skHex string, relays []string, promptName string
 	ti.Width = 0 // will be set on WindowSizeMsg
 
 	return shellModel{
+		feed:       newFeed(maxFeedLines),
 		input:      ti,
 		npub:       npub,
 		myHex:      myHex,
@@ -119,15 +120,11 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case newEventMsg:
-		line := sprintFeedEvent(msg.Event, m.myHex, m.promptName, m.width)
-		appendFeed(&m, line)
+		m.feed.AddEvent(msg.Event)
 		return m, nil
 
 	case batchEventsMsg:
-		for _, ev := range msg.Events {
-			line := sprintFeedEvent(ev, m.myHex, m.promptName, m.width)
-			appendFeed(&m, line)
-		}
+		m.feed.AddEvents(msg.Events)
 		return m, nil
 
 	case statusMsg:
@@ -136,9 +133,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case infoMsg:
 		if msg.Text != "" {
-			for _, line := range strings.Split(msg.Text, "\n") {
-				appendFeed(&m, line)
-			}
+			m.feed.AddInfo(msg.Text)
 		}
 		return m, nil
 
@@ -190,11 +185,10 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Content:   line,
 		}
 		if err := event.Sign(m.skHex); err != nil {
-			appendFeed(&m, redStyle.Render("✗ sign failed: "+err.Error()))
+			m.feed.AddInfo(redStyle.Render("✗ sign failed: " + err.Error()))
 			return m, nil
 		}
-		feedLine := sprintFeedEvent(event, m.myHex, m.promptName, m.width)
-		appendFeed(&m, feedLine)
+		m.feed.AddEvent(event)
 		_ = cache.LogFeedEvent(m.npub, event)
 		_ = cache.LogSentEvent(m.npub, event)
 
@@ -255,15 +249,6 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// appendFeed adds a line to the feed buffer and caps at maxFeedLines.
-// Works on both value and pointer receivers since the caller always
-// returns the modified model to Bubble Tea.
-func appendFeed(m *shellModel, line string) {
-	m.feedLines = append(m.feedLines, line)
-	if len(m.feedLines) > maxFeedLines {
-		m.feedLines = m.feedLines[len(m.feedLines)-maxFeedLines:]
-	}
-}
 
 func (m shellModel) View() string {
 	if m.quitting {
@@ -302,8 +287,9 @@ func (m shellModel) View() string {
 }
 
 func (m shellModel) renderFeed(height int) string {
-	if len(m.feedLines) == 0 {
-		// Fill with empty lines
+	rendered := m.feed.Render(m.myHex, m.promptName, m.width)
+
+	if len(rendered) == 0 {
 		lines := make([]string, height)
 		for i := range lines {
 			lines[i] = ""
@@ -313,10 +299,10 @@ func (m shellModel) renderFeed(height int) string {
 
 	// Take last `height` lines
 	start := 0
-	if len(m.feedLines) > height {
-		start = len(m.feedLines) - height
+	if len(rendered) > height {
+		start = len(rendered) - height
 	}
-	visible := m.feedLines[start:]
+	visible := rendered[start:]
 
 	// Pad with empty lines at the top if fewer lines than height
 	padding := height - len(visible)
@@ -404,69 +390,6 @@ func (m shellModel) makeSlashCmd(npub, myHex string, relays []string, line strin
 	}
 }
 
-// sprintFeedEvent formats a single feed event as a string (no raw terminal codes).
-func sprintFeedEvent(ev nostr.Event, myHex, promptName string, termW int) string {
-	ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
-	name := resolveAuthorName(ev.PubKey)
-	if ev.PubKey == myHex && name != promptName && promptName != "" {
-		name = promptName
-	}
-	nw := updateFeedNameWidth(name)
-	prefixLen := 14 + 2 + nw + 2
-
-	content := ev.Content
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "")
-	content = strings.TrimSpace(content)
-	content = renderInlineMarkdown(content)
-
-	// Wrap to terminal width
-	avail := termW - prefixLen
-	if avail < 20 {
-		avail = 20
-	}
-	if termW <= 0 {
-		avail = 60
-	}
-
-	indent := strings.Repeat(" ", prefixLen)
-	var sb strings.Builder
-	paragraphs := strings.Split(content, "\n")
-	for pi, para := range paragraphs {
-		if pi > 0 {
-			sb.WriteString("\n")
-			sb.WriteString(indent)
-		}
-		for len(para) > 0 {
-			vis := visibleLen(para)
-			if vis <= avail {
-				sb.WriteString(para)
-				break
-			}
-			lineLen := visibleIndex(para, avail)
-			if lineLen <= 0 {
-				lineLen = len(para)
-			}
-			if lineLen < len(para) {
-				cutoff := visibleIndex(para, avail/3)
-				if idx := strings.LastIndex(para[:lineLen], " "); idx > cutoff {
-					lineLen = idx + 1
-				}
-			}
-			sb.WriteString(strings.TrimRight(para[:lineLen], " "))
-			para = para[lineLen:]
-			if len(para) > 0 {
-				sb.WriteString("\n")
-				sb.WriteString(indent)
-			}
-		}
-	}
-
-	tsStr := dimStyle.Render(ts + "  ")
-	nameStr := cyanStyle.Render(fmt.Sprintf("%-*s", nw, name)) + ": "
-
-	return tsStr + nameStr + sb.String()
-}
 
 // captureOutput runs fn and captures anything written to os.Stdout.
 // It forces color output since the pipe would otherwise disable it.

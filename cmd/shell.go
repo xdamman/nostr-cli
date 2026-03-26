@@ -133,8 +133,7 @@ func runShell() error {
 	cachedEvents, _ := cache.LoadFeed(npub, 20)
 	for _, ev := range cachedEvents {
 		queueProfileFetch(ev.PubKey)
-		line := sprintFeedEvent(ev, myHex, shellPromptName, 80)
-		m.feedLines = append(m.feedLines, line)
+		m.feed.AddEvent(ev)
 	}
 
 	// Create the Bubble Tea program with alt screen

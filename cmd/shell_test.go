@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -204,14 +205,93 @@ func sliceContains(ss []string, s string) bool {
 	return false
 }
 
-func TestSprintFeedEvent(t *testing.T) {
+func TestRenderFeedEvent(t *testing.T) {
 	ev := nostr.Event{
 		PubKey:    "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 		CreatedAt: nostr.Timestamp(1711000000),
 		Content:   "Hello world",
 	}
-	line := sprintFeedEvent(ev, "myhex", "alice", 80)
-	if !strings.Contains(line, "Hello world") {
-		t.Errorf("expected feed line to contain content, got %q", line)
+	lines := renderFeedEvent(ev, "myhex", "alice", 80)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Hello world") {
+		t.Errorf("expected feed line to contain content, got %q", joined)
+	}
+}
+
+func TestFeedDedup(t *testing.T) {
+	f := newFeed(100)
+	ev := nostr.Event{ID: "abc123", CreatedAt: nostr.Timestamp(1000), Content: "hello"}
+
+	if !f.AddEvent(ev) {
+		t.Error("first add should return true")
+	}
+	if f.AddEvent(ev) {
+		t.Error("duplicate add should return false")
+	}
+	if f.Len() != 1 {
+		t.Errorf("expected 1 entry, got %d", f.Len())
+	}
+}
+
+func TestFeedOrdering(t *testing.T) {
+	f := newFeed(100)
+	// Add events out of order
+	f.AddEvent(nostr.Event{ID: "c", CreatedAt: nostr.Timestamp(3000), Content: "third"})
+	f.AddEvent(nostr.Event{ID: "a", CreatedAt: nostr.Timestamp(1000), Content: "first"})
+	f.AddEvent(nostr.Event{ID: "b", CreatedAt: nostr.Timestamp(2000), Content: "second"})
+
+	if f.Len() != 3 {
+		t.Fatalf("expected 3 entries, got %d", f.Len())
+	}
+	// Entries should be sorted oldest first
+	if f.entries[0].event.ID != "a" {
+		t.Errorf("expected first entry to be 'a', got %q", f.entries[0].event.ID)
+	}
+	if f.entries[1].event.ID != "b" {
+		t.Errorf("expected second entry to be 'b', got %q", f.entries[1].event.ID)
+	}
+	if f.entries[2].event.ID != "c" {
+		t.Errorf("expected third entry to be 'c', got %q", f.entries[2].event.ID)
+	}
+}
+
+func TestFeedTrim(t *testing.T) {
+	f := newFeed(3)
+	for i := 0; i < 5; i++ {
+		f.AddEvent(nostr.Event{
+			ID:        fmt.Sprintf("ev%d", i),
+			CreatedAt: nostr.Timestamp(i * 1000),
+			Content:   fmt.Sprintf("event %d", i),
+		})
+	}
+	if f.Len() != 3 {
+		t.Errorf("expected 3 entries after trim, got %d", f.Len())
+	}
+	// Should keep the 3 newest
+	if f.entries[0].event.ID != "ev2" {
+		t.Errorf("expected oldest kept entry to be 'ev2', got %q", f.entries[0].event.ID)
+	}
+	// Trimmed IDs should be removed from seen map
+	if f.HasEvent("ev0") {
+		t.Error("ev0 should have been removed from seen map")
+	}
+	if !f.HasEvent("ev4") {
+		t.Error("ev4 should still be in seen map")
+	}
+}
+
+func TestFeedAddEvents(t *testing.T) {
+	f := newFeed(100)
+	events := []nostr.Event{
+		{ID: "a", CreatedAt: nostr.Timestamp(1000)},
+		{ID: "b", CreatedAt: nostr.Timestamp(2000)},
+		{ID: "a", CreatedAt: nostr.Timestamp(1000)}, // duplicate
+	}
+	added := f.AddEvents(events)
+	if added != 2 {
+		t.Errorf("expected 2 new events, got %d", added)
+	}
+	if f.Len() != 2 {
+		t.Errorf("expected 2 entries, got %d", f.Len())
 	}
 }
