@@ -59,7 +59,7 @@ func runDM(cmd *cobra.Command, args []string) error {
 
 	targetHex, err := resolve.Resolve(npub, args[0])
 	if err != nil {
-		return fmt.Errorf("cannot resolve user: %w", err)
+		return err
 	}
 
 	nsec, err := config.LoadNsec(npub)

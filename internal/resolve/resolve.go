@@ -47,6 +47,19 @@ func Resolve(npub string, input string) (string, error) {
 		}
 	}
 
+	// If the input looks like a plain name (not npub, hex, or NIP-05),
+	// show existing aliases and hint how to create one.
+	if !strings.HasPrefix(input, "npub1") && !strings.Contains(input, "@") && !strings.Contains(input, ".") {
+		aliases, _ := config.LoadGlobalAliases()
+		if len(aliases) > 0 {
+			names := make([]string, 0, len(aliases))
+			for name := range aliases {
+				names = append(names, name)
+			}
+			return "", fmt.Errorf("no alias found for %q. Existing aliases: %s\n  To add an alias: nostr alias %s <npub>", input, strings.Join(names, ", "), input)
+		}
+		return "", fmt.Errorf("no alias found for %q. You have no aliases yet.\n  To add an alias: nostr alias %s <npub>", input, input)
+	}
 	return "", fmt.Errorf("could not resolve %q to a pubkey", input)
 }
 
