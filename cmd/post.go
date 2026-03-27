@@ -167,10 +167,6 @@ func runPost(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "Signer:")), npub)
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "Event ID:")), event.ID)
-	nevent, _ := nip19.EncodeEvent(event.ID, relays, event.PubKey)
-	if nevent != "" {
-		fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "nevent:")), nevent)
-	}
 	fmt.Println()
 
 	// Publish with interactive relay progress
