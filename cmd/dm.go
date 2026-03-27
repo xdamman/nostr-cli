@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -28,10 +27,7 @@ import (
 	"golang.org/x/term"
 )
 
-var (
-	dmJSONFlag  bool
-	dmWatchFlag bool
-)
+var dmWatchFlag bool
 
 var dmCmd = &cobra.Command{
 	Use:     "dm [profile] [message]",
@@ -42,7 +38,6 @@ var dmCmd = &cobra.Command{
 }
 
 func init() {
-	dmCmd.Flags().BoolVar(&dmJSONFlag, "json", false, "Output event and relay results as JSON")
 	dmCmd.Flags().BoolVar(&dmWatchFlag, "watch", false, "Listen for DMs without sending")
 	rootCmd.AddCommand(dmCmd)
 }
@@ -132,20 +127,24 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
 
-	if rawFlag {
-		_, _ = ui.PublishEventSilent(npub, event, relays, timeout)
-		ui.PrintRawEvent(event)
-		return nil
-	}
-
-	if dmJSONFlag {
+	if rawFlag || jsonFlag || jsonlFlag {
 		result, err := ui.PublishEventSilent(npub, event, relays, timeout)
-		if err != nil && result == nil {
-			return err
+		if rawFlag {
+			printRaw(event)
+		} else if jsonlFlag {
+			if result != nil {
+				printJSONL(result)
+			} else {
+				printJSONL(event)
+			}
+		} else {
+			if result != nil {
+				printJSON(result)
+			} else {
+				printJSON(event)
+			}
 		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(data))
-		if err != nil {
+		if err != nil && result == nil {
 			return err
 		}
 		return nil
@@ -295,9 +294,8 @@ func watchAllDMs(npub string) error {
 
 					printMu.Lock()
 					if rawFlag {
-						data, _ := json.Marshal(ev)
-						fmt.Println(string(data))
-					} else if dmJSONFlag {
+						printRaw(ev)
+					} else if jsonFlag || jsonlFlag {
 						entry := map[string]interface{}{
 							"timestamp": ts.Format(time.RFC3339),
 							"from":      senderName,
@@ -306,8 +304,11 @@ func watchAllDMs(npub string) error {
 							"event_id":  ev.ID,
 							"pubkey":    ev.PubKey,
 						}
-						data, _ := json.Marshal(entry)
-						fmt.Println(string(data))
+						if jsonlFlag {
+							printJSONL(entry)
+						} else {
+							printJSON(entry)
+						}
 					} else {
 						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
 					}
@@ -359,9 +360,8 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 		defer printMu.Unlock()
 
 		if rawFlag {
-			data, _ := json.Marshal(ev)
-			fmt.Println(string(data))
-		} else if dmJSONFlag {
+			printRaw(ev)
+		} else if jsonFlag || jsonlFlag {
 			entry := map[string]interface{}{
 				"timestamp": ts.Format(time.RFC3339),
 				"from":      senderName,
@@ -369,8 +369,11 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 				"event_id":  ev.ID,
 				"pubkey":    ev.PubKey,
 			}
-			data, _ := json.Marshal(entry)
-			fmt.Println(string(data))
+			if jsonlFlag {
+				printJSONL(entry)
+			} else {
+				printJSON(entry)
+			}
 		} else {
 			fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
 		}

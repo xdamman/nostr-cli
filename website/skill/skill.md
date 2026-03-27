@@ -199,13 +199,15 @@ nostr nip05
 - `--profile <npub|alias|username>` — Execute command under a specific profile
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 - `--no-color` — Strip ANSI color codes
-- `--raw` — Output raw Nostr event JSON (wire format, as relays see it)
-- `--json` — Enriched JSON output with event + relay publish results
+- `--raw` — Output raw Nostr event as compact single-line JSON (wire format)
+- `--json` — Enriched JSON output, pretty-printed with colors on TTY
+- `--jsonl` — One JSON object per line, no formatting (for bot/pipe consumption)
 
-### `--raw` vs `--json`
+### `--raw` vs `--json` vs `--jsonl`
 
-- `--raw` returns the **standard Nostr event object** — the exact JSON that relays receive. Useful for piping into other nostr tools or storing events.
-- `--json` returns an **enriched object** with the event plus metadata like relay publish status, timing, etc. Useful for automation and scripting.
+- `--raw` returns the **standard Nostr event object** as a single compact JSON line — the exact wire format relays receive. Useful for piping into other nostr tools.
+- `--json` returns an **enriched object** with the event plus metadata (relay publish status, timing). Pretty-printed with syntax colors when output is a terminal.
+- `--jsonl` returns the same enriched object as `--json` but as a **single line per event** with no formatting. Ideal for bots and streaming pipelines.
 
 ## User Resolution
 
@@ -217,31 +219,40 @@ In commands accepting a `<user>` argument, you can specify:
 ## Best Practices for Scriptable Usage
 
 ### Output Parsing
-Use `--raw` for the standard event format or `--json` for enriched output:
 ```bash
-# Raw event (wire format)
+# Raw event — compact single-line JSON (wire format)
 nostr post "Message" --raw | jq '.id'
 
-# Enriched JSON with relay results
-nostr post "Message" --json | jq '.relays[] | select(.ok) | .url'
+# Enriched JSON — pretty-printed with colors on TTY
+nostr post "Message" --json
 
-# Profile as JSON
-nostr profile alice --json | jq '.about'
-nostr relays --json | jq '.[]'
+# JSONL — one compact JSON line per event (for pipes/bots)
+nostr post "Message" --jsonl | jq '.relays[] | select(.ok) | .url'
+
+# Piped input works with all output flags
+echo "Hello world" | nostr --raw
+echo "Hello world" | nostr --json
 ```
 
-### Streaming Events
+### Building a Bot
+Use `--jsonl` for streaming commands — one JSON object per line, easy to parse:
 ```bash
+# Watch all incoming DMs as JSONL (one event per line, runs forever)
+nostr dm --watch --jsonl
+
+# Watch DMs from a specific user
+nostr dm alice --watch --jsonl
+
 # Stream all notes from followed accounts
-nostr --watch --raw              # raw event per line (JSONL)
-nostr --watch --json             # enriched JSON per line
+nostr --watch --jsonl
 
-# Stream all incoming DMs
-nostr dm --watch --raw           # raw encrypted events
-nostr dm --watch --json          # decrypted with sender info
-
-# Stream DMs with specific user
-nostr dm alice --watch --json
+# Example: auto-reply bot
+nostr dm --watch --jsonl | while read -r line; do
+  from=$(echo "$line" | jq -r '.from_npub')
+  msg=$(echo "$line" | jq -r '.message')
+  echo "Received from $from: $msg"
+  echo "pong" | nostr dm "$from" --jsonl
+done
 ```
 
 ### Clean Output

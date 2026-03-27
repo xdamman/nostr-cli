@@ -3,7 +3,6 @@ package cmd
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -23,7 +22,6 @@ import (
 )
 
 var followingRefreshFlag bool
-var followJSONFlag bool
 
 var followCmd = &cobra.Command{
 	Use:     "follow <profile>",
@@ -49,9 +47,6 @@ var followingCmd = &cobra.Command{
 }
 
 func init() {
-	followCmd.Flags().BoolVar(&followJSONFlag, "json", false, "Output as JSON")
-	unfollowCmd.Flags().BoolVar(&followJSONFlag, "json", false, "Output as JSON")
-	followingCmd.Flags().BoolVar(&followJSONFlag, "json", false, "Output as JSON")
 	followingCmd.Flags().BoolVar(&followingRefreshFlag, "refresh", false, "Force refresh from relays")
 	rootCmd.AddCommand(followCmd)
 	rootCmd.AddCommand(unfollowCmd)
@@ -99,7 +94,7 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	// Check if already following
 	for _, tag := range contacts.Tags {
 		if len(tag) >= 2 && tag[0] == "p" && tag[1] == targetHex {
-			if followJSONFlag {
+			if jsonFlag || jsonlFlag {
 				result := map[string]interface{}{
 					"ok":              false,
 					"action":          "follow",
@@ -107,8 +102,11 @@ func runFollow(cmd *cobra.Command, args []string) error {
 					"error":           "already following",
 					"following_count": len(contacts.Tags),
 				}
-				jsonBytes, _ := json.Marshal(result)
-				fmt.Println(string(jsonBytes))
+				if jsonlFlag {
+					printJSONL(result)
+				} else {
+					printJSON(result)
+				}
 			} else {
 				yellow.Printf("Already following %s\n", targetNpub)
 			}
@@ -154,15 +152,18 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
 
-	if followJSONFlag {
+	if jsonFlag || jsonlFlag {
 		result := map[string]interface{}{
 			"ok":              true,
 			"action":          "follow",
 			"user":            targetNpub,
 			"following_count": len(contacts.Tags),
 		}
-		jsonBytes, _ := json.Marshal(result)
-		fmt.Println(string(jsonBytes))
+		if jsonlFlag {
+			printJSONL(result)
+		} else {
+			printJSON(result)
+		}
 		return nil
 	}
 
@@ -279,7 +280,7 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	}
 
 	if !found {
-		if followJSONFlag {
+		if jsonFlag || jsonlFlag {
 			result := map[string]interface{}{
 				"ok":              false,
 				"action":          "unfollow",
@@ -287,8 +288,11 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 				"error":           "not following",
 				"following_count": len(contacts.Tags),
 			}
-			jsonBytes, _ := json.Marshal(result)
-			fmt.Println(string(jsonBytes))
+			if jsonlFlag {
+				printJSONL(result)
+			} else {
+				printJSON(result)
+			}
 		} else {
 			yellow.Printf("Not following %s\n", targetNpub)
 		}
@@ -332,15 +336,18 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
 
-	if followJSONFlag {
+	if jsonFlag || jsonlFlag {
 		result := map[string]interface{}{
 			"ok":              true,
 			"action":          "unfollow",
 			"user":            targetNpub,
 			"following_count": len(contacts.Tags),
 		}
-		jsonBytes, _ := json.Marshal(result)
-		fmt.Println(string(jsonBytes))
+		if jsonlFlag {
+			printJSONL(result)
+		} else {
+			printJSON(result)
+		}
 	} else {
 		green.Printf("✓ Unfollowed %s\n", targetNpub)
 	}
@@ -369,7 +376,7 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 	// Try cache first (unless --refresh)
 	if !followingRefreshFlag {
 		if cached := cache.LoadFollowing(npub); cached != nil && len(cached.Hexes) > 0 {
-			if followJSONFlag {
+			if jsonFlag || jsonlFlag {
 				var following []map[string]string
 				for _, hex := range cached.Hexes {
 					name := cache.ResolveNameByHex(hex)
@@ -379,8 +386,11 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 						"name": name,
 					})
 				}
-				jsonBytes, _ := json.Marshal(following)
-				fmt.Println(string(jsonBytes))
+				if jsonlFlag {
+					printJSONL(following)
+				} else {
+					printJSON(following)
+				}
 			} else {
 				printFollowingList(cached.Hexes, cyan, dim)
 				age := time.Since(cached.UpdatedAt).Truncate(time.Second)
@@ -414,7 +424,7 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 	_ = cache.SaveFollowing(npub, hexes)
 
 	if len(hexes) == 0 {
-		if followJSONFlag {
+		if jsonFlag || jsonlFlag {
 			fmt.Println("[]")
 		} else {
 			fmt.Println("You're not following anyone yet.")
@@ -422,7 +432,7 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if followJSONFlag {
+	if jsonFlag || jsonlFlag {
 		var following []map[string]string
 		for _, hex := range hexes {
 			name := cache.ResolveNameByHex(hex)
@@ -432,8 +442,11 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 				"name": name,
 			})
 		}
-		jsonBytes, _ := json.Marshal(following)
-		fmt.Println(string(jsonBytes))
+		if jsonlFlag {
+			printJSONL(following)
+		} else {
+			printJSON(following)
+		}
 	} else {
 		printFollowingList(hexes, cyan, dim)
 	}

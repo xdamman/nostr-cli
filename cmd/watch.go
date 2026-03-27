@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -68,14 +67,8 @@ func runWatchFeed() error {
 	// Include self
 	allAuthors := append(followedHexes, myHex)
 
-	jsonMode := false
-	for _, arg := range os.Args {
-		if arg == "--json" {
-			jsonMode = true
-			break
-		}
-	}
 	rawMode := rawFlag
+	jsonMode := jsonFlag || jsonlFlag
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,8 +142,7 @@ func runWatchFeed() error {
 
 					printMu.Lock()
 					if rawMode {
-						data, _ := json.Marshal(ev)
-						fmt.Println(string(data))
+						printRaw(ev)
 					} else if jsonMode {
 						entry := map[string]interface{}{
 							"timestamp": ts.Format(time.RFC3339),
@@ -160,8 +152,11 @@ func runWatchFeed() error {
 							"pubkey":    ev.PubKey,
 							"kind":      ev.Kind,
 						}
-						data, _ := json.Marshal(entry)
-						fmt.Println(string(data))
+						if jsonlFlag {
+							printJSONL(entry)
+						} else {
+							printJSON(entry)
+						}
 					} else {
 						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), authorName, content)
 					}

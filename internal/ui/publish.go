@@ -179,9 +179,9 @@ func publishInteractive(npub string, event nostr.Event, relays []string, ch <-ch
 	}, nil
 }
 
-// PrintRawEvent outputs the raw Nostr event as JSON (wire format).
+// PrintRawEvent outputs the raw Nostr event as compact single-line JSON (wire format).
 func PrintRawEvent(event nostr.Event) {
-	data, _ := json.MarshalIndent(event, "", "  ")
+	data, _ := json.Marshal(event)
 	fmt.Println(string(data))
 }
 

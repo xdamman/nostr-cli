@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,10 +19,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
-var (
-	postReply   string
-	postJSONOut bool
-)
+var postReply string
 
 var postCmd = &cobra.Command{
 	Use:     "post [message]",
@@ -35,7 +31,6 @@ var postCmd = &cobra.Command{
 
 func init() {
 	postCmd.Flags().StringVar(&postReply, "reply", "", "Event ID to reply to (hex or note1/nevent)")
-	postCmd.Flags().BoolVar(&postJSONOut, "json", false, "Output signed event as JSON without publishing")
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -126,29 +121,27 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to sign event: %w", err)
 	}
 
-	// --raw: publish and output raw event JSON (wire format)
-	if rawFlag {
-		timeout := time.Duration(timeoutFlag) * time.Millisecond
-		_, err := ui.PublishEventSilent(npub, event, relays, timeout)
-		if err != nil {
-			// Still output the event even if publish failed
-		}
-		_ = cache.LogFeedEvent(npub, event)
-		ui.PrintRawEvent(event)
-		return nil
-	}
-
-	// --json: publish and output event + relay results as JSON
-	if postJSONOut {
+	// Machine-readable output modes
+	if rawFlag || jsonFlag || jsonlFlag {
 		timeout := time.Duration(timeoutFlag) * time.Millisecond
 		result, err := ui.PublishEventSilent(npub, event, relays, timeout)
-		if err != nil && result == nil {
-			return err
-		}
 		_ = cache.LogFeedEvent(npub, event)
-		data, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(data))
-		if err != nil {
+		if rawFlag {
+			printRaw(event)
+		} else if jsonlFlag {
+			if result != nil {
+				printJSONL(result)
+			} else {
+				printJSONL(event)
+			}
+		} else {
+			if result != nil {
+				printJSON(result)
+			} else {
+				printJSON(event)
+			}
+		}
+		if err != nil && result == nil {
 			return err
 		}
 		return nil

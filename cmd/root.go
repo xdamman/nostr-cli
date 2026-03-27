@@ -20,6 +20,8 @@ var (
 	noColorFlag bool
 	timeoutFlag int
 	rawFlag     bool
+	jsonFlag    bool
+	jsonlFlag   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -298,7 +300,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub, alias, or username of the profile to use (default: active profile)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().IntVar(&timeoutFlag, "timeout", 2000, "Timeout per relay in milliseconds")
-	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event JSON (wire format)")
+	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event as compact single-line JSON")
+	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output enriched JSON (pretty-printed with colors on TTY)")
+	rootCmd.PersistentFlags().BoolVar(&jsonlFlag, "jsonl", false, "Output one JSON object per line (for bot/pipe consumption)")
 
 	// Command groups
 	rootCmd.AddGroup(
