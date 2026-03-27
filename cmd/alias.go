@@ -11,7 +11,7 @@ import (
 )
 
 var aliasCmd = &cobra.Command{
-	Use:     "alias [name] [profile]",
+	Use:     "alias [name] [npub|nip05]",
 	Short:   "Manage aliases",
 	Long:    "Create, list, or remove aliases. Aliases are global shortcuts for npubs.\nA <profile> can be an npub or NIP-05 address.",
 	GroupID: "infra",
@@ -59,7 +59,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			dim := color.New(color.Faint)
 			fmt.Println("No aliases configured.")
 			fmt.Println()
-			dim.Println("Add an alias:  nostr alias <name> <profile>")
+			dim.Println("Add an alias:  nostr alias <name> <npub|nip05>")
 			dim.Println("Send a DM:     nostr dm <name> <message>")
 			return nil
 		}
@@ -76,13 +76,13 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println()
 		dim := color.New(color.Faint)
-		dim.Println("Add an alias:     nostr alias <name> <profile>")
+		dim.Println("Add an alias:     nostr alias <name> <npub|nip05>")
 		dim.Println("Remove an alias:  nostr alias rm <name>")
 		return nil
 	}
 
 	if len(args) < 2 {
-		return fmt.Errorf("usage: nostr alias <name> <profile>")
+		return fmt.Errorf("usage: nostr alias <name> <npub|nip05>")
 	}
 
 	name := args[0]
