@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -383,15 +384,67 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 
 	profileName := resolveProfileName(npub)
 
-	// Show active profile
-	short := npub
-	if len(short) > 20 {
-		short = short[:20] + "..."
+	// Show profile summary
+	alias := ""
+	if aliases, aErr := config.LoadGlobalAliases(); aErr == nil {
+		for a, n := range aliases {
+			if n == npub {
+				alias = a
+				break
+			}
+		}
 	}
-	if profileName != "" {
-		fmt.Printf("Profile: %s (%s)\n", cyan(profileName), dimFn.Sprint(short))
+	profileDir, _ := config.ProfileDir(npub)
+	home, _ := os.UserHomeDir()
+	if home != "" && strings.HasPrefix(profileDir, home) {
+		profileDir = "~" + profileDir[len(home):]
+	}
+
+	sentEvents, _ := cache.LoadSentEvents(npub)
+
+	// Count DM conversations
+	dmDir := ""
+	if dir, err := config.ProfileDir(npub); err == nil {
+		dmDir = filepath.Join(dir, "directmessages")
+	}
+	dmConversations := 0
+	dmEvents := 0
+	if dmDir != "" {
+		if entries, err := os.ReadDir(dmDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+					dmConversations++
+					// Count lines in each file
+					if f, err := os.Open(filepath.Join(dmDir, e.Name())); err == nil {
+						scanner := bufio.NewScanner(f)
+						for scanner.Scan() {
+							dmEvents++
+						}
+						f.Close()
+					}
+				}
+			}
+		}
+	}
+
+	displayName := profileName
+	if displayName == "" {
+		displayName = npub[:20] + "..."
+	}
+
+	fmt.Printf("Profile: %s\n\n", cyan(displayName))
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-16s", "Npub:")), npub)
+	if alias != "" {
+		fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-16s", "Alias:")), alias)
+	}
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-16s", "Directory:")), profileDir)
+	fmt.Printf("  %s %d\n", cyan(fmt.Sprintf("%-16s", "Sent events:")), len(sentEvents))
+	if dmConversations > 0 {
+		fmt.Printf("  %s %d event%s across %d conversation%s\n",
+			cyan(fmt.Sprintf("%-16s", "Direct messages:")),
+			dmEvents, plural(dmEvents), dmConversations, plural(dmConversations))
 	} else {
-		fmt.Printf("Profile: %s\n", cyan(short))
+		fmt.Printf("  %s none\n", cyan(fmt.Sprintf("%-16s", "Direct messages:")))
 	}
 	fmt.Println()
 
@@ -404,11 +457,8 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no relays configured — run `nostr relays add <url>` first")
 	}
 
-	// Load local sent events and compute syncable set upfront
-	localEvents, err := cache.LoadSentEvents(npub)
-	if err != nil {
-		return fmt.Errorf("failed to load local events: %w", err)
-	}
+	// Reuse sent events from the summary above
+	localEvents := sentEvents
 	localSyncable, localSkipped := syncableEvents(localEvents)
 
 	localIDs := make(map[string]bool, len(localEvents))
