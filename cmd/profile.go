@@ -157,7 +157,33 @@ func fetchAndShowProfile(npub, user string, label func(a ...interface{}) string,
 func showProfileJSON(npub string) error {
 	meta, err := profile.LoadCached(npub)
 	if err != nil || meta == nil {
-		return fmt.Errorf("no cached profile for %s. Run 'nostr profile %s --refresh' to fetch it", npub, npub)
+		// No cache — fetch from relays and save
+		activeNpub, _ := config.ActiveProfile()
+		var relays []string
+		if activeNpub != "" {
+			relays, _ = config.LoadRelays(activeNpub)
+		}
+		targetRelays, _ := config.LoadRelaysWithFallback(npub)
+		seen := make(map[string]bool, len(relays))
+		for _, r := range relays {
+			seen[r] = true
+		}
+		for _, r := range targetRelays {
+			if !seen[r] {
+				relays = append(relays, r)
+			}
+		}
+		for _, r := range config.DefaultRelays() {
+			if !seen[r] {
+				relays = append(relays, r)
+			}
+		}
+		ctx := context.Background()
+		meta, err = profile.FetchFromRelays(ctx, npub, relays)
+		if err != nil || meta == nil {
+			return fmt.Errorf("profile not found for %s", npub)
+		}
+		_ = profile.SaveCached(npub, meta)
 	}
 
 	obj := map[string]interface{}{
