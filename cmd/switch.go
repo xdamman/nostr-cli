@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -39,6 +38,23 @@ type profileEntry struct {
 func runSwitch(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
 	activeNpub, _ := config.ActiveProfile()
+
+	// JSON output: list all profiles
+	if (rawFlag || jsonFlag || jsonlFlag) && len(args) == 0 {
+		entries, err := listSwitchableProfiles()
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			obj := profileToMap(e, e.npub == activeNpub)
+			if jsonlFlag || rawFlag {
+				printJSONL(obj)
+			} else {
+				printJSON(obj)
+			}
+		}
+		return nil
+	}
 
 	if len(args) > 0 {
 		return switchToTarget(args[0], activeNpub, green)
@@ -110,6 +126,33 @@ func switchToTarget(arg string, activeNpub string, green *color.Color) error {
 		return err
 	}
 
+	// JSON output for single profile switch
+	if rawFlag || jsonFlag || jsonlFlag {
+		meta, _ := profile.LoadCached(targetNpub)
+		alias := ""
+		if aliases, aErr := config.LoadGlobalAliases(); aErr == nil {
+			for a, n := range aliases {
+				if n == targetNpub {
+					alias = a
+					break
+				}
+			}
+		}
+		relays, _ := config.LoadRelays(targetNpub)
+		obj := profileToMap(profileEntry{
+			npub:  targetNpub,
+			name:  profileName(meta),
+			alias: alias,
+		}, true)
+		obj["relays"] = relays
+		if jsonlFlag || rawFlag {
+			printJSONL(obj)
+		} else {
+			printJSON(obj)
+		}
+		return nil
+	}
+
 	meta, _ := profile.LoadCached(targetNpub)
 	name := profileName(meta)
 	if name != "" {
@@ -121,31 +164,18 @@ func switchToTarget(arg string, activeNpub string, green *color.Color) error {
 	return nil
 }
 
-// showSwitchedProfile displays profile details and relays after switching.
+// showSwitchedProfile displays cached profile details and relays after switching.
 func showSwitchedProfile(npub string) {
 	label := color.New(color.FgCyan).SprintFunc()
 	dim := color.New(color.Faint)
 
-	// Try to fetch fresh profile from relays, fall back to cache
+	meta, _ := profile.LoadCached(npub)
 	relays, _ := config.LoadRelays(npub)
-	var meta *profile.Metadata
-
-	if len(relays) > 0 {
-		ctx := context.Background()
-		fresh, err := profile.FetchFromRelays(ctx, npub, relays)
-		if err == nil && fresh != nil {
-			meta = fresh
-			_ = profile.SaveCached(npub, meta)
-		}
-	}
-	if meta == nil {
-		meta, _ = profile.LoadCached(npub)
-	}
 
 	fmt.Println()
-	pubHex, _ := crypto.NpubToHex(npub)
 	fmt.Printf("%s %s\n", label("npub:"), npub)
 	if meta != nil {
+		pubHex, _ := crypto.NpubToHex(npub)
 		printColorField(label, "Name", meta.Name)
 		printColorField(label, "Display Name", meta.DisplayName)
 		printColorField(label, "About", meta.About)
@@ -154,6 +184,8 @@ func showSwitchedProfile(npub string) {
 		printColorField(label, "Banner", meta.Banner)
 		printColorField(label, "Website", meta.Website)
 		printColorField(label, "Lightning", meta.LUD16)
+	} else {
+		dim.Println("  No cached profile. Run 'nostr profile' to fetch it.")
 	}
 
 	if len(relays) > 0 {
@@ -231,6 +263,36 @@ func relayInfoStr(npub string) string {
 		return relays[0]
 	}
 	return fmt.Sprintf("%d relays", len(relays))
+}
+
+// profileToMap builds a JSON-friendly map for a profile entry.
+func profileToMap(e profileEntry, active bool) map[string]interface{} {
+	obj := map[string]interface{}{
+		"npub":   e.npub,
+		"active": active,
+	}
+	if e.name != "" {
+		obj["name"] = e.name
+	}
+	if e.alias != "" {
+		obj["alias"] = e.alias
+	}
+	// Include cached profile metadata if available
+	if meta, _ := profile.LoadCached(e.npub); meta != nil {
+		if meta.DisplayName != "" {
+			obj["display_name"] = meta.DisplayName
+		}
+		if meta.About != "" {
+			obj["about"] = meta.About
+		}
+		if meta.NIP05 != "" {
+			obj["nip05"] = meta.NIP05
+		}
+		if meta.Picture != "" {
+			obj["picture"] = meta.Picture
+		}
+	}
+	return obj
 }
 
 func profileName(meta *profile.Metadata) string {
