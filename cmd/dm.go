@@ -150,7 +150,36 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 		return nil
 	}
 
-	fmt.Printf("Sending DM to %s...\n", targetNpub)
+	cyan := color.New(color.FgCyan).SprintFunc()
+
+	// Resolve display names
+	senderName := resolveProfileName(npub)
+	if senderName == "" {
+		senderName = npub[:20] + "..."
+	}
+	recipientName := cache.ResolveNameByHex(targetHex)
+	if recipientName == "" {
+		recipientName = targetNpub[:20] + "..."
+	}
+	// Check aliases for better names
+	if aliases, aErr := config.LoadGlobalAliases(); aErr == nil {
+		for a, n := range aliases {
+			if n == npub {
+				senderName = a
+			}
+			if n == targetNpub {
+				recipientName = a
+			}
+		}
+	}
+
+	fmt.Printf("Sending encrypted direct message from %s to %s\n", cyan(senderName), cyan(recipientName))
+	fmt.Println()
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Signer:")), npub)
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Recipient:")), targetNpub)
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Event ID:")), event.ID)
+	fmt.Println()
+
 	_, err = ui.PublishEventToRelays(npub, event, relays, timeout)
 	if err != nil {
 		return err
