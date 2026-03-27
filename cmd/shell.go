@@ -30,7 +30,7 @@ type slashCmd struct {
 }
 
 var slashCommands = []slashCmd{
-	{"dm", "/dm <user> <message>", "Send a direct message"},
+	{"dm", "/dm [user] [message]", "Start a DM conversation or send a message"},
 	{"post", "/post <message>", "Post a note"},
 	{"follow", "/follow <user>", "Follow a user"},
 	{"following", "/following", "List accounts you follow"},
@@ -42,6 +42,8 @@ var slashCommands = []slashCmd{
 	{"alias", "/alias <name> <npub>", "Create an alias"},
 	{"aliases", "/aliases", "List aliases"},
 	{"nip", "/nip <number>", "View a NIP specification"},
+	{"help", "/help", "Show available commands"},
+	{"welcome", "/welcome", "Show welcome message"},
 	{"version", "/version", "Show version info"},
 	{"update", "/update", "Check for updates"},
 }
@@ -134,6 +136,9 @@ func runShell() error {
 	for _, ev := range cachedEvents {
 		queueProfileFetch(ev.PubKey)
 		m.feed.AddEvent(ev)
+	}
+	if len(cachedEvents) > 0 {
+		m.showWelcome = false
 	}
 
 	// Create the Bubble Tea program with alt screen
@@ -280,10 +285,21 @@ func runShell() error {
 	}
 
 	// Run the Bubble Tea program (blocks until quit)
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		return err
 	}
 	shellCancel()
+
+	// Check if the user wants to enter DM mode
+	if sm, ok := finalModel.(shellModel); ok && sm.dmTarget != "" {
+		targetHex, err := resolve.Resolve(npub, sm.dmTarget)
+		if err != nil {
+			return err
+		}
+		return interactiveDM(npub, skHex, myHex, targetHex, sm.dmTarget, relays)
+	}
+
 	return nil
 }
 
@@ -731,8 +747,14 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 		color.Green("✓ Unfollowed %s", targetNpub)
 
 	case "dm":
-		if len(args) < 2 {
-			color.Red("Usage: /dm <user> <message>")
+		if len(args) == 0 {
+			// Show list of people to DM
+			printDMTargets(npub)
+			return
+		}
+		if len(args) == 1 {
+			// Start interactive DM — signal back to the Bubble Tea model
+			fmt.Printf("__DM_START__:%s", args[0])
 			return
 		}
 		targetHex, err := resolve.Resolve(npub, args[0])
@@ -929,6 +951,12 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			color.Red("Error: %v", err)
 		}
 
+	case "help":
+		printShellHelp()
+
+	case "welcome":
+		printWelcomeMessage()
+
 	case "version":
 		runVersion(nil, nil)
 
@@ -954,6 +982,115 @@ func mergeWithDefaults(relays []string) []string {
 		}
 	}
 	return merged
+}
+
+func printWelcomeMessage() {
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint)
+	green := color.New(color.FgGreen).SprintFunc()
+
+	fmt.Println()
+	fmt.Printf("  Welcome to %s\n", cyan("Nostr"))
+	fmt.Println()
+	dim.Println("  Nostr is an open protocol for censorship-resistant social networking.")
+	dim.Println("  Your identity is a cryptographic key pair — no accounts, no servers you depend on.")
+	fmt.Println()
+	fmt.Printf("  %s\n", green("Getting started:"))
+	fmt.Println()
+	fmt.Printf("    %s  Follow someone and see their posts in your feed\n", cyan("/follow <user>"))
+	fmt.Printf("    %s  List who you follow\n", cyan("/following"))
+	fmt.Printf("    %s  Post a public note (or just type and press enter)\n", cyan("/post <message>"))
+	fmt.Printf("    %s  Start a DM conversation or send a message\n", cyan("/dm [user]"))
+	fmt.Printf("    %s  View a profile\n", cyan("/profile [user]"))
+	fmt.Printf("    %s  Show all commands\n", cyan("/help"))
+	fmt.Println()
+	dim.Println("  A <user> can be an npub, alias, or NIP-05 address (user@domain.com).")
+	dim.Println("  Type / to see the command menu. Press ctrl+c to exit.")
+	fmt.Println()
+}
+
+func printShellHelp() {
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint)
+
+	fmt.Println()
+	fmt.Println("  Available commands:")
+	fmt.Println()
+	for _, cmd := range slashCommands {
+		fmt.Printf("    %s  %s\n", cyan(fmt.Sprintf("%-28s", cmd.usage)), cmd.desc)
+	}
+	fmt.Println()
+	dim.Println("  Just type text and press enter to post a public note.")
+	dim.Println("  A <user> can be an npub, alias, or NIP-05 address.")
+	fmt.Println()
+}
+
+func printDMTargets(npub string) {
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint)
+
+	fmt.Println()
+	fmt.Println("  Start a DM with someone:")
+	fmt.Println()
+
+	// Show aliases
+	aliases, _ := config.LoadGlobalAliases()
+	if len(aliases) > 0 {
+		names := make([]string, 0, len(aliases))
+		for n := range aliases {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		fmt.Println("  Aliases:")
+		for _, n := range names {
+			fmt.Printf("    %s\n", cyan(n))
+		}
+		fmt.Println()
+	}
+
+	// Show people from feed
+	feedAuthors := collectFeedAuthors(npub)
+	if len(feedAuthors) > 0 {
+		fmt.Println("  People in your feed:")
+		for _, name := range feedAuthors {
+			fmt.Printf("    %s\n", cyan(name))
+		}
+		fmt.Println()
+	}
+
+	dim.Println("  Usage: /dm <user> to start a conversation, /dm <user> <message> to send")
+	fmt.Println()
+}
+
+// collectFeedAuthors returns display names of unique authors from the profile cache
+// who appear in the following list (excluding self).
+func collectFeedAuthors(npub string) []string {
+	cached := cache.LoadFollowing(npub)
+	if cached == nil || len(cached.Hexes) == 0 {
+		return nil
+	}
+	myHex, _ := crypto.NpubToHex(npub)
+	var names []string
+	seen := make(map[string]bool)
+	for _, hex := range cached.Hexes {
+		if hex == myHex {
+			continue
+		}
+		name := cache.ResolveNameByHex(hex)
+		if name == "" {
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) > 20 {
+		names = names[:20]
+	}
+	return names
 }
 
 // filterCommands returns slash commands matching the current input prefix.

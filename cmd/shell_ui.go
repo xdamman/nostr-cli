@@ -46,6 +46,11 @@ type followReadyMsg struct {
 	Hexes []string
 }
 
+// dmStartMsg signals the user wants to enter DM mode with a target.
+type dmStartMsg struct {
+	Target string
+}
+
 // -- Styles --
 
 var (
@@ -82,6 +87,12 @@ type shellModel struct {
 	relays     []string
 	promptName string
 
+	// Welcome message shown until first event arrives
+	showWelcome bool
+
+	// DM mode: when set, shell quits and launches DM with this target
+	dmTarget string
+
 	quitting bool
 }
 
@@ -93,13 +104,14 @@ func newShellModel(npub, myHex, skHex string, relays []string, promptName string
 	ti.Width = 0 // will be set on WindowSizeMsg
 
 	return shellModel{
-		feed:       newFeed(maxFeedLines),
-		input:      ti,
-		npub:       npub,
-		myHex:      myHex,
-		skHex:      skHex,
-		relays:     relays,
-		promptName: promptName,
+		feed:        newFeed(maxFeedLines),
+		input:       ti,
+		npub:        npub,
+		myHex:       myHex,
+		skHex:       skHex,
+		relays:      relays,
+		promptName:  promptName,
+		showWelcome: true,
 	}
 }
 
@@ -121,10 +133,14 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case newEventMsg:
 		m.feed.AddEvent(msg.Event)
+		m.showWelcome = false
 		return m, nil
 
 	case batchEventsMsg:
 		m.feed.AddEvents(msg.Events)
+		if len(msg.Events) > 0 {
+			m.showWelcome = false
+		}
 		return m, nil
 
 	case statusMsg:
@@ -139,6 +155,10 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case followReadyMsg:
 		return m, nil
+
+	case dmStartMsg:
+		m.dmTarget = msg.Target
+		return m, tea.Quit
 	}
 
 	// Pass through to textinput
@@ -290,6 +310,9 @@ func (m shellModel) renderFeed(height int) string {
 	rendered := m.feed.Render(m.myHex, m.promptName, m.width)
 
 	if len(rendered) == 0 {
+		if m.showWelcome {
+			return m.renderWelcome(height)
+		}
 		lines := make([]string, height)
 		for i := range lines {
 			lines[i] = ""
@@ -313,6 +336,39 @@ func (m shellModel) renderFeed(height int) string {
 	lines = append(lines, visible...)
 
 	return strings.Join(lines, "\n")
+}
+
+func (m shellModel) renderWelcome(height int) string {
+	welcome := []string{
+		"",
+		"  " + cyanStyle.Render("Welcome to Nostr"),
+		"",
+		dimStyle.Render("  Nostr is an open protocol for censorship-resistant social networking."),
+		dimStyle.Render("  Your identity is a cryptographic key pair — no accounts, no servers you depend on."),
+		"",
+		"  " + greenStyle.Render("Getting started:"),
+		"",
+		"    " + cyanStyle.Render("/follow <user>") + "   Follow someone and see their posts",
+		"    " + cyanStyle.Render("/dm [user]") + "       Start a DM conversation",
+		"    " + cyanStyle.Render("/help") + "            Show all commands",
+		"",
+		dimStyle.Render("  Just type text and press enter to post a public note."),
+		dimStyle.Render("  A <user> can be an npub, alias, or NIP-05 (user@domain.com)."),
+		"",
+	}
+
+	// Pad to fill height
+	if len(welcome) < height {
+		padding := make([]string, height-len(welcome))
+		for i := range padding {
+			padding[i] = ""
+		}
+		welcome = append(padding, welcome...)
+	}
+	if len(welcome) > height {
+		welcome = welcome[len(welcome)-height:]
+	}
+	return strings.Join(welcome, "\n")
 }
 
 func (m shellModel) renderStatus() string {
@@ -384,6 +440,11 @@ func (m shellModel) makeSlashCmd(npub, myHex string, relays []string, line strin
 			close(statusCh)
 		})
 		if output != "" {
+			// Check for DM start signal
+			if strings.HasPrefix(output, "__DM_START__:") {
+				target := strings.TrimPrefix(output, "__DM_START__:")
+				return dmStartMsg{Target: target}
+			}
 			return infoMsg{Text: strings.TrimRight(output, "\n")}
 		}
 		return nil
