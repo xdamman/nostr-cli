@@ -3,7 +3,6 @@ package cmd
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -22,10 +21,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
-var (
-	profileJSONFlag    bool
-	profileRefreshFlag bool
-)
+var profileRefreshFlag bool
 
 var profileCmd = &cobra.Command{
 	Use:     "profile [profile]",
@@ -49,7 +45,6 @@ var profileRmCmd = &cobra.Command{
 }
 
 func init() {
-	profileCmd.Flags().BoolVar(&profileJSONFlag, "json", false, "Output raw kind 0 event as JSON")
 	profileCmd.Flags().BoolVar(&profileRefreshFlag, "refresh", false, "Fetch fresh profile from relays")
 	profileCmd.AddCommand(profileUpdateCmd)
 	rootCmd.AddCommand(profileCmd)
@@ -71,7 +66,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if profileJSONFlag {
+	if rawFlag || jsonFlag || jsonlFlag {
 		return showProfileJSON(npub)
 	}
 
@@ -91,7 +86,7 @@ func lookupUserProfile(user string, label func(a ...interface{}) string, errColo
 		npub = resolved
 	}
 
-	if profileJSONFlag {
+	if rawFlag || jsonFlag || jsonlFlag {
 		return showProfileJSON(npub)
 	}
 
@@ -216,11 +211,13 @@ func showProfileJSON(npub string) error {
 		return fmt.Errorf("profile not found")
 	}
 
-	data, err := json.MarshalIndent(event, "", "  ")
-	if err != nil {
-		return err
+	if rawFlag {
+		printRaw(event)
+	} else if jsonlFlag {
+		printJSONL(event)
+	} else {
+		printJSON(event)
 	}
-	fmt.Println(string(data))
 	return nil
 }
 
