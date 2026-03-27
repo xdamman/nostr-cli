@@ -10,13 +10,11 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/nip05"
 	"github.com/xdamman/nostr-cli/internal/profile"
-	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
@@ -155,68 +153,47 @@ func fetchAndShowProfile(npub, user string, label func(a ...interface{}) string,
 	return nil
 }
 
-// showProfileJSON fetches the raw kind 0 event and prints it as pretty JSON.
+// showProfileJSON outputs the cached profile as JSON. No relay fetch.
 func showProfileJSON(npub string) error {
-	activeNpub, _ := config.ActiveProfile()
-	var relays []string
-	if activeNpub != "" {
-		relays, _ = config.LoadRelays(activeNpub)
-	}
-	// Also try the target npub's relays
-	targetRelays, _ := config.LoadRelays(npub)
-	for _, r := range targetRelays {
-		found := false
-		for _, existing := range relays {
-			if existing == r {
-				found = true
-				break
-			}
-		}
-		if !found {
-			relays = append(relays, r)
-		}
-	}
-	// Include default relays
-	seen := make(map[string]bool, len(relays))
-	for _, r := range relays {
-		seen[r] = true
-	}
-	for _, r := range config.DefaultRelays() {
-		if !seen[r] {
-			relays = append(relays, r)
-		}
+	meta, err := profile.LoadCached(npub)
+	if err != nil || meta == nil {
+		return fmt.Errorf("no cached profile for %s. Run 'nostr profile %s --refresh' to fetch it", npub, npub)
 	}
 
-	if len(relays) == 0 {
-		return fmt.Errorf("no relays configured")
+	obj := map[string]interface{}{
+		"npub": npub,
 	}
-
-	pubHex, err := crypto.NpubToHex(npub)
-	if err != nil {
-		return err
+	if meta.Name != "" {
+		obj["name"] = meta.Name
 	}
-
-	ctx := context.Background()
-	filter := nostr.Filter{
-		Authors: []string{pubHex},
-		Kinds:   []int{nostr.KindProfileMetadata},
-		Limit:   1,
+	if meta.DisplayName != "" {
+		obj["display_name"] = meta.DisplayName
 	}
-
-	event, err := internalRelay.FetchEvent(ctx, filter, relays)
-	if err != nil {
-		return fmt.Errorf("failed to fetch profile: %w", err)
+	if meta.About != "" {
+		obj["about"] = meta.About
 	}
-	if event == nil {
-		return fmt.Errorf("profile not found")
+	if meta.Picture != "" {
+		obj["picture"] = meta.Picture
+	}
+	if meta.NIP05 != "" {
+		obj["nip05"] = meta.NIP05
+	}
+	if meta.Banner != "" {
+		obj["banner"] = meta.Banner
+	}
+	if meta.Website != "" {
+		obj["website"] = meta.Website
+	}
+	if meta.LUD16 != "" {
+		obj["lud16"] = meta.LUD16
 	}
 
 	if rawFlag {
-		printRaw(event)
+		printRaw(obj)
 	} else if jsonlFlag {
-		printJSONL(event)
+		printJSONL(obj)
 	} else {
-		printJSON(event)
+		printJSON(obj)
 	}
 	return nil
 }
