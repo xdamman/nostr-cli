@@ -14,6 +14,7 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip04"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/xdamman/nostr-cli/internal/cache"
+	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/ui"
@@ -39,14 +40,24 @@ type dmFeedBT struct {
 	entries      []nostr.Event
 	seen         map[string]bool
 	sharedSecret []byte
+	skHex        string // for NIP-17 unwrapping
 	maxSize      int
+	// Cache unwrapped NIP-17 rumor content: eventID → {plaintext, senderPubHex}
+	unwrapped map[string]unwrappedRumor
 }
 
-func newDMFeedBT(sharedSecret []byte, maxSize int) dmFeedBT {
+type unwrappedRumor struct {
+	plaintext    string
+	senderPubHex string
+}
+
+func newDMFeedBT(sharedSecret []byte, skHex string, maxSize int) dmFeedBT {
 	return dmFeedBT{
 		seen:         make(map[string]bool),
 		sharedSecret: sharedSecret,
+		skHex:        skHex,
 		maxSize:      maxSize,
+		unwrapped:    make(map[string]unwrappedRumor),
 	}
 }
 
@@ -88,9 +99,31 @@ func (f *dmFeedBT) render(myHex, myName, targetName string, dimSent map[string]b
 
 	var lines []string
 	for _, ev := range f.entries {
-		plaintext, err := nip04.Decrypt(ev.Content, f.sharedSecret)
-		if err != nil {
-			continue
+		var plaintext string
+		var senderPubHex string
+
+		if ev.Kind == nostr.KindGiftWrap {
+			// NIP-17 gift wrap — use cached unwrap
+			if cached, ok := f.unwrapped[ev.ID]; ok {
+				plaintext = cached.plaintext
+				senderPubHex = cached.senderPubHex
+			} else {
+				rumor, err := crypto.UnwrapGiftWrapDM(ev, f.skHex)
+				if err != nil {
+					continue
+				}
+				plaintext = rumor.Content
+				senderPubHex = rumor.PubKey
+				f.unwrapped[ev.ID] = unwrappedRumor{plaintext: plaintext, senderPubHex: senderPubHex}
+			}
+		} else {
+			// NIP-04 legacy
+			var err error
+			plaintext, err = nip04.Decrypt(ev.Content, f.sharedSecret)
+			if err != nil {
+				continue
+			}
+			senderPubHex = ev.PubKey
 		}
 
 		ts := formatLocalTimestamp(time.Unix(int64(ev.CreatedAt), 0))
@@ -105,7 +138,7 @@ func (f *dmFeedBT) render(myHex, myName, targetName string, dimSent map[string]b
 		isDim := dimSent != nil && dimSent[ev.ID]
 
 		var name string
-		if ev.PubKey == myHex {
+		if senderPubHex == myHex {
 			name = myName
 		} else {
 			name = targetName
@@ -119,7 +152,7 @@ func (f *dmFeedBT) render(myHex, myName, targetName string, dimSent map[string]b
 		} else {
 			tsStr := dimStyle.Render(ts + "  ")
 			var nameStr string
-			if ev.PubKey == myHex {
+			if senderPubHex == myHex {
 				nameStr = greenStyle.Render(fmt.Sprintf("%-*s", nameWidth, name)) + ": "
 			} else {
 				nameStr = cyanStyle.Render(fmt.Sprintf("%-*s", nameWidth, name)) + ": "
@@ -170,7 +203,7 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 	ti.Prompt = greenStyle.Render(myName) + "> "
 
 	return dmModel{
-		feed:       newDMFeedBT(sharedSecret, 200),
+		feed:       newDMFeedBT(sharedSecret, skHex, 200),
 		dimSent:    make(map[string]bool),
 		input:      ti,
 		npub:       npub,
@@ -273,35 +306,46 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedMentions = nil
 		}
 
-		// Encrypt and sign
-		sharedSecret := generateSharedSecret(m.skHex, m.targetHex)
-		ciphertext, err := nip04.Encrypt(content, sharedSecret)
+		if dmNip04Flag {
+			// Legacy NIP-04 encrypt + kind 4
+			sharedSecret := generateSharedSecret(m.skHex, m.targetHex)
+			ciphertext, err := nip04.Encrypt(content, sharedSecret)
+			if err != nil {
+				return m, nil
+			}
+
+			tags := nostr.Tags{nostr.Tag{"p", m.targetHex}}
+			tags = append(tags, extraTags...)
+
+			event := nostr.Event{
+				PubKey:    m.myHex,
+				CreatedAt: nostr.Now(),
+				Kind:      nostr.KindEncryptedDirectMessage,
+				Tags:      tags,
+				Content:   ciphertext,
+			}
+			if err := event.Sign(m.skHex); err != nil {
+				return m, nil
+			}
+
+			// Add to feed immediately (dim = unconfirmed)
+			m.dimSent[event.ID] = true
+			m.feed.addEvents([]nostr.Event{event})
+			_ = cache.LogDMEvent(m.npub, m.targetHex, event)
+			_ = cache.LogSentEvent(m.npub, event)
+
+			// Publish in background
+			return m, m.publishDMCmd(event)
+		}
+
+		// NIP-17 gift wrap (default)
+		forRecipient, forSelf, err := crypto.CreateGiftWrapDM(content, m.skHex, m.myHex, m.targetHex)
 		if err != nil {
 			return m, nil
 		}
 
-		tags := nostr.Tags{nostr.Tag{"p", m.targetHex}}
-		tags = append(tags, extraTags...)
-
-		event := nostr.Event{
-			PubKey:    m.myHex,
-			CreatedAt: nostr.Now(),
-			Kind:      nostr.KindEncryptedDirectMessage,
-			Tags:      tags,
-			Content:   ciphertext,
-		}
-		if err := event.Sign(m.skHex); err != nil {
-			return m, nil
-		}
-
-		// Add to feed immediately (dim = unconfirmed)
-		m.dimSent[event.ID] = true
-		m.feed.addEvents([]nostr.Event{event})
-		_ = cache.LogDMEvent(m.npub, m.targetHex, event)
-		_ = cache.LogSentEvent(m.npub, event)
-
-		// Publish in background
-		return m, m.publishDMCmd(event)
+		// Publish both events in background
+		return m, m.publishNip17Cmd(forRecipient, forSelf)
 	}
 
 	var cmd tea.Cmd
@@ -410,6 +454,44 @@ func (m dmModel) publishDMCmd(event nostr.Event) tea.Cmd {
 		}
 		_ = cache.LogSentEvent(npub, event)
 		return dmStatusMsg{Text: ""}
+	}
+}
+
+func (m dmModel) publishNip17Cmd(forRecipient, forSelf nostr.Event) tea.Cmd {
+	npub := m.npub
+	relays := m.relays
+	return func() tea.Msg {
+		total := len(relays)
+		timeout := time.Duration(timeoutFlag) * time.Millisecond
+
+		ch := internalRelay.PublishEventWithProgress(context.Background(), forRecipient, relays, timeout)
+		ch2 := internalRelay.PublishEventWithProgress(context.Background(), forSelf, relays, timeout)
+
+		recipientOK := make(map[string]bool)
+		selfOK := make(map[string]bool)
+
+		for res := range ch {
+			if res.OK {
+				recipientOK[res.URL] = true
+			}
+		}
+		for res := range ch2 {
+			if res.OK {
+				selfOK[res.URL] = true
+			}
+		}
+
+		successCount := 0
+		for _, r := range relays {
+			if recipientOK[r] && selfOK[r] {
+				successCount++
+			}
+		}
+
+		_ = cache.LogSentEvent(npub, forRecipient)
+		_ = cache.LogSentEvent(npub, forSelf)
+
+		return dmStatusMsg{Text: fmt.Sprintf("✓ Published to %d/%d relays (NIP-17)", successCount, total)}
 	}
 }
 
@@ -576,17 +658,35 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 			Since:   &since,
 			Limit:   50,
 		}
+		// Also fetch NIP-17 gift wraps addressed to me
+		filter3 := nostr.Filter{
+			Kinds: []int{nostr.KindGiftWrap},
+			Tags:  nostr.TagMap{"p": []string{myHex}},
+			Since: &since,
+			Limit: 50,
+		}
 		fetchCtx, fetchCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer fetchCancel()
 
 		events1, _ := internalRelay.FetchEvents(fetchCtx, filter1, relays)
 		events2, _ := internalRelay.FetchEvents(fetchCtx, filter2, relays)
+		events3, _ := internalRelay.FetchEvents(fetchCtx, filter3, relays)
 
 		var all []nostr.Event
-		for _, evp := range append(events1, events2...) {
+		for _, evp := range append(append(events1, events2...), events3...) {
 			if evp != nil {
-				// Store each event to disk
-				_ = cache.LogDMEvent(npub, targetHex, *evp)
+				// For gift wraps, filter to only show DMs involving the target
+				if evp.Kind == nostr.KindGiftWrap {
+					rumor, err := crypto.UnwrapGiftWrapDM(*evp, skHex)
+					if err != nil || rumor.Kind != 14 {
+						continue
+					}
+					if rumor.PubKey != targetHex && rumor.PubKey != myHex {
+						continue
+					}
+				} else {
+					_ = cache.LogDMEvent(npub, targetHex, *evp)
+				}
 				all = append(all, *evp)
 			}
 		}
@@ -636,24 +736,56 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 			defer relay.Close()
 
 			since := nostr.Now()
-			sub, err := relay.Subscribe(ctx, nostr.Filters{
-				{
-					Kinds:   []int{nostr.KindEncryptedDirectMessage},
-					Authors: []string{targetHex},
-					Tags:    nostr.TagMap{"p": []string{myHex}},
-					Since:   &since,
-				},
-			})
-			if err != nil {
-				return
+
+			// Subscribe to both NIP-04 DMs and NIP-17 gift wraps
+			merged := make(chan *nostr.Event, 20)
+			var subsActive sync.WaitGroup
+
+			// NIP-04: incoming from target
+			nip04Sub, err := relay.Subscribe(ctx, nostr.Filters{{
+				Kinds:   []int{nostr.KindEncryptedDirectMessage},
+				Authors: []string{targetHex},
+				Tags:    nostr.TagMap{"p": []string{myHex}},
+				Since:   &since,
+			}})
+			if err == nil {
+				subsActive.Add(1)
+				go func() {
+					defer subsActive.Done()
+					defer nip04Sub.Unsub()
+					for ev := range nip04Sub.Events {
+						merged <- ev
+					}
+				}()
 			}
-			defer sub.Unsub()
+
+			// NIP-17: gift wraps addressed to me
+			gwSub, err := relay.Subscribe(ctx, nostr.Filters{{
+				Kinds: []int{nostr.KindGiftWrap},
+				Tags:  nostr.TagMap{"p": []string{myHex}},
+				Since: &since,
+			}})
+			if err == nil {
+				subsActive.Add(1)
+				go func() {
+					defer subsActive.Done()
+					defer gwSub.Unsub()
+					for ev := range gwSub.Events {
+						merged <- ev
+					}
+				}()
+			}
+
+			go func() {
+				subsActive.Wait()
+				close(merged)
+			}()
 
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case ev, ok := <-sub.Events:
+				case ev, ok := <-merged:
 					if !ok {
 						return
 					}
@@ -665,7 +797,19 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 					subSeen[ev.ID] = true
 					subSeenMu.Unlock()
 
-					_ = cache.LogDMEvent(npub, targetHex, *ev)
+					// Filter NIP-17 events to only show DMs involving the target
+					if ev.Kind == nostr.KindGiftWrap {
+						rumor, err := crypto.UnwrapGiftWrapDM(*ev, skHex)
+						if err != nil || rumor.Kind != 14 {
+							continue
+						}
+						if rumor.PubKey != targetHex && rumor.PubKey != myHex {
+							continue
+						}
+					} else {
+						_ = cache.LogDMEvent(npub, targetHex, *ev)
+					}
+
 					p.Send(dmEventMsg{Events: []nostr.Event{*ev}})
 				}
 			}

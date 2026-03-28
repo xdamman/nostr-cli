@@ -179,6 +179,159 @@ func publishInteractive(npub string, event nostr.Event, relays []string, ch <-ch
 	}, nil
 }
 
+// PublishEventsToRelays publishes multiple events to the given relays with an
+// interactive per-relay spinner UI. Each relay shows ONE line; a relay is "success"
+// only if ALL events published OK. Falls back to simple output when not a TTY.
+func PublishEventsToRelays(npub string, events []nostr.Event, relays []string, timeout time.Duration) (*PublishResult, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	isTTY := isStdoutTTY()
+	dim := color.New(color.Faint)
+
+	fmt.Printf("  Publishing %d events (gift wrap + self-copy) to %d relays...\n", len(events), len(relays))
+
+	type relayLine struct {
+		host string
+		url  string
+	}
+	rl := make([]relayLine, len(relays))
+	for i, r := range relays {
+		host := r
+		if u, uErr := url.Parse(r); uErr == nil && u.Host != "" {
+			host = u.Host
+		}
+		rl[i] = relayLine{host: host, url: r}
+	}
+
+	// For each relay, publish all events and track aggregate result
+	type aggResult struct {
+		url      string
+		ok       bool
+		duration time.Duration
+	}
+	ch := make(chan aggResult, len(relays))
+	for _, r := range relays {
+		go func(relayURL string) {
+			start := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			conn, err := nostr.RelayConnect(ctx, relayURL)
+			if err != nil {
+				ch <- aggResult{url: relayURL, ok: false, duration: time.Since(start)}
+				return
+			}
+			defer conn.Close()
+
+			allOK := true
+			for _, ev := range events {
+				if err := conn.Publish(ctx, ev); err != nil {
+					allOK = false
+					break
+				}
+			}
+			ch <- aggResult{url: relayURL, ok: allOK, duration: time.Since(start)}
+		}(r)
+	}
+
+	if !isTTY {
+		// Simple non-interactive output
+		var successURLs []string
+		for i := 0; i < len(relays); i++ {
+			res := <-ch
+			host := res.url
+			if u, uErr := url.Parse(res.url); uErr == nil && u.Host != "" {
+				host = u.Host
+			}
+			ms := res.duration.Milliseconds()
+			if res.ok {
+				fmt.Fprintf(os.Stderr, "  ✓ %s  %dms\n", host, ms)
+				successURLs = append(successURLs, res.url)
+			} else {
+				fmt.Fprintf(os.Stderr, "  ✗ %s  %dms\n", host, ms)
+			}
+		}
+		if len(successURLs) == 0 {
+			return nil, fmt.Errorf("failed to publish to any relay")
+		}
+		for _, ev := range events {
+			_ = cache.LogSentEvent(npub, ev)
+		}
+		fmt.Fprintf(os.Stderr, "  ✓ Published to %d/%d relays\n", len(successURLs), len(relays))
+		return &PublishResult{SuccessURLs: successURLs, TotalCount: len(relays)}, nil
+	}
+
+	// Interactive TTY output with spinners
+	greenFn := color.New(color.FgGreen).SprintFunc()
+	redFn := color.New(color.FgRed).SprintFunc()
+
+	// Print initial spinner lines
+	for _, l := range rl {
+		fmt.Printf("  %s %s\n", dim.Sprint(SpinnerFrames[0]), dim.Sprint(l.host))
+	}
+
+	results := make(map[string]aggResult)
+	var successURLs []string
+
+	renderRelays := func(frame int) {
+		fmt.Printf("\033[%dA", len(rl))
+		for _, l := range rl {
+			fmt.Print("\r\033[K")
+			if r, ok := results[l.url]; ok {
+				ms := r.duration.Milliseconds()
+				if r.ok {
+					fmt.Printf("  %s %-30s %s\n", greenFn("✓"), l.host, dim.Sprintf("%dms", ms))
+				} else {
+					fmt.Printf("  %s %-30s %s\n", redFn("✗"), l.host, dim.Sprintf("%dms", ms))
+				}
+			} else {
+				f := SpinnerFrames[frame%len(SpinnerFrames)]
+				fmt.Printf("  %s %s\n", dim.Sprint(f), dim.Sprint(l.host))
+			}
+		}
+	}
+
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	frame := 0
+	received := 0
+
+	for received < len(relays) {
+		select {
+		case res := <-ch:
+			results[res.url] = res
+			if res.ok {
+				successURLs = append(successURLs, res.url)
+			}
+			received++
+			renderRelays(frame)
+		case <-ticker.C:
+			if received < len(relays) {
+				frame++
+				renderRelays(frame)
+			}
+		}
+	}
+
+	renderRelays(frame)
+
+	if len(successURLs) == 0 {
+		return nil, fmt.Errorf("failed to publish to any relay")
+	}
+
+	for _, ev := range events {
+		_ = cache.LogSentEvent(npub, ev)
+	}
+
+	green := color.New(color.FgGreen)
+	fmt.Println()
+	green.Printf("  ✓ Published to %d/%d relays\n", len(successURLs), len(relays))
+
+	return &PublishResult{SuccessURLs: successURLs, TotalCount: len(relays)}, nil
+}
+
 // PrintRawEvent outputs the raw Nostr event as compact single-line JSON (wire format).
 func PrintRawEvent(event nostr.Event) {
 	data, _ := json.Marshal(event)
