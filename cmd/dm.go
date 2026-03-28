@@ -175,27 +175,72 @@ func sendDMNip17(npub, skHex, myHex, targetHex, message string, relays []string)
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
 
 	if rawFlag || jsonFlag || jsonlFlag {
-		result, pubErr := ui.PublishEventSilent(npub, forRecipient, relays, timeout)
-		// Also publish self-copy (best effort)
-		_, _ = ui.PublishEventSilent(npub, forSelf, relays, timeout)
+		// Publish both events in parallel
+		var recipientResult, selfResult *ui.PublishJSONResult
+		var recipientErr, selfErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			recipientResult, recipientErr = ui.PublishEventSilent(npub, forRecipient, relays, timeout)
+		}()
+		go func() {
+			defer wg.Done()
+			selfResult, selfErr = ui.PublishEventSilent(npub, forSelf, relays, timeout)
+		}()
+		wg.Wait()
 
 		if rawFlag {
 			printRaw(forRecipient)
+			printRaw(forSelf)
 		} else if jsonlFlag {
-			if result != nil {
-				printJSONL(result)
-			} else {
-				printJSONL(forRecipient)
+			recipientEntry := map[string]interface{}{
+				"role":     "recipient",
+				"protocol": "nip17",
 			}
+			if recipientResult != nil {
+				recipientEntry["event"] = recipientResult.Event
+				recipientEntry["relays"] = recipientResult.Relays
+			} else {
+				recipientEntry["event"] = forRecipient
+			}
+			printJSONL(recipientEntry)
+
+			selfEntry := map[string]interface{}{
+				"role":     "self_copy",
+				"protocol": "nip17",
+			}
+			if selfResult != nil {
+				selfEntry["event"] = selfResult.Event
+				selfEntry["relays"] = selfResult.Relays
+			} else {
+				selfEntry["event"] = forSelf
+			}
+			printJSONL(selfEntry)
 		} else {
-			if result != nil {
-				printJSON(result)
-			} else {
-				printJSON(forRecipient)
+			// --json
+			output := map[string]interface{}{
+				"protocol":  "nip17",
+				"published": recipientErr == nil,
 			}
+			if recipientResult != nil {
+				output["recipient_event"] = recipientResult
+			} else {
+				output["recipient_event"] = forRecipient
+			}
+			if selfResult != nil {
+				output["self_copy_event"] = selfResult
+			} else {
+				output["self_copy_event"] = forSelf
+			}
+			printJSON(output)
 		}
-		if pubErr != nil && result == nil {
-			return pubErr
+		if recipientErr != nil && recipientResult == nil {
+			return recipientErr
+		}
+		if selfErr != nil && selfResult == nil {
+			// Log but don't fail — self-copy is best effort
+			fmt.Fprintf(os.Stderr, "warning: self-copy publish failed: %v\n", selfErr)
 		}
 		return nil
 	}
@@ -223,19 +268,60 @@ func sendDMNip17(npub, skHex, myHex, targetHex, message string, relays []string)
 
 	fmt.Printf("Sending NIP-17 gift-wrapped DM from %s to %s\n", cyan(senderName), cyan(recipientName))
 	fmt.Println()
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Protocol:")), "NIP-17 (gift wrap)")
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Signer:")), npub)
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Recipient:")), targetNpub)
-	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Event ID:")), forRecipient.ID)
-	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Protocol:")), "NIP-17 (gift wrap)")
 	fmt.Println()
 
-	_, err = ui.PublishEventToRelays(npub, forRecipient, relays, timeout)
-	if err != nil {
-		return err
+	// Publish both events in parallel using silent publish, then display results
+	var recipientResult, selfResult *ui.PublishJSONResult
+	var recipientErr, selfErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		recipientResult, recipientErr = ui.PublishEventSilent(npub, forRecipient, relays, timeout)
+	}()
+	go func() {
+		defer wg.Done()
+		selfResult, selfErr = ui.PublishEventSilent(npub, forSelf, relays, timeout)
+	}()
+	wg.Wait()
+
+	green := color.New(color.FgGreen)
+	red := color.New(color.FgRed)
+
+	// Display recipient event results
+	fmt.Printf("  Publishing gift wrap for recipient (kind 1059)...\n")
+	if recipientErr != nil && recipientResult == nil {
+		red.Printf("  ✗ Failed to publish to any relay\n")
+		return recipientErr
+	}
+	if recipientResult != nil {
+		okCount := 0
+		for _, r := range recipientResult.Relays {
+			if r.OK {
+				okCount++
+			}
+		}
+		green.Printf("  ✓ Published to %d/%d relays\n", okCount, len(relays))
 	}
 
-	// Publish self-copy (best effort, don't fail on error)
-	_, _ = ui.PublishEventToRelays(npub, forSelf, relays, timeout)
+	fmt.Println()
+
+	// Display self-copy results
+	fmt.Printf("  Publishing self-copy (kind 1059)...\n")
+	if selfErr != nil && selfResult == nil {
+		red.Printf("  ✗ Failed to publish self-copy\n")
+	} else if selfResult != nil {
+		okCount := 0
+		for _, r := range selfResult.Relays {
+			if r.OK {
+				okCount++
+			}
+		}
+		green.Printf("  ✓ Published to %d/%d relays\n", okCount, len(relays))
+	}
 
 	return nil
 }
@@ -276,17 +362,28 @@ func sendDMLegacy(npub, skHex, myHex, targetHex, message string, relays []string
 		if rawFlag {
 			printRaw(event)
 		} else if jsonlFlag {
-			if result != nil {
-				printJSONL(result)
-			} else {
-				printJSONL(event)
+			entry := map[string]interface{}{
+				"protocol": "nip04",
 			}
+			if result != nil {
+				entry["event"] = result.Event
+				entry["relays"] = result.Relays
+			} else {
+				entry["event"] = event
+			}
+			printJSONL(entry)
 		} else {
-			if result != nil {
-				printJSON(result)
-			} else {
-				printJSON(event)
+			// --json
+			output := map[string]interface{}{
+				"protocol":  "nip04",
+				"published": err == nil,
 			}
+			if result != nil {
+				output["event"] = result
+			} else {
+				output["event"] = event
+			}
+			printJSON(output)
 		}
 		if err != nil && result == nil {
 			return err
@@ -315,13 +412,14 @@ func sendDMLegacy(npub, skHex, myHex, targetHex, message string, relays []string
 		}
 	}
 
-	fmt.Printf("Sending NIP-04 encrypted direct message from %s to %s\n", cyan(senderName), cyan(recipientName))
+	fmt.Printf("Sending NIP-04 DM from %s to %s\n", cyan(senderName), cyan(recipientName))
 	fmt.Println()
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Protocol:")), "NIP-04 (legacy)")
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Signer:")), npub)
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Recipient:")), targetNpub)
-	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Event ID:")), event.ID)
 	fmt.Println()
 
+	fmt.Printf("  Publishing DM (kind 4)...\n")
 	_, err = ui.PublishEventToRelays(npub, event, relays, timeout)
 	if err != nil {
 		return err
@@ -345,15 +443,32 @@ func sendDMAsync(npub, skHex, myHex, targetHex, message string, relays []string,
 	}
 
 	ctx := context.Background()
-	if _, err := internalRelay.PublishEvent(ctx, forRecipient, relays); err != nil {
-		statusCh <- fmt.Sprintf("✗ %v", err)
+	var recipientErr, selfErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := internalRelay.PublishEvent(ctx, forRecipient, relays); err != nil {
+			recipientErr = err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := internalRelay.PublishEvent(ctx, forSelf, relays); err != nil {
+			selfErr = err
+		}
+	}()
+	wg.Wait()
+
+	if recipientErr != nil {
+		statusCh <- fmt.Sprintf("✗ %v", recipientErr)
 		return
 	}
-
-	// Publish self-copy (best effort)
-	_, _ = internalRelay.PublishEvent(ctx, forSelf, relays)
-
-	statusCh <- "✓"
+	if selfErr != nil {
+		statusCh <- "✓ NIP-17 gift wrap sent (recipient ok, self-copy failed)"
+		return
+	}
+	statusCh <- "✓ NIP-17 gift wrap sent (2 events)"
 }
 
 func sendDMAsyncLegacy(npub, skHex, myHex, targetHex, message string, relays []string, statusCh chan<- string) {
@@ -384,7 +499,7 @@ func sendDMAsyncLegacy(npub, skHex, myHex, targetHex, message string, relays []s
 
 	_ = cache.LogDMEvent(npub, targetHex, event)
 	_ = cache.LogSentEvent(npub, event)
-	statusCh <- "✓"
+	statusCh <- "✓ NIP-04 DM sent"
 }
 
 
