@@ -333,30 +333,60 @@ func watchAllDMs(npub string) error {
 			}
 			defer relay.Close()
 
-			// Subscribe to both incoming (p=myHex) and outgoing (Authors=myHex) DMs
-			sub, err := relay.Subscribe(ctx, nostr.Filters{
-				{
-					Kinds: []int{nostr.KindEncryptedDirectMessage},
-					Tags:  nostr.TagMap{"p": []string{myHex}},
-					Since: &since,
-				},
-				{
-					Kinds:   []int{nostr.KindEncryptedDirectMessage},
-					Authors: []string{myHex},
-					Since:   &since,
-				},
-			})
+			// Two separate subscriptions for better relay compatibility
+			// Some relays don't handle multi-filter subscriptions correctly
+			merged := make(chan *nostr.Event, 20)
+			var subsActive sync.WaitGroup
+
+			// Subscription 1: Incoming DMs (p tag = my pubkey)
+			inSub, err := relay.Subscribe(ctx, nostr.Filters{{
+				Kinds: []int{nostr.KindEncryptedDirectMessage},
+				Tags:  nostr.TagMap{"p": []string{myHex}},
+				Since: &since,
+			}})
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "relay %s: subscribe failed: %v\n", url, err)
-				return
+				fmt.Fprintf(os.Stderr, "relay %s: incoming subscribe failed: %v\n", url, err)
+			} else {
+				subsActive.Add(1)
+				go func() {
+					defer subsActive.Done()
+					defer inSub.Unsub()
+					for ev := range inSub.Events {
+						merged <- ev
+					}
+				}()
 			}
-			defer sub.Unsub()
+
+			// Subscription 2: Outgoing DMs (author = me)
+			outSub, err := relay.Subscribe(ctx, nostr.Filters{{
+				Kinds:   []int{nostr.KindEncryptedDirectMessage},
+				Authors: []string{myHex},
+				Since:   &since,
+			}})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "relay %s: outgoing subscribe failed: %v\n", url, err)
+			} else {
+				subsActive.Add(1)
+				go func() {
+					defer subsActive.Done()
+					defer outSub.Unsub()
+					for ev := range outSub.Events {
+						merged <- ev
+					}
+				}()
+			}
+
+			// Close merged channel when both subs are done
+			go func() {
+				subsActive.Wait()
+				close(merged)
+			}()
 
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case ev, ok := <-sub.Events:
+				case ev, ok := <-merged:
 					if !ok {
 						return
 					}
@@ -552,35 +582,62 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 
 	onConnected()
 
-	// Subscribe to both directions: target→me and me→target
-	filters := nostr.Filters{
-		{
-			Kinds:   []int{nostr.KindEncryptedDirectMessage},
-			Authors: []string{targetHex},
-			Tags:    nostr.TagMap{"p": []string{myHex}},
-			Since:   &since,
-		},
-		{
-			Kinds:   []int{nostr.KindEncryptedDirectMessage},
-			Authors: []string{myHex},
-			Tags:    nostr.TagMap{"p": []string{targetHex}},
-			Since:   &since,
-		},
+	// Two separate subscriptions for better relay compatibility
+	merged := make(chan *nostr.Event, 20)
+	var subsActive sync.WaitGroup
+
+	// Subscription 1: target→me
+	inSub, err := relay.Subscribe(ctx, nostr.Filters{{
+		Kinds:   []int{nostr.KindEncryptedDirectMessage},
+		Authors: []string{targetHex},
+		Tags:    nostr.TagMap{"p": []string{myHex}},
+		Since:   &since,
+	}})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "relay %s: incoming subscribe failed: %v\n", url, err)
+	} else {
+		subsActive.Add(1)
+		go func() {
+			defer subsActive.Done()
+			defer inSub.Unsub()
+			for ev := range inSub.Events {
+				merged <- ev
+			}
+		}()
 	}
 
-	sub, err := relay.Subscribe(ctx, filters)
+	// Subscription 2: me→target
+	outSub, err := relay.Subscribe(ctx, nostr.Filters{{
+		Kinds:   []int{nostr.KindEncryptedDirectMessage},
+		Authors: []string{myHex},
+		Tags:    nostr.TagMap{"p": []string{targetHex}},
+		Since:   &since,
+	}})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "relay %s: subscribe failed: %v\n", url, err)
-		return
+		fmt.Fprintf(os.Stderr, "relay %s: outgoing subscribe failed: %v\n", url, err)
+	} else {
+		subsActive.Add(1)
+		go func() {
+			defer subsActive.Done()
+			defer outSub.Unsub()
+			for ev := range outSub.Events {
+				merged <- ev
+			}
+		}()
 	}
-	defer sub.Unsub()
+
+	// Close merged channel when both subs are done
+	go func() {
+		subsActive.Wait()
+		close(merged)
+	}()
 
 	sharedSecret := generateSharedSecret(skHex, targetHex)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-sub.Events:
+		case ev, ok := <-merged:
 			if !ok {
 				return
 			}

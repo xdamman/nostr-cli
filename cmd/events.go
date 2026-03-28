@@ -24,15 +24,16 @@ import (
 )
 
 var (
-	eventsKinds   string
-	eventsSince   string
-	eventsUntil   string
-	eventsAuthor  string
-	eventsLimit   int
-	eventsDecrypt bool
-	eventsWatch   bool
-	eventsFilter  []string
-	eventsMe      bool
+	eventsKinds     string
+	eventsSince     string
+	eventsUntil     string
+	eventsAuthor    string
+	eventsLimit     int
+	eventsDecrypt   bool // kept for backwards compat (no-op, decryption is automatic)
+	eventsNoDecrypt bool
+	eventsWatch     bool
+	eventsFilter    []string
+	eventsMe        bool
 )
 
 var eventsCmd = &cobra.Command{
@@ -50,9 +51,9 @@ The --since and --until flags accept:
   • Unix timestamps: 1700000000
   • ISO dates: 2024-01-01, 2024-01-01T15:00:00Z
 
-Use --decrypt to decrypt kind 4 DM content (requires your private key).
+Kind 4 (DM) events are automatically decrypted when your private key is available.
+Use --no-decrypt to disable automatic decryption (or --raw for wire format).
 Use --watch to live-stream events (keeps connection open, Ctrl+C to exit).
-  In watch mode, --decrypt works in real-time for kind 4 events.
 Use --filter key=value (repeatable) to filter by nostr tags (e.g. p=<pubkey>, t=bitcoin).
 Use --me as a shortcut for --filter "p=<your_pubkey>" (requires active account).
 
@@ -64,13 +65,14 @@ Output formats:
 
 Examples:
   nostr events --kinds 1 --since 1h                              # Recent text notes
-  nostr events --kinds 4 --since 24h --decrypt --jsonl           # Decrypt DMs, output as JSONL
+  nostr events --kinds 4 --since 24h --jsonl                     # DMs auto-decrypted, output as JSONL
   nostr events --kinds 1,7 --author npub1... --limit 50          # Notes and reactions by author
   nostr events --kinds 0,1,3 --since 2024-01-01 --json           # Multiple kinds since a date
-  nostr events --watch --kinds 4 --decrypt --jsonl               # Stream decrypted DMs
+  nostr events --watch --kinds 4 --jsonl                         # Stream decrypted DMs
   nostr events --watch --kinds 1 --jsonl                         # Stream all notes
-  nostr events --watch --kinds 4 --since 1h --decrypt --jsonl    # Start from 1h ago
-  nostr events --watch --kinds 4 --me --decrypt --jsonl          # Only DMs to me, decrypted
+  nostr events --watch --kinds 4 --since 1h --jsonl              # Start from 1h ago
+  nostr events --watch --kinds 4 --me --jsonl                    # Only DMs to me, decrypted
+  nostr events --kinds 4 --since 24h --no-decrypt --jsonl        # DMs without decryption
   nostr events --kinds 1 --filter "t=bitcoin" --jsonl            # Notes tagged bitcoin`,
 	RunE: runEvents,
 }
@@ -81,8 +83,10 @@ func init() {
 	eventsCmd.Flags().StringVar(&eventsUntil, "until", "", "End time: duration (1h, 7d), unix timestamp, or ISO date (2024-01-01)")
 	eventsCmd.Flags().StringVar(&eventsAuthor, "author", "", "Filter by author (npub, alias, or NIP-05 address)")
 	eventsCmd.Flags().IntVar(&eventsLimit, "limit", 50, "Maximum number of events to return")
-	eventsCmd.Flags().BoolVar(&eventsDecrypt, "decrypt", false, "Decrypt kind 4 DM content (requires private key)")
+	eventsCmd.Flags().BoolVar(&eventsDecrypt, "decrypt", false, "Decrypt kind 4 DM content (no-op, decryption is now automatic)")
+	eventsCmd.Flags().BoolVar(&eventsNoDecrypt, "no-decrypt", false, "Disable automatic decryption of kind 4 DM content")
 	eventsCmd.Flags().BoolVar(&eventsWatch, "watch", false, "Live-stream events (keeps connection open, Ctrl+C to exit)")
+	_ = eventsCmd.Flags().MarkHidden("decrypt") // kept for backwards compat
 	eventsCmd.Flags().StringArrayVar(&eventsFilter, "filter", nil, "Tag filter in key=value format, e.g. p=<pubkey> (repeatable)")
 	eventsCmd.Flags().BoolVar(&eventsMe, "me", false, "Shortcut for --filter \"p=<your_pubkey>\"")
 	_ = eventsCmd.MarkFlagRequired("kinds")
@@ -235,6 +239,7 @@ func runEvents(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if we need decrypt capabilities
+	// Kind 4 events are decrypted by default unless --no-decrypt or --raw
 	hasKind4 := false
 	for _, k := range kinds {
 		if k == 4 {
@@ -243,19 +248,23 @@ func runEvents(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	shouldDecrypt := hasKind4 && !eventsNoDecrypt && !rawFlag
 	var skHex, myHex string
-	if hasKind4 && eventsDecrypt {
+	if shouldDecrypt {
 		nsec, err := config.LoadNsec(npub)
 		if err != nil {
-			return fmt.Errorf("--decrypt requires access to private key: %w", err)
-		}
-		skHex, err = crypto.NsecToHex(nsec)
-		if err != nil {
-			return err
-		}
-		myHex, err = crypto.NpubToHex(npub)
-		if err != nil {
-			return err
+			// No private key available — silently skip decryption
+			shouldDecrypt = false
+		} else {
+			skHex, err = crypto.NsecToHex(nsec)
+			if err != nil {
+				shouldDecrypt = false
+			} else {
+				myHex, err = crypto.NpubToHex(npub)
+				if err != nil {
+					shouldDecrypt = false
+				}
+			}
 		}
 	}
 
@@ -297,8 +306,8 @@ func runEvents(cmd *cobra.Command, args []string) error {
 func printEvent(ev nostr.Event, skHex, myHex string) {
 	content := ev.Content
 
-	// Decrypt kind 4 if requested
-	if ev.Kind == 4 && eventsDecrypt && skHex != "" {
+	// Decrypt kind 4 automatically when key is available
+	if ev.Kind == 4 && skHex != "" {
 		counterparty := ev.PubKey
 		if counterparty == myHex {
 			// Sent by us — counterparty is in p tag
