@@ -19,7 +19,12 @@ import (
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
-var postReply string
+var (
+	postReply    string
+	postTagFlags []string
+	postTagsJSON string
+	postDryRun   bool
+)
 
 var postCmd = &cobra.Command{
 	Use:     "post [message]",
@@ -34,6 +39,10 @@ The message can come from:
 
 Flags:
   --reply <event-id>  Reply to a specific event (hex, note1, or nevent)
+  --tag key=value     Add extra tags (repeatable). Semicolons for multi-value:
+                      --tag custom="a;b;c" → ["custom","a","b","c"]
+  --tags '<json>'     Add extra tags as JSON array of arrays
+  --dry-run           Sign but don't publish, output JSON
 
 Output formats:
   (default)  Human-readable relay-by-relay progress
@@ -46,12 +55,18 @@ Examples:
   echo "Automated post" | nostr post
   nostr post "Great thread!" --reply note1abc...
   nostr post "Hello" --json | jq .id
-  echo "Bot message" | nostr post --jsonl`,
+  echo "Bot message" | nostr post --jsonl
+  nostr post "Tagged post" --tag t=nostr --tag t=bitcoin
+  nostr post "Custom" --tags '[["t","nostr"],["r","https://example.com"]]'
+  nostr post "Test" --dry-run --json`,
 	RunE: runPost,
 }
 
 func init() {
 	postCmd.Flags().StringVar(&postReply, "reply", "", "Event ID to reply to (hex or note1/nevent)")
+	postCmd.Flags().StringArrayVar(&postTagFlags, "tag", nil, "Extra tags in key=value format (repeatable)")
+	postCmd.Flags().StringVar(&postTagsJSON, "tags", "", "Extra tags as JSON array of arrays")
+	postCmd.Flags().BoolVar(&postDryRun, "dry-run", false, "Sign but don't publish — print the signed event")
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -137,9 +152,26 @@ func runPost(cmd *cobra.Command, args []string) error {
 		event.Tags = append(event.Tags, nostr.Tag{"e", replyID, "", "reply"})
 	}
 
+	// Merge extra tags from --tag and --tags flags
+	extraTags, err := parseTags(postTagFlags, postTagsJSON)
+	if err != nil {
+		return err
+	}
+	event.Tags = append(event.Tags, extraTags...)
+
 	// Sign
 	if err := event.Sign(skHex); err != nil {
 		return fmt.Errorf("failed to sign event: %w", err)
+	}
+
+	// Dry run: just output the event
+	if postDryRun {
+		if jsonlFlag {
+			printJSONL(event)
+		} else {
+			printJSON(event)
+		}
+		return nil
 	}
 
 	// Machine-readable output modes

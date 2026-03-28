@@ -48,6 +48,9 @@ Publishes a kind 1 text note. Message can come from argument, stdin, or interact
 
 Flags:
 - `--reply <event-id>` — Reply to a specific event (hex, note1, or nevent)
+- `--tag key=value` — Add extra tags (repeatable). Semicolons for multi-value: `--tag custom="a;b;c"` → `["custom","a","b","c"]`
+- `--tags '<json>'` — Add extra tags as JSON array: `--tags '[["t","bitcoin"],["r","https://example.com"]]'`
+- `--dry-run` — Sign but don't publish, output JSON
 - `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 Examples:
@@ -55,7 +58,32 @@ Examples:
 nostr post "Hello Nostr"
 echo "My message" | nostr post
 nostr post "Reply" --reply note1abc... --jsonl
+nostr post "Tagged" --tag t=nostr --tag t=bitcoin
+nostr post "Custom" --tags '[["t","nostr"],["r","https://example.com"]]'
+nostr post "Test" --dry-run --json
 EVENT_ID=$(nostr post "Message" --jsonl | jq -r '.id')
+```
+
+### Replying to Events
+```bash
+nostr reply <eventId> [message]
+```
+
+Reply to an existing Nostr event with NIP-10 compliant threading. The event ID can be hex, note1..., or nevent1... format. The referenced event is fetched from relays to determine thread structure.
+
+Flags:
+- `--tag key=value` — Add extra tags (repeatable)
+- `--tags '<json>'` — Add extra tags as JSON array
+- `--dry-run` — Sign but don't publish, output JSON
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+Examples:
+```bash
+nostr reply note1abc... "Great post!"
+nostr reply abc123hex "I agree" --tag t=nostr
+nostr reply nevent1... "Check this" --tags '[["p","<hex>"]]'
+echo "Nice work" | nostr reply note1abc...
+nostr reply note1abc... "Test" --dry-run --json
 ```
 
 ### Direct Messages
@@ -75,11 +103,14 @@ Modes:
 
 Flags:
 - `--watch` — Stream incoming DMs (no send prompt)
+- `--tag key=value` — Add extra tags (repeatable)
+- `--tags '<json>'` — Add extra tags as JSON array
 - `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 Examples:
 ```bash
 nostr dm alice "Hello"
+nostr dm alice "Hello" --tag subject=greeting
 echo "Alert" | nostr dm alice
 nostr dm --watch --jsonl | while read -r line; do echo "$line" | jq .message; done
 nostr dm alice --watch --jsonl
@@ -119,7 +150,8 @@ Create, sign, and publish a Nostr event of any kind.
 Flags:
 - `--kind <n>` — Event kind number (required)
 - `--content <text>` — Event content (required, use `-` for stdin)
-- `--tag key=value` — Tags in key=value format (repeatable)
+- `--tag key=value` — Tags in key=value format (repeatable). Semicolons for multi-value: `--tag custom="a;b;c"`
+- `--tags '<json>'` — Extra tags as JSON array: `--tags '[["t","bitcoin"]]'`
 - `--pow <n>` — Proof of work difficulty (leading zero bits)
 - `--dry-run` — Sign but don't publish (outputs signed event)
 - `--json` / `--jsonl` / `--raw` — Machine-readable output
@@ -131,6 +163,7 @@ nostr event new --kind 7 --content "+" --tag e=<eventid> --tag p=<pubkey>
 nostr event new --kind 0 --content '{"name":"bot","about":"I am a bot"}'
 echo "Hello" | nostr event new --kind 1 --content -
 nostr event new --kind 1 --content "Test" --dry-run --json
+nostr event new --kind 1 --content "Hello" --tag t=nostr --tags '[["r","https://example.com"]]'
 ```
 
 ### User Profiles

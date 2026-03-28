@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	eventNewKind    int
-	eventNewContent string
-	eventNewTags    []string
-	eventNewPow     int
-	eventNewDryRun  bool
+	eventNewKind     int
+	eventNewContent  string
+	eventNewTags     []string
+	eventNewTagsJSON string
+	eventNewPow      int
+	eventNewDryRun   bool
 )
 
 var eventCmd = &cobra.Command{
@@ -40,6 +41,8 @@ Flags:
               3 (follow list), 5 (deletion), 7 (reaction), 30023 (long-form article).
   --content   Event content string (required). Use '-' to read from stdin.
   --tag       Tags in key=value format (repeatable). E.g. --tag e=<eventid> --tag p=<pubkey>
+              Use semicolons for multi-value: --tag custom="a;b;c" → ["custom","a","b","c"]
+  --tags      Extra tags as JSON array: --tags '[["t","bitcoin"],["p","<hex>"]]'
   --pow       Proof of work difficulty (leading zero bits in event ID).
   --dry-run   Sign the event but don't publish. Outputs the signed event JSON.
 
@@ -58,7 +61,8 @@ Examples:
   nostr event new --kind 0 --content '{"name":"bot","about":"I am a bot"}'
   echo "Hello" | nostr event new --kind 1 --content -
   nostr event new --kind 1 --content "Test" --dry-run --json
-  nostr event new --kind 1 --content "Mined" --pow 16`,
+  nostr event new --kind 1 --content "Mined" --pow 16
+  nostr event new --kind 1 --content "Hello" --tag t=nostr --tags '[["r","https://example.com"]]'`,
 	RunE: runEventNew,
 }
 
@@ -66,6 +70,7 @@ func init() {
 	eventNewCmd.Flags().IntVar(&eventNewKind, "kind", -1, "Event kind number (required, e.g. 1 for text note)")
 	eventNewCmd.Flags().StringVar(&eventNewContent, "content", "", "Event content (use '-' to read from stdin)")
 	eventNewCmd.Flags().StringArrayVar(&eventNewTags, "tag", nil, "Tags in key=value format, repeatable (e.g. --tag e=abc --tag p=def)")
+	eventNewCmd.Flags().StringVar(&eventNewTagsJSON, "tags", "", "Extra tags as JSON array of arrays")
 	eventNewCmd.Flags().IntVar(&eventNewPow, "pow", 0, "Proof of work difficulty (leading zero bits)")
 	eventNewCmd.Flags().BoolVar(&eventNewDryRun, "dry-run", false, "Sign but don't publish — print the signed event")
 	_ = eventNewCmd.MarkFlagRequired("kind")
@@ -112,13 +117,9 @@ func runEventNew(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse tags
-	var tags nostr.Tags
-	for _, t := range eventNewTags {
-		parts := strings.SplitN(t, "=", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid tag format %q, expected key=value", t)
-		}
-		tags = append(tags, nostr.Tag{parts[0], parts[1]})
+	tags, err := parseTags(eventNewTags, eventNewTagsJSON)
+	if err != nil {
+		return err
 	}
 
 	event := nostr.Event{

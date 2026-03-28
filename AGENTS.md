@@ -15,10 +15,17 @@ Verify: `nostr version`
 ### Post & Message
 ```bash
 nostr post "Hello Nostr"                    # Post a note
-nostr post "Reply" --reply <event-id>       # Reply to an event
+nostr post "Reply" --reply <event-id>       # Reply to an event (simple)
+nostr post "Tagged" --tag t=nostr           # Post with extra tags
+nostr post "Custom" --tags '[["t","nostr"]]' # Tags as JSON array
+nostr post "Test" --dry-run --json          # Sign but don't publish
 echo "My message" | nostr post              # Post from stdin
+nostr reply note1abc... "Great post!"       # Reply with NIP-10 threading
+nostr reply <eventId> "I agree" --tag t=nostr  # Reply with extra tags
+nostr reply nevent1... "Check" --tags '[["p","<hex>"]]'  # Reply with JSON tags
 nostr dm alice "Hello"                      # Send encrypted DM
 nostr dm alice "Hello" --jsonl              # Send DM, JSONL output
+nostr dm alice "Hello" --tag subject=hi     # DM with extra tags
 echo "Content" | nostr dm alice             # DM from stdin
 nostr dm --watch --jsonl                    # Stream ALL incoming DMs
 nostr dm alice --watch --jsonl              # Stream DMs with alice
@@ -42,6 +49,7 @@ nostr event new --kind 7 --content "+" --tag e=<id> --tag p=<pubkey>
 nostr event new --kind 0 --content '{"name":"bot"}'
 echo "Hello" | nostr event new --kind 1 --content -
 nostr event new --kind 1 --content "Test" --dry-run --json
+nostr event new --kind 1 --content "Hello" --tag t=nostr --tags '[["r","https://example.com"]]'
 ```
 
 ### Profiles

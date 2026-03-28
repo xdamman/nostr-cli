@@ -92,6 +92,7 @@ nostr                                    # Launch the interactive shell
 | Command | Description |
 |---------|-------------|
 | `nostr post [message]` | Post a text note (kind 1). Reads from stdin if piped. |
+| `nostr reply <eventId> [message]` | Reply to an event with NIP-10 threading |
 | `nostr dm [profile] [message]` | Send an encrypted DM, start interactive chat, or stream DMs with `--watch` |
 | `nostr events --kinds <n>` | Query events from relays with filters (kinds, time range, author) |
 | `nostr event new --kind <n> --content <text>` | Create and publish a raw event of any kind |
@@ -179,6 +180,19 @@ Posting as xavier to 5 relays
 ```bash
 $ echo "Hello from the command line" | nostr
 ✓ Published to 5/5 relays
+```
+
+### Reply to an event
+
+```bash
+$ nostr reply note1abc... "Great post!"
+Replying as xavier to 5 relays
+  ✓ relay.damus.io     142ms
+  ...
+✓ Published to 4/5 relays
+
+$ nostr reply note1abc... "Tagged reply" --tag t=nostr
+$ nostr reply nevent1... "Check this" --tags '[["p","<hex>"]]'
 ```
 
 ### Send an encrypted DM

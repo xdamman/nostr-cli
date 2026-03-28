@@ -27,7 +27,11 @@ import (
 	"golang.org/x/term"
 )
 
-var dmWatchFlag bool
+var (
+	dmWatchFlag bool
+	dmTagFlags  []string
+	dmTagsJSON  string
+)
 
 var dmCmd = &cobra.Command{
 	Use:     "dm [profile] [message]",
@@ -51,17 +55,25 @@ Output formats (for one-shot send and --watch):
   --jsonl    One JSON object per line (ideal for bots and piping)
   --raw      Raw Nostr event JSON (wire format, still encrypted)
 
+Flags:
+  --tag key=value    Add extra tags (repeatable). Semicolons for multi-value:
+                     --tag custom="a;b;c" → ["custom","a","b","c"]
+  --tags '<json>'    Add extra tags as JSON array of arrays
+
 Examples:
   nostr dm alice "Hey, how's it going?"
   echo "Automated alert" | nostr dm alice
   nostr dm alice --watch --jsonl
   nostr dm --watch --jsonl | jq .message
-  nostr dm alice "Hello" --json`,
+  nostr dm alice "Hello" --json
+  nostr dm alice "Hello" --tag subject=greeting`,
 	RunE: runDM,
 }
 
 func init() {
 	dmCmd.Flags().BoolVar(&dmWatchFlag, "watch", false, "Listen for DMs without sending")
+	dmCmd.Flags().StringArrayVar(&dmTagFlags, "tag", nil, "Extra tags in key=value format (repeatable)")
+	dmCmd.Flags().StringVar(&dmTagsJSON, "tags", "", "Extra tags as JSON array of arrays")
 	rootCmd.AddCommand(dmCmd)
 }
 
@@ -134,11 +146,20 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 		return fmt.Errorf("encryption failed: %w", err)
 	}
 
+	dmTags := nostr.Tags{nostr.Tag{"p", targetHex}}
+
+	// Merge extra tags from --tag and --tags flags
+	extraTags, err := parseTags(dmTagFlags, dmTagsJSON)
+	if err != nil {
+		return err
+	}
+	dmTags = append(dmTags, extraTags...)
+
 	event := nostr.Event{
 		PubKey:    myHex,
 		CreatedAt: nostr.Now(),
 		Kind:      nostr.KindEncryptedDirectMessage,
-		Tags:      nostr.Tags{nostr.Tag{"p", targetHex}},
+		Tags:      dmTags,
 		Content:   ciphertext,
 	}
 

@@ -28,6 +28,9 @@ nostr post [message]
 
 Flags:
 - `--reply <event-id>` — Reply to a specific event
+- `--tag key=value` — Add extra tags (repeatable). Semicolons for multi-value.
+- `--tags '<json>'` — Add extra tags as JSON array
+- `--dry-run` — Sign but don't publish
 - `--json` — Output result as JSON (includes event ID, signature, etc.)
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 
@@ -36,6 +39,29 @@ Examples:
 nostr post "Hello Nostr"
 echo "My message" | nostr post
 nostr post "Reply" --reply <event-id> --json
+nostr post "Tagged" --tag t=nostr --tag t=bitcoin
+nostr post "Custom" --tags '[["t","nostr"]]'
+```
+
+### Replying to Events
+```bash
+nostr reply <eventId> [message]
+```
+
+Reply to an existing event with NIP-10 compliant threading. Fetches the referenced event from relays to determine thread structure.
+
+Flags:
+- `--tag key=value` — Add extra tags (repeatable)
+- `--tags '<json>'` — Add extra tags as JSON array
+- `--dry-run` — Sign but don't publish
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+Examples:
+```bash
+nostr reply note1abc... "Great post!"
+nostr reply abc123hex "I agree" --tag t=nostr
+nostr reply nevent1... "Check this" --tags '[["p","<hex>"]]'
+echo "Nice" | nostr reply note1abc...
 ```
 
 ### Direct Messages
@@ -43,15 +69,18 @@ nostr post "Reply" --reply <event-id> --json
 nostr dm <user> [message]
 ```
 
-Sends NIP-44 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
+Sends NIP-04 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
 
 Flags:
+- `--tag key=value` — Add extra tags (repeatable)
+- `--tags '<json>'` — Add extra tags as JSON array
 - `--json` — Output event and relay results as JSON
 
 Examples:
 ```bash
 nostr dm npub1... "Hello"
 nostr dm alice@example.com "Message" --json
+nostr dm alice "Hello" --tag subject=greeting
 echo "Content" | nostr dm alice
 ```
 
