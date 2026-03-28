@@ -20,6 +20,14 @@ nostr post "Tagged" --tag t=nostr           # Post with extra tags
 nostr post "Custom" --tags '[["t","nostr"]]' # Tags as JSON array
 nostr post "Test" --dry-run --json          # Sign but don't publish
 echo "My message" | nostr post              # Post from stdin
+
+# Long-form content (NIP-23)
+nostr post -f article.md --title "My Article"            # Publish article (kind 30023)
+nostr post -f article.md --slug my-article               # With explicit slug
+nostr post --long --title "Quick Thoughts"               # Write in built-in editor
+nostr post -f article.md --draft                         # Publish as draft (kind 30024)
+nostr post -f updated.md --slug my-article               # Update existing article
+nostr post -f article.md --hashtag nostr --hashtag bitcoin  # With hashtags
 nostr reply note1abc... "Great post!"       # Reply with NIP-10 threading
 nostr reply <eventId> "I agree" --tag t=nostr  # Reply with extra tags
 nostr reply nevent1... "Check" --tags '[["p","<hex>"]]'  # Reply with JSON tags

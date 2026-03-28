@@ -24,6 +24,16 @@ var (
 	postTagFlags []string
 	postTagsJSON string
 	postDryRun   bool
+
+	// NIP-23 long-form content flags
+	postFileFlag    string   // -f / --file
+	postLongFlag    bool     // --long (opens editor)
+	postTitleFlag   string   // --title
+	postSummaryFlag string   // --summary
+	postImageFlag   string   // --image
+	postSlugFlag    string   // --slug (d tag)
+	postDraftFlag   bool     // --draft (kind 30024)
+	postHashtags    []string // --hashtag (repeatable, t tags)
 )
 
 var postCmd = &cobra.Command{
@@ -44,6 +54,21 @@ Flags:
   --tags '<json>'     Add extra tags as JSON array of arrays
   --dry-run           Sign but don't publish, output JSON
 
+Long-form content (NIP-23):
+  -f, --file <path>   Read content from a markdown file
+  --long               Open multi-line editor for long-form content
+  --title <string>     Article title
+  --summary <string>   Article summary
+  --image <url>        Header image URL
+  --slug <string>      Article identifier for updates (d tag)
+  --draft              Publish as draft (kind 30024 instead of 30023)
+  --hashtag <string>   Hashtag topics (repeatable, t tags)
+
+  Using --file, --long, --title, or --slug activates long-form mode (kind 30023).
+  Files with YAML frontmatter (---) auto-extract title, summary, image, slug, hashtags.
+  CLI flags override frontmatter values.
+  Reusing the same --slug updates an existing article (addressable/replaceable event).
+
 Output formats:
   (default)  Human-readable relay-by-relay progress
   --json     Pretty-printed JSON with event + relay results
@@ -58,7 +83,14 @@ Examples:
   echo "Bot message" | nostr post --jsonl
   nostr post "Tagged post" --tag t=nostr --tag t=bitcoin
   nostr post "Custom" --tags '[["t","nostr"],["r","https://example.com"]]'
-  nostr post "Test" --dry-run --json`,
+  nostr post "Test" --dry-run --json
+
+Long-form content (NIP-23):
+  nostr post -f article.md --title "My Article"
+  nostr post -f article.md --slug my-article --title "My Article" --summary "Great read"
+  nostr post --long --title "Quick Thoughts"
+  nostr post -f article.md --draft
+  nostr post -f updated.md --slug my-article    # Updates existing article`,
 	RunE: runPost,
 }
 
@@ -67,6 +99,17 @@ func init() {
 	postCmd.Flags().StringArrayVar(&postTagFlags, "tag", nil, "Extra tags in key=value format (repeatable)")
 	postCmd.Flags().StringVar(&postTagsJSON, "tags", "", "Extra tags as JSON array of arrays")
 	postCmd.Flags().BoolVar(&postDryRun, "dry-run", false, "Sign but don't publish — print the signed event")
+
+	// NIP-23 long-form content flags
+	postCmd.Flags().StringVarP(&postFileFlag, "file", "f", "", "Read content from a markdown file")
+	postCmd.Flags().BoolVar(&postLongFlag, "long", false, "Open multi-line editor for long-form content")
+	postCmd.Flags().StringVar(&postTitleFlag, "title", "", "Article title (NIP-23)")
+	postCmd.Flags().StringVar(&postSummaryFlag, "summary", "", "Article summary (NIP-23)")
+	postCmd.Flags().StringVar(&postImageFlag, "image", "", "Header image URL (NIP-23)")
+	postCmd.Flags().StringVar(&postSlugFlag, "slug", "", "Article identifier for updates (d tag, NIP-23)")
+	postCmd.Flags().BoolVar(&postDraftFlag, "draft", false, "Publish as draft (kind 30024)")
+	postCmd.Flags().StringArrayVar(&postHashtags, "hashtag", nil, "Hashtag topics (repeatable, NIP-23 t tags)")
+
 	rootCmd.AddCommand(postCmd)
 }
 
@@ -94,10 +137,32 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get message: from args, piped stdin, or interactive prompt
+	// Detect long-form mode
+	isLongForm := postFileFlag != "" || postLongFlag || postTitleFlag != "" || postSlugFlag != ""
+
+	// Get message: from file, editor, args, piped stdin, or interactive prompt
 	var message string
 	var mentionPTags [][]string
-	if len(args) > 0 {
+	var frontmatter *articleFrontmatter
+
+	if postFileFlag != "" {
+		data, err := os.ReadFile(postFileFlag)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+		content := string(data)
+		fm, body := parseFrontmatter(content)
+		frontmatter = fm
+		message = body
+	} else if postLongFlag {
+		result := ui.RunLongFormEditor(ui.LongFormEditorConfig{
+			Title: postTitleFlag,
+		})
+		if result.Cancelled {
+			return nil
+		}
+		message = result.Text
+	} else if len(args) > 0 {
 		message = strings.Join(args, " ")
 	} else if !term.IsTerminal(int(os.Stdin.Fd())) {
 		data, err := io.ReadAll(os.Stdin)
@@ -125,6 +190,11 @@ func runPost(cmd *cobra.Command, args []string) error {
 
 	if message == "" {
 		return fmt.Errorf("message cannot be empty")
+	}
+
+	// Long-form content: build kind 30023/30024 event
+	if isLongForm {
+		return publishLongForm(npub, pubHex, message, frontmatter, relays, mentionPTags)
 	}
 
 	// Load keys

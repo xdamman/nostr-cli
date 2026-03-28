@@ -64,6 +64,40 @@ nostr post "Test" --dry-run --json
 EVENT_ID=$(nostr post "Message" --jsonl | jq -r '.id')
 ```
 
+### Long-Form Content (NIP-23)
+```bash
+nostr post -f <file> [flags]
+nostr post --long [flags]
+```
+
+Publish long-form articles (kind 30023) or drafts (kind 30024). Activated by using `--file`, `--long`, `--title`, or `--slug`.
+
+Flags:
+- `-f, --file <path>` — Read content from a markdown file
+- `--long` — Open built-in multi-line editor
+- `--title <string>` — Article title
+- `--summary <string>` — Article summary
+- `--image <url>` — Header image URL
+- `--slug <string>` — Article identifier / d tag (for updates)
+- `--draft` — Publish as draft (kind 30024 instead of 30023)
+- `--hashtag <string>` — Hashtag topics (repeatable, t tags)
+- `--dry-run` — Sign but don't publish
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+YAML frontmatter in markdown files is auto-parsed for title, summary, image, slug, hashtags, draft. CLI flags override frontmatter.
+
+Updating an article: reuse the same `--slug` to replace a previous version (addressable/replaceable event).
+
+Examples:
+```bash
+nostr post -f article.md --title "My Article"
+nostr post -f article.md --slug my-article --title "My Article" --summary "Great read"
+nostr post --long --title "Quick Thoughts"
+nostr post -f article.md --draft
+nostr post -f updated.md --slug my-article    # Updates existing article
+nostr post -f article.md --hashtag nostr --hashtag bitcoin
+```
+
 ### Replying to Events
 ```bash
 nostr reply <eventId> [message]

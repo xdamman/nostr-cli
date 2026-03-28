@@ -19,7 +19,7 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 
 - 🔑 Login with existing nsec or generate a new keypair
 - 👤 View and update profiles (kind 0)
-- 📝 Post text notes (kind 1)
+- 📝 Post text notes (kind 1) and long-form articles (NIP-23, kind 30023/30024)
 - 💬 Encrypted DMs (NIP-17 gift wrap / NIP-44 / NIP-04 legacy) with interactive chat UI
 - 🔎 Query events from relays with flexible filters
 - 🛠️ Create raw events of any kind
@@ -92,6 +92,8 @@ nostr                                    # Launch the interactive shell
 | Command | Description |
 |---------|-------------|
 | `nostr post [message]` | Post a text note (kind 1). Reads from stdin if piped. |
+| `nostr post -f article.md` | Publish long-form content (NIP-23, kind 30023). |
+| `nostr post --long --title "Title"` | Write long-form content in the built-in editor. |
 | `nostr reply <eventId> [message]` | Reply to an event with NIP-10 threading |
 | `nostr dm [profile] [message]` | Send an encrypted DM, start interactive chat, or stream DMs with `--watch` |
 | `nostr events --kinds <n>` | Query events from relays with filters (kinds, time range, author, tags) |
@@ -174,6 +176,28 @@ Posting as xavier to 5 relays
   ...
 ✓ Published to 4/5 relays
 ```
+
+### Publish long-form content (NIP-23)
+
+```bash
+# Publish a markdown file as an article
+$ nostr post -f article.md --title "My Article" --slug my-article
+
+# Write in the built-in editor
+$ nostr post --long --title "Quick Thoughts"
+
+# Publish as draft (kind 30024)
+$ nostr post -f article.md --draft
+
+# Update an existing article (same slug replaces previous)
+$ nostr post -f updated.md --slug my-article
+
+# Full metadata
+$ nostr post -f article.md --title "My Article" --summary "Great read" \
+  --image https://example.com/header.jpg --hashtag nostr --hashtag bitcoin
+```
+
+Files with YAML frontmatter (`---`) auto-extract title, summary, image, slug, and hashtags. CLI flags override frontmatter values.
 
 ### Pipe content to Nostr
 
