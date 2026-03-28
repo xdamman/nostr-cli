@@ -94,7 +94,7 @@ nostr                                    # Launch the interactive shell
 | `nostr post [message]` | Post a text note (kind 1). Reads from stdin if piped. |
 | `nostr reply <eventId> [message]` | Reply to an event with NIP-10 threading |
 | `nostr dm [profile] [message]` | Send an encrypted DM, start interactive chat, or stream DMs with `--watch` |
-| `nostr events --kinds <n>` | Query events from relays with filters (kinds, time range, author) |
+| `nostr events --kinds <n>` | Query events from relays with filters (kinds, time range, author, tags) |
 | `nostr event new --kind <n> --content <text>` | Create and publish a raw event of any kind |
 | `nostr follow <profile>` | Follow a user |
 | `nostr unfollow <profile>` | Unfollow a user |
@@ -286,8 +286,20 @@ done
 # Stream DMs with a specific user
 nostr dm alice --watch --jsonl
 
-# Query and decrypt recent DMs
+# Catch up on missed DMs (last hour) and continue streaming
+nostr dm --watch --since 1h --jsonl
+
+# Query and decrypt recent DMs (one-shot)
 nostr events --kinds 4 --since 1h --decrypt --jsonl
+
+# Live-stream decrypted DMs
+nostr events --watch --kinds 4 --decrypt --jsonl
+
+# Stream only DMs addressed to you, decrypted
+nostr events --watch --kinds 4 --me --decrypt --jsonl
+
+# Stream notes with tag-based filtering
+nostr events --watch --kinds 1 --filter "t=bitcoin" --jsonl
 
 # Stream notes from followed accounts
 nostr --watch --jsonl

@@ -103,9 +103,15 @@ Modes:
 
 Flags:
 - `--watch` — Stream incoming DMs (no send prompt)
+- `--since <time>` — Start time for --watch: duration (1h, 7d), unix timestamp, or ISO date
 - `--tag key=value` — Add extra tags (repeatable)
 - `--tags '<json>'` — Add extra tags as JSON array
 - `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+Watch mode stderr output:
+- Connection errors and subscription failures are logged to stderr
+- A "ready" line is printed to stderr when all relay goroutines are launched
+- Use `--since` with `--watch` to catch up on missed events
 
 Examples:
 ```bash
@@ -114,6 +120,7 @@ nostr dm alice "Hello" --tag subject=greeting
 echo "Alert" | nostr dm alice
 nostr dm --watch --jsonl | while read -r line; do echo "$line" | jq .message; done
 nostr dm alice --watch --jsonl
+nostr dm --watch --since 1h --jsonl
 ```
 
 ### Query Events
@@ -130,6 +137,9 @@ Flags:
 - `--author <user>` — Filter by author (npub, alias, or NIP-05)
 - `--limit <n>` — Maximum events to return (default: 50)
 - `--decrypt` — Decrypt kind 4 DM content (requires private key)
+- `--watch` — Live-stream events (keeps connection open, Ctrl+C to exit). Supports --decrypt in real-time
+- `--filter key=value` — Tag filter (repeatable). e.g. `--filter "p=<pubkey>"`, `--filter "t=bitcoin"`
+- `--me` — Shortcut for `--filter "p=<your_pubkey>"` (requires active account)
 - `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 Examples:
@@ -138,6 +148,9 @@ nostr events --kinds 1 --since 1h
 nostr events --kinds 4 --since 24h --decrypt --jsonl
 nostr events --kinds 1,7 --author alice --limit 50 --json
 nostr events --kinds 0,1,3 --since 2024-01-01 --jsonl
+nostr events --watch --kinds 4 --decrypt --jsonl
+nostr events --watch --kinds 4 --me --decrypt --jsonl
+nostr events --watch --kinds 1 --filter "t=bitcoin" --jsonl
 ```
 
 ### Create Raw Events
@@ -334,6 +347,14 @@ nostr events --kinds 4 --since 1h --decrypt --jsonl | jq '{from: .author, msg: .
 
 # Export notes from a user
 nostr events --kinds 1 --author alice --since 7d --jsonl > alice_notes.jsonl
+
+# Live-stream DMs addressed to you
+nostr events --watch --kinds 4 --me --decrypt --jsonl | while read -r line; do
+  echo "$line" | jq '{from: .author, msg: .content}'
+done
+
+# Stream notes tagged bitcoin
+nostr events --watch --kinds 1 --filter "t=bitcoin" --jsonl
 ```
 
 ### Non-interactive setup

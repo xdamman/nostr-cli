@@ -28,9 +28,10 @@ import (
 )
 
 var (
-	dmWatchFlag bool
-	dmTagFlags  []string
-	dmTagsJSON  string
+	dmWatchFlag  bool
+	dmTagFlags   []string
+	dmTagsJSON   string
+	dmSinceFlag  string
 )
 
 var dmCmd = &cobra.Command{
@@ -55,16 +56,23 @@ Output formats (for one-shot send and --watch):
   --jsonl    One JSON object per line (ideal for bots and piping)
   --raw      Raw Nostr event JSON (wire format, still encrypted)
 
+Watch mode stderr output:
+  Connection errors and subscription failures are logged to stderr.
+  A "ready" line is printed to stderr when all relay goroutines are launched.
+  Use --since with --watch to catch up on missed events (e.g. --since 1h).
+
 Flags:
   --tag key=value    Add extra tags (repeatable). Semicolons for multi-value:
                      --tag custom="a;b;c" → ["custom","a","b","c"]
   --tags '<json>'    Add extra tags as JSON array of arrays
+  --since <duration> Start watching from this time (e.g. 1h, 24h, 7d) — watch mode only
 
 Examples:
   nostr dm alice "Hey, how's it going?"
   echo "Automated alert" | nostr dm alice
   nostr dm alice --watch --jsonl
   nostr dm --watch --jsonl | jq .message
+  nostr dm --watch --since 1h --jsonl
   nostr dm alice "Hello" --json
   nostr dm alice "Hello" --tag subject=greeting`,
 	RunE: runDM,
@@ -74,6 +82,7 @@ func init() {
 	dmCmd.Flags().BoolVar(&dmWatchFlag, "watch", false, "Listen for DMs without sending")
 	dmCmd.Flags().StringArrayVar(&dmTagFlags, "tag", nil, "Extra tags in key=value format (repeatable)")
 	dmCmd.Flags().StringVar(&dmTagsJSON, "tags", "", "Extra tags as JSON array of arrays")
+	dmCmd.Flags().StringVar(&dmSinceFlag, "since", "", "Start time for --watch: duration (1h, 7d), unix timestamp, or ISO date")
 	rootCmd.AddCommand(dmCmd)
 }
 
@@ -302,6 +311,15 @@ func watchAllDMs(npub string) error {
 	var printMu sync.Mutex
 
 	since := nostr.Now()
+	if dmSinceFlag != "" {
+		ts, err := parseTimeArg(dmSinceFlag)
+		if err != nil {
+			return fmt.Errorf("invalid --since: %w", err)
+		}
+		since = ts
+	}
+
+	fmt.Fprintf(os.Stderr, "Watching for DMs to %s on %d relays...\n", npub[:20]+"...", len(relays))
 
 	for _, url := range relays {
 		go func(url string) {
@@ -310,6 +328,7 @@ func watchAllDMs(npub string) error {
 
 			relay, err := nostr.RelayConnect(connectCtx, url)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "relay %s: connection failed: %v\n", url, err)
 				return
 			}
 			defer relay.Close()
@@ -322,6 +341,7 @@ func watchAllDMs(npub string) error {
 				},
 			})
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "relay %s: subscribe failed: %v\n", url, err)
 				return
 			}
 			defer sub.Unsub()
@@ -395,6 +415,8 @@ func watchAllDMs(npub string) error {
 		}(url)
 	}
 
+	fmt.Fprintf(os.Stderr, "ready\n")
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
@@ -457,9 +479,22 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 		}
 	}
 
-	for _, url := range relays {
-		go subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, &seenMu, seen, onConnected, onMessage)
+	since := nostr.Now()
+	if dmSinceFlag != "" {
+		ts, err := parseTimeArg(dmSinceFlag)
+		if err != nil {
+			return fmt.Errorf("invalid --since: %w", err)
+		}
+		since = ts
 	}
+
+	fmt.Fprintf(os.Stderr, "Watching for DMs with %s on %d relays...\n", inputName, len(relays))
+
+	for _, url := range relays {
+		go subscribeDMRelay(ctx, npub, url, skHex, myHex, targetHex, &seenMu, seen, onConnected, onMessage, since)
+	}
+
+	fmt.Fprintf(os.Stderr, "ready\n")
 
 	// Wait for Ctrl+C
 	sigCh := make(chan os.Signal, 1)
@@ -484,19 +519,19 @@ func drainStatus(ch <-chan string) {
 // dmEventCallback is called when a new DM event is received and decrypted.
 type dmEventCallback func(ev *nostr.Event, plaintext string)
 
-func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex string, seenMu *sync.Mutex, seen map[string]bool, onConnected func(), onMessage dmEventCallback) {
+func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex string, seenMu *sync.Mutex, seen map[string]bool, onConnected func(), onMessage dmEventCallback, since nostr.Timestamp) {
 	connectCtx, cancel := context.WithTimeout(ctx, internalRelay.ConnectTimeout)
 	defer cancel()
 
 	relay, err := nostr.RelayConnect(connectCtx, url)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "relay %s: connection failed: %v\n", url, err)
 		return
 	}
 	defer relay.Close()
 
 	onConnected()
 
-	since := nostr.Now()
 	filters := nostr.Filters{
 		{
 			Kinds:   []int{nostr.KindEncryptedDirectMessage},
@@ -508,6 +543,7 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 
 	sub, err := relay.Subscribe(ctx, filters)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "relay %s: subscribe failed: %v\n", url, err)
 		return
 	}
 	defer sub.Unsub()

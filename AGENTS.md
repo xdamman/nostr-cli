@@ -28,6 +28,7 @@ nostr dm alice "Hello" --jsonl              # Send DM, JSONL output
 nostr dm alice "Hello" --tag subject=hi     # DM with extra tags
 echo "Content" | nostr dm alice             # DM from stdin
 nostr dm --watch --jsonl                    # Stream ALL incoming DMs
+nostr dm --watch --since 1h --jsonl         # Catch up and stream DMs
 nostr dm alice --watch --jsonl              # Stream DMs with alice
 ```
 
@@ -37,10 +38,18 @@ nostr events --kinds 1 --since 1h                    # Recent text notes
 nostr events --kinds 4 --since 24h --decrypt --jsonl  # Decrypt DMs as JSONL
 nostr events --kinds 1,7 --author alice --limit 50    # Notes + reactions by author
 nostr events --kinds 0,1,3 --since 2024-01-01 --json  # Multiple kinds since date
+nostr events --watch --kinds 4 --decrypt --jsonl      # Live-stream decrypted DMs
+nostr events --watch --kinds 1 --jsonl                # Live-stream all notes
+nostr events --watch --kinds 4 --me --decrypt --jsonl # Stream DMs to me, decrypted
+nostr events --watch --kinds 4 --filter "p=<hex>" --jsonl  # Filter by tag
+nostr events --kinds 1 --filter "t=bitcoin" --jsonl   # Notes tagged bitcoin
 ```
 
 The `--since` and `--until` flags accept: durations (1h, 7d, 30m), unix timestamps, or ISO dates (2024-01-01).
 The `--kinds` flag accepts comma-separated event kinds (e.g. 1,4,7).
+The `--watch` flag keeps the connection open and streams events in real-time.
+The `--filter key=value` flag (repeatable) filters by nostr tags (e.g. p, t, e).
+The `--me` flag is shorthand for `--filter "p=<your_pubkey>"`.
 
 ### Create Raw Events
 ```bash
