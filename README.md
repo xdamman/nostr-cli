@@ -8,9 +8,9 @@
 
 ## Why?
 
-Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, scriptable CLI that works like `git` — manage multiple profiles, switch contexts, and publish events from your terminal.
+Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, scriptable CLI that works like `git` — manage multiple accounts, switch contexts, and publish events from your terminal.
 
-- **Multi-profile support** — switch between identities like git branches
+- **Multi-account support** — switch between identities like git branches
 - **Human-friendly** — use aliases and usernames, not just npubs
 - **Unix-native** — pipes, scripts, cron jobs — it just works
 - **Auto-detection** — colors off when piped, TTY detection for interactive features
@@ -24,9 +24,9 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - 🔎 Query events from relays with flexible filters
 - 🛠️ Create raw events of any kind
 - 🔄 Follow/unfollow users
-- 🌐 Manage relay lists per profile
+- 🌐 Manage relay lists per account
 - 🏷️ Create aliases for quick access to contacts
-- 👥 Switch between multiple profiles
+- 👥 Switch between multiple accounts
 - 📖 Built-in NIP reference viewer
 - 🔄 Sync local events with relays
 - 🐚 Interactive shell with feed, posting, and slash commands
@@ -79,7 +79,7 @@ nostr update
 ## Quick Start
 
 ```bash
-nostr login                              # Create or import a profile
+nostr login                              # Create or import an account
 nostr post "Hello Nostr!"               # Post a public note
 nostr dm xavier "See you at the meetup"  # Send an encrypted DM
 nostr                                    # Launch the interactive shell
@@ -103,16 +103,16 @@ nostr                                    # Launch the interactive shell
 | `nostr [profile] --watch` | Live-stream a user's new notes |
 | `nostr --watch` | Live-stream notes from all followed accounts |
 
-### Profile
+### Account & Profile
 
 | Command | Description |
 |---------|-------------|
-| `nostr login` | Create a new profile or import an existing nsec |
-| `nostr switch [profile]` | Switch between profiles (interactive picker without args) |
-| `nostr profile` | Show your current profile |
-| `nostr profile [profile]` | Show another user's profile |
-| `nostr profile update` | Interactively update your profile fields |
-| `nostr profiles` | List all local profiles |
+| `nostr login` | Create a new account or import an existing nsec |
+| `nostr switch [account]` | Switch between accounts (interactive picker without args) |
+| `nostr profile` | Show your current Nostr profile |
+| `nostr profile [user]` | Show another user's Nostr profile |
+| `nostr profile update` | Interactively update your Nostr profile fields |
+| `nostr accounts` | List all local accounts |
 
 ### Infrastructure
 
@@ -139,7 +139,7 @@ nostr                                    # Launch the interactive shell
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias\|username>` | Use a specific profile instead of the active one |
+| `--profile <npub\|alias\|username>` | Use a specific account instead of the active one |
 | `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
 | `--json` | Output enriched JSON (pretty-printed with colors on TTY) |
@@ -357,7 +357,7 @@ All state lives in `~/.nostr/`:
             └── profiles.jsonl    # Cached profile metadata
 ```
 
-Each profile is isolated — relays, aliases, and keys are scoped per identity.
+Each account is isolated — relays, aliases, and keys are scoped per identity.
 
 ## Testing
 

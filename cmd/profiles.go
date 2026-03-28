@@ -13,17 +13,18 @@ import (
 
 var profilesJSONFlag bool
 
-var profilesCmd = &cobra.Command{
-	Use:     "profiles",
-	Short:   "List all local profiles",
+var accountsCmd = &cobra.Command{
+	Use:     "accounts",
+	Aliases: []string{"profiles"},
+	Short:   "List all local accounts",
 	GroupID: "profile",
-	RunE:    runProfiles,
+	RunE:    runAccounts,
 }
 
 func init() {
-	profilesCmd.Flags().BoolVar(&profilesJSONFlag, "json", false, "Output as JSON")
-	profilesCmd.AddCommand(profileRmCmd)
-	rootCmd.AddCommand(profilesCmd)
+	accountsCmd.Flags().BoolVar(&profilesJSONFlag, "json", false, "Output as JSON")
+	accountsCmd.AddCommand(profileRmCmd)
+	rootCmd.AddCommand(accountsCmd)
 }
 
 type profileInfo struct {
@@ -40,14 +41,14 @@ type profileInfo struct {
 	LUD16       string `json:"lud16,omitempty"`
 }
 
-func runProfiles(cmd *cobra.Command, args []string) error {
+func runAccounts(cmd *cobra.Command, args []string) error {
 	entries, err := listSwitchableProfiles()
 	if err != nil {
 		return err
 	}
 
 	if len(entries) == 0 {
-		fmt.Println("No profiles found. Run 'nostr login' to create one.")
+		fmt.Println("No accounts found. Run 'nostr login' to create one.")
 		return nil
 	}
 
@@ -161,12 +162,12 @@ func runProfiles(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	dim.Println("A <profile> can be an alias, npub, or NIP-05 address.")
+	dim.Println("An <account> can be an alias, npub, or NIP-05 address.")
 	dim.Println("")
-	dim.Println("  nostr switch <profile>        Switch active profile")
-	dim.Println("  nostr profile update           Update your profile metadata")
-	dim.Println("  nostr profiles rm              Remove a profile")
-	dim.Println("  nostr login                    Add a new profile")
+	dim.Println("  nostr switch <account>        Switch active account")
+	dim.Println("  nostr profile update           Update your Nostr profile metadata")
+	dim.Println("  nostr accounts rm              Remove an account")
+	dim.Println("  nostr login                    Add a new account")
 
 	return nil
 }

@@ -170,7 +170,7 @@ type syncJSONRelay struct {
 }
 
 type syncJSONOutput struct {
-	Profile        string          `json:"profile"`
+	Account        string          `json:"account"`
 	LocalEvents    int             `json:"local_events"`
 	SyncableEvents int             `json:"syncable_events"`
 	SkippedEvents  int             `json:"skipped_events"`
@@ -286,7 +286,7 @@ func runSyncJSON(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Fetch incoming DMs (sent to this profile)
+	// Fetch incoming DMs (sent to this account)
 	dmFilter := nostr.Filter{
 		Kinds: []int{nostr.KindEncryptedDirectMessage},
 		Tags:  nostr.TagMap{"p": []string{pubHex}},
@@ -347,7 +347,7 @@ func runSyncJSON(cmd *cobra.Command, args []string) error {
 
 	// Build output
 	out := syncJSONOutput{
-		Profile:        npub,
+		Account:        npub,
 		LocalEvents:    len(localEvents),
 		SyncableEvents: len(localSyncable),
 		SkippedEvents:  localSkipped,
@@ -384,7 +384,7 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 
 	profileName := resolveProfileName(npub)
 
-	// Show profile summary
+	// Show account summary
 	alias := ""
 	if aliases, aErr := config.LoadGlobalAliases(); aErr == nil {
 		for a, n := range aliases {
@@ -432,7 +432,7 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 		displayName = npub[:20] + "..."
 	}
 
-	fmt.Printf("Profile: %s\n\n", cyan(displayName))
+	fmt.Printf("Account: %s\n\n", cyan(displayName))
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-16s", "Npub:")), npub)
 	if alias != "" {
 		fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-16s", "Alias:")), alias)
@@ -661,7 +661,7 @@ func runSyncInteractive(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Fetch incoming DMs (sent to this profile)
+	// Fetch incoming DMs (sent to this account)
 	{
 		sp := ui.NewSpinner("Fetching incoming direct messages...")
 		dmFilter := nostr.Filter{

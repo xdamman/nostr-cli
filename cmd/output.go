@@ -18,17 +18,8 @@ func printRaw(v interface{}) {
 }
 
 // printJSON outputs a value as pretty-printed JSON.
-// Always outputs clean JSON without ANSI codes — this is machine-readable output.
-// For colored JSON display, use printColoredJSON.
+// Colorizes output when stdout is a TTY (like jq). Clean JSON when piped.
 func printJSON(v interface{}) {
-	data, _ := json.MarshalIndent(v, "", "  ")
-	fmt.Println(string(data))
-	os.Stdout.Sync()
-}
-
-// printColoredJSON outputs a value as pretty-printed JSON with syntax coloring on TTY.
-// Use this for human display (e.g. profile views) where --json flag was NOT explicitly set.
-func printColoredJSON(v interface{}) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	if term.IsTerminal(int(os.Stdout.Fd())) && !color.NoColor {
 		fmt.Println(colorizeJSON(string(data)))

@@ -32,7 +32,7 @@ var rootCmd = &cobra.Command{
 Nostr is an open protocol for censorship-resistant social networking.
 It uses cryptographic keys for identity — no accounts, no servers you depend on.
 
-A <profile> can be an npub (npub1...), a local alias, or a NIP-05 address
+An <account> can be an npub (npub1...), a local alias, or a NIP-05 address
 (e.g. user@domain.com).
 
 Output formats (available on most commands):
@@ -252,7 +252,7 @@ func searchString(s, substr string) bool {
 	return false
 }
 
-// printActiveProfile prints a one-line header showing the active profile name and npub.
+// printActiveProfile prints a one-line header showing the active account name and npub.
 func printActiveProfile(npub string) {
 	dim := color.New(color.Faint)
 	name := resolveProfileName(npub)
@@ -261,9 +261,9 @@ func printActiveProfile(npub string) {
 		short = short[:20] + "..."
 	}
 	if name != "" {
-		dim.Printf("Using profile %s (%s)\n", name, short)
+		dim.Printf("Using account %s (%s)\n", name, short)
 	} else {
-		dim.Printf("Using profile %s\n", short)
+		dim.Printf("Using account %s\n", short)
 	}
 }
 
@@ -290,8 +290,8 @@ func resolveProfileName(npub string) string {
 }
 
 // loadProfile resolves the --profile flag to an npub.
-// If no flag is set, returns the active profile.
-// The flag value is resolved as: npub → alias → NIP-05 (using the active profile's context).
+// If no flag is set, returns the active account.
+// The flag value is resolved as: npub → alias → NIP-05 (using the active account's context).
 func loadProfile() (string, error) {
 	if profileFlag == "" {
 		return config.ActiveProfile()
@@ -299,16 +299,16 @@ func loadProfile() (string, error) {
 	if strings.HasPrefix(profileFlag, "npub1") {
 		return profileFlag, nil
 	}
-	// Resolve using the active profile's aliases
+	// Resolve using the active account's aliases
 	activeNpub, err := config.ActiveProfile()
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve --profile %q: no active profile to look up aliases", profileFlag)
+		return "", fmt.Errorf("cannot resolve --profile %q: no active account to look up aliases", profileFlag)
 	}
 	return resolve.ResolveToNpub(activeNpub, profileFlag)
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub, alias, or username of the profile to use (default: active profile)")
+	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub, alias, or username of the account to use (default: active account)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().IntVar(&timeoutFlag, "timeout", 2000, "Timeout per relay in milliseconds")
 	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event as compact single-line JSON")

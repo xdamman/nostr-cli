@@ -9,7 +9,7 @@ Priority levels: **P0** = MVP, **P1** = Important, **P2** = Nice to have
 **Priority:** P0  
 **NIPs:** NIP-01, NIP-19
 
-Create a new profile or import an existing one.
+Create a new account or import an existing one.
 
 ```
 nostr login
@@ -21,8 +21,8 @@ nostr login
 3. Create `~/.nostr/profiles/<npub>/` directory
 4. Save nsec (file mode `0600`)
 5. Fetch kind 0 from relays → save as `profile.json`
-6. Set as active profile
-7. Print npub and profile summary
+6. Set as active account
+7. Print npub and account summary
 
 **Edge cases:**
 - If npub directory already exists → ask to overwrite or switch to it
@@ -102,7 +102,7 @@ nostr post                    # Interactive mode
 **Priority:** P0  
 **NIPs:** NIP-01
 
-Manage the relay list for the active profile.
+Manage the relay list for the active account.
 
 ```
 nostr relays                     # List relays (numbered)
@@ -205,20 +205,20 @@ nostr unfollow [npub|username|alias]
 **Priority:** P1  
 **NIPs:** NIP-19
 
-Switch between profiles.
+Switch between accounts.
 
 ```
-nostr switch                          # List profiles, pick one
+nostr switch                          # List accounts, pick one
 nostr switch [alias|username|npub]    # Switch directly
 ```
 
 **Behavior:**
-- Update `~/.nostr/active` to point to the selected profile
+- - Update `~/.nostr/active` to point to the selected account
 - Print confirmation: "Switched to <name> (<npub short>)"
 
 **Edge cases:**
-- No other profiles → "Only one profile. Use `nostr login` to add another."
-- Unknown identifier → "Profile not found. Available profiles: ..."
+- No other accounts → "Only one account. Use `nostr login` to add another."
+- Unknown identifier → "Account not found. Available accounts: ..."
 
 ---
 
@@ -268,7 +268,7 @@ nostr alias rm [name]                 # Remove alias
 
 **Behavior:**
 - Save to `~/.nostr/profiles/<npub>/aliases.csv`
-- Aliases are profile-scoped
+- Aliases are account-scoped
 - Used for resolution in all commands that accept user identifiers
 
 ---

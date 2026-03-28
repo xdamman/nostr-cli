@@ -30,7 +30,7 @@ var relaysCmd = &cobra.Command{
 	Use:     "relays",
 	Short:   "Manage relays",
 	GroupID: "infra",
-	Long: `List, add, or remove relays for the active profile.
+	Long: `List, add, or remove relays for the active account.
 
 Without subcommands, lists all configured relays with live connectivity status.
 Use --json for machine-readable output with ping times.
@@ -49,7 +49,7 @@ Examples:
 var relaysAddCmd = &cobra.Command{
 	Use:   "add [url]",
 	Short: "Add a relay",
-	Long: `Add a relay to your profile's relay list and publish updated NIP-65.
+	Long: `Add a relay to your account's relay list and publish updated NIP-65.
 
 The URL must start with wss:// or ws://.
 

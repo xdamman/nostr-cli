@@ -24,12 +24,12 @@ import (
 var followingRefreshFlag bool
 
 var followCmd = &cobra.Command{
-	Use:     "follow <profile>",
-	Short:   "Follow a profile",
+	Use:     "follow <account>",
+	Short:   "Follow a user",
 	GroupID: "social",
 	Long: `Follow a user by adding them to your contact list (kind 3).
 
-A <profile> can be an npub, alias, or NIP-05 address.
+An <account> can be an npub, alias, or NIP-05 address.
 After following, you'll be prompted to create an alias for quick access.
 
 Output formats:
@@ -44,8 +44,8 @@ Examples:
 }
 
 var unfollowCmd = &cobra.Command{
-	Use:     "unfollow <profile>",
-	Short:   "Unfollow a profile",
+	Use:     "unfollow <account>",
+	Short:   "Unfollow a user",
 	GroupID: "social",
 	Long: `Remove a user from your contact list (kind 3).
 

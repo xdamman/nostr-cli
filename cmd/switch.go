@@ -17,20 +17,20 @@ import (
 )
 
 var switchCmd = &cobra.Command{
-	Use:     "switch [profile]",
-	Short:   "Switch active profile",
-	Long: `Switch to a different profile. Without arguments, shows an interactive picker.
+	Use:     "switch [account]",
+	Short:   "Switch active account",
+	Long: `Switch to a different account. Without arguments, shows an interactive picker.
 
-A <profile> can be an npub, alias, or NIP-05 address.
+An <account> can be an npub, alias, or NIP-05 address.
 
 Output formats:
-  --json/--jsonl  List all profiles (no argument) or show switched profile details
+  --json/--jsonl  List all accounts (no argument) or show switched account details
 
 Examples:
   nostr switch                    # Interactive picker
   nostr switch alice              # Switch by alias
   nostr switch npub1...           # Switch by npub
-  nostr switch --json             # List all profiles as JSON`,
+  nostr switch --json             # List all accounts as JSON`,
 	GroupID: "profile",
 	RunE:    runSwitch,
 }
@@ -77,11 +77,11 @@ func runSwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if len(entries) == 0 {
-		fmt.Println("No profiles found. Run 'nostr login' to create one.")
+		fmt.Println("No accounts found. Run 'nostr login' to create one.")
 		return nil
 	}
 
-	// Find the index of the active profile
+	// Find the index of the active account
 	selected := 0
 	for i, e := range entries {
 		if e.npub == activeNpub {
@@ -100,7 +100,7 @@ func runSwitch(cmd *cobra.Command, args []string) error {
 
 	target := entries[chosen]
 	if target.npub == activeNpub {
-		fmt.Println("Already on this profile.")
+		fmt.Println("Already on this account.")
 		return nil
 	}
 
@@ -130,7 +130,7 @@ func switchToTarget(arg string, activeNpub string, green *color.Color) error {
 		return err
 	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return fmt.Errorf("profile %s not found. Run 'nostr login' first", targetNpub)
+		return fmt.Errorf("account %s not found. Run 'nostr login' first", targetNpub)
 	}
 
 	if err := config.SetActiveProfile(targetNpub); err != nil {
@@ -196,7 +196,7 @@ func showSwitchedProfile(npub string) {
 		printColorField(label, "Website", meta.Website)
 		printColorField(label, "Lightning", meta.LUD16)
 	} else {
-		dim.Println("  No cached profile. Run 'nostr profile' to fetch it.")
+		dim.Println("  No cached profile data. Run 'nostr profile' to fetch it.")
 	}
 
 	if len(relays) > 0 {
@@ -391,7 +391,7 @@ func formatEntry(e profileEntry, nameW, aliasW, npubW int, cyanFn, dimFn func(a 
 }
 
 func interactiveSelect(entries []profileEntry, selected int, footer ...string) (int, error) {
-	footerText := "Run 'nostr login' to add a new profile."
+	footerText := "Run 'nostr login' to add a new account."
 	if len(footer) > 0 {
 		footerText = footer[0]
 	}
@@ -403,7 +403,7 @@ func interactiveSelect(entries []profileEntry, selected int, footer ...string) (
 		bold := color.New(color.Bold).SprintFunc()
 		dim := color.New(color.Faint).SprintFunc()
 		activeNpub, _ := config.ActiveProfile()
-		fmt.Println("Available profiles:")
+		fmt.Println("Available accounts:")
 		for i, e := range entries {
 			active := ""
 			if e.npub == activeNpub {
@@ -432,7 +432,7 @@ func interactiveSelect(entries []profileEntry, selected int, footer ...string) (
 	render := func() {
 		// Move cursor to start and clear
 		fmt.Print("\r\033[J") // clear from cursor to end of screen
-		fmt.Print("Select a profile (arrow keys to move, enter to select, q to cancel):\r\n\r\n")
+		fmt.Print("Select an account (arrow keys to move, enter to select, q to cancel):\r\n\r\n")
 		for i, e := range entries {
 			line := formatEntry(e, nameW, aliasW, npubW, cyan, dim, i == selected)
 			if i == selected {

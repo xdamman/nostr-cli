@@ -37,7 +37,7 @@ var slashCommands = []slashCmd{
 	{"unfollow", "/unfollow <user>", "Unfollow a user"},
 	{"profile", "/profile [user]", "View a profile"},
 	{"edit-profile", "/edit-profile", "Edit your profile metadata"},
-	{"switch", "/switch [user]", "Switch active profile"},
+	{"switch", "/switch [user]", "Switch active account"},
 	{"relays", "/relays", "List relays"},
 	{"alias", "/alias <name> <npub>", "Create an alias"},
 	{"aliases", "/aliases", "List aliases"},
@@ -80,7 +80,7 @@ func updateFeedNameWidth(name string) int {
 func runShell() error {
 	npub, err := loadProfile()
 	if err != nil {
-		return fmt.Errorf("no active profile. Run 'nostr login' first")
+		return fmt.Errorf("no active account. Run 'nostr login' first")
 	}
 
 	// Reset feed name width for this session
@@ -843,7 +843,7 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			return
 		}
 		if len(entries) == 0 {
-			fmt.Println("No other profiles found. Run 'nostr login' to add one.")
+			fmt.Println("No other accounts found. Run 'nostr login' to add one.")
 			return
 		}
 		if len(args) > 0 {
@@ -864,10 +864,10 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			}
 			return
 		}
-		// List available profiles
+		// List available accounts
 		cyanFn := color.New(color.FgCyan).SprintFunc()
 		dimFn := color.New(color.Faint).SprintFunc()
-		fmt.Println("Available profiles (use /switch <name> to switch):")
+		fmt.Println("Available accounts (use /switch <name> to switch):")
 		for _, e := range entries {
 			active := ""
 			if e.npub == npub {

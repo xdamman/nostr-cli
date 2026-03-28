@@ -27,10 +27,10 @@ var (
 
 var loginCmd = &cobra.Command{
 	Use:     "login",
-	Short:   "Create a new profile or import an existing one",
+	Short:   "Create a new account or import an existing one",
 	Long: `Login with an existing nsec or generate a new keypair.
 
-Creates a profile directory in ~/.nostr/profiles/<npub>/ with keys, relays,
+Creates an account directory in ~/.nostr/profiles/<npub>/ with keys, relays,
 and optionally profile metadata.
 
 Flags:
@@ -40,8 +40,8 @@ Flags:
 
 Examples:
   nostr login                     # Interactive: import or generate
-  nostr login --new               # Generate new keypair non-interactively
-  nostr login --nsec nsec1...     # Import existing key non-interactively`,
+  nostr login --new               # Generate new keypair
+  nostr login --nsec nsec1...     # Import existing key`,
 	GroupID: "profile",
 	RunE:    runLogin,
 }
@@ -98,17 +98,17 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if profile already exists
+	// Check if account already exists
 	dir, err := config.ProfileDir(npub)
 	if err != nil {
 		return err
 	}
 	if _, statErr := os.Stat(dir); statErr == nil {
-		fmt.Printf("Profile %s already exists. Switching to it.\n", npub)
+		fmt.Printf("Account %s already exists. Switching to it.\n", npub)
 		return config.SetActiveProfile(npub)
 	}
 
-	// Create profile directory
+	// Create account directory
 	if _, err := config.EnsureProfileDir(npub); err != nil {
 		return err
 	}
@@ -134,15 +134,15 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to save relays: %w", err)
 		}
 
-		// Set as active profile
+		// Set as active account
 		if err := config.SetActiveProfile(npub); err != nil {
-			return fmt.Errorf("failed to set active profile: %w", err)
+			return fmt.Errorf("failed to set active account: %w", err)
 		}
 
 		// Prompt for profile setup
 		if isTTY {
 			fmt.Println()
-			fmt.Println("Set up your profile (enter to skip any field):")
+			fmt.Println("Set up your Nostr profile (enter to skip any field):")
 			reader := bufio.NewReader(os.Stdin)
 			meta := &profile.Metadata{}
 			meta.Name = promptField(reader, "Username", "")
@@ -178,9 +178,9 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to save default relays: %w", err)
 		}
 
-		// Set as active profile
+		// Set as active account
 		if err := config.SetActiveProfile(npub); err != nil {
-			return fmt.Errorf("failed to set active profile: %w", err)
+			return fmt.Errorf("failed to set active account: %w", err)
 		}
 
 		// Fetch profile from relays
@@ -245,7 +245,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	green.Printf("✓ Logged in as %s\n", npub)
-	fmt.Printf("  Profile dir: %s\n", dir)
+	fmt.Printf("  Account dir: %s\n", dir)
 
 	// Next steps hints
 	fmt.Println()
@@ -265,9 +265,9 @@ func promptAlias(npub, defaultName string, green *color.Color) {
 		defaultAlias = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(defaultName), " ", "-"))
 	}
 	if defaultAlias != "" {
-		fmt.Printf("\nChoose an alias for this profile [%s]: ", defaultAlias)
+		fmt.Printf("\nChoose an alias for this account [%s]: ", defaultAlias)
 	} else {
-		fmt.Print("\nChoose an alias for this profile (enter to skip): ")
+		fmt.Print("\nChoose an alias for this account (enter to skip): ")
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	if scanner.Scan() {

@@ -59,9 +59,9 @@ Examples:
 }
 
 var profileRmCmd = &cobra.Command{
-	Use:   "rm [profile]",
-	Short: "Remove a local profile (profile: npub, alias, or nip05)",
-	Long:  "Remove a local profile. Without arguments, select interactively.\nA <profile> can be an npub, alias, or NIP-05 address.",
+	Use:   "rm [account]",
+	Short: "Remove a local account (account: npub, alias, or nip05)",
+	Long:  "Remove a local account. Without arguments, select interactively.\nAn <account> can be an npub, alias, or NIP-05 address.",
 	RunE:  runProfileRm,
 }
 
@@ -407,12 +407,12 @@ func runProfileRm(cmd *cobra.Command, args []string) error {
 		if !strings.HasPrefix(target, "npub1") {
 			resolved, err := resolve.ResolveToNpub("", target)
 			if err != nil {
-				return fmt.Errorf("cannot resolve %q to a profile: %w", target, err)
+				return fmt.Errorf("cannot resolve %q to an account: %w", target, err)
 			}
 			npub = resolved
 		}
 		if !config.HasNsec(npub) {
-			return fmt.Errorf("no local profile found for %s", target)
+			return fmt.Errorf("no local account found for %s", target)
 		}
 		displayLabel = target
 	} else {
@@ -422,7 +422,7 @@ func runProfileRm(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if len(entries) == 0 {
-			fmt.Println("No profiles found.")
+			fmt.Println("No accounts found.")
 			return nil
 		}
 
@@ -442,7 +442,7 @@ func runProfileRm(cmd *cobra.Command, args []string) error {
 	if name != "" {
 		displayLabel = fmt.Sprintf("%s (%s)", name, npub)
 	}
-	fmt.Printf("Remove profile %s? This deletes the local keys and cache. [y/N] ", displayLabel)
+	fmt.Printf("Remove account %s? This deletes the local keys and cache. [y/N] ", displayLabel)
 	var answer string
 	fmt.Scanln(&answer)
 	if answer != "y" && answer != "Y" {
@@ -454,7 +454,7 @@ func runProfileRm(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	green.Printf("✓ Removed profile %s\n", displayLabel)
+	green.Printf("✓ Removed account %s\n", displayLabel)
 	return nil
 }
 

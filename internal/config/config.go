@@ -125,7 +125,7 @@ func autoResolveProfile(base string) (string, error) {
 	profilesDir := filepath.Join(base, "profiles")
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
-		return "", fmt.Errorf("no profile set up yet. Run 'nostr login' first")
+		return "", fmt.Errorf("no account set up yet. Run 'nostr login' first")
 	}
 
 	var npubs []string
@@ -135,7 +135,7 @@ func autoResolveProfile(base string) (string, error) {
 		}
 		name := e.Name()
 		if strings.HasPrefix(name, "npub1") {
-			// Only count profiles that have an nsec file
+			// Only count accounts that have an nsec file
 			if HasNsec(name) {
 				npubs = append(npubs, name)
 			}
@@ -144,13 +144,13 @@ func autoResolveProfile(base string) (string, error) {
 
 	switch len(npubs) {
 	case 0:
-		return "", fmt.Errorf("no profile set up yet. Run 'nostr login' first")
+		return "", fmt.Errorf("no account set up yet. Run 'nostr login' first")
 	case 1:
-		// Auto-select the only profile
+		// Auto-select the only account
 		_ = SetActiveProfile(npubs[0])
 		return npubs[0], nil
 	default:
-		return "", fmt.Errorf("no active profile. Run 'nostr switch' to select a profile")
+		return "", fmt.Errorf("no active account. Run 'nostr switch' to select an account")
 	}
 }
 
@@ -351,7 +351,7 @@ func RemoveProfile(npub string) error {
 		return err
 	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return fmt.Errorf("profile not found: %s", npub)
+		return fmt.Errorf("account not found: %s", npub)
 	}
 
 	// Remove the profile directory

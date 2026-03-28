@@ -34,18 +34,18 @@ var (
 )
 
 var dmCmd = &cobra.Command{
-	Use:     "dm [profile] [message]",
+	Use:     "dm [account] [message]",
 	Short:   "Send an encrypted direct message",
 	GroupID: "social",
-	Long: `Send an NIP-04 encrypted direct message to a profile.
+	Long: `Send an NIP-04 encrypted direct message to a user.
 
-A <profile> can be an npub, alias, or NIP-05 address (e.g. user@domain.com).
+An <account> can be an npub, alias, or NIP-05 address (e.g. user@domain.com).
 
 Modes:
-  nostr dm <profile> <message>   Send a one-shot DM
-  echo "msg" | nostr dm <profile> Send from stdin
-  nostr dm <profile>             Interactive chat (TUI with message history)
-  nostr dm <profile> --watch     Stream messages with this user (no send prompt)
+  nostr dm <account> <message>   Send a one-shot DM
+  echo "msg" | nostr dm <account> Send from stdin
+  nostr dm <account>             Interactive chat (TUI with message history)
+  nostr dm <account> --watch     Stream messages with this user (no send prompt)
   nostr dm --watch               Stream ALL incoming DMs from anyone
   nostr dm                       Show your aliases (quick reference)
 
@@ -272,7 +272,7 @@ func interactiveDM(npub, skHex, myHex, targetHex, inputName string, relays []str
 	return interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName, relays)
 }
 
-// watchAllDMs subscribes to all incoming DMs for the active profile.
+// watchAllDMs subscribes to all incoming DMs for the active account.
 // Output: timestamp:sender:message (or JSONL with --json).
 func watchAllDMs(npub string) error {
 	nsec, err := config.LoadNsec(npub)
@@ -596,9 +596,9 @@ func showDMAliases(npub string) error {
 		return err
 	}
 
-	bold.Println("Usage: nostr dm <profile> [message]")
+	bold.Println("Usage: nostr dm <account> [message]")
 	fmt.Println()
-	dim.Println("A <profile> can be an alias, npub, or NIP-05 address (user@domain.com).")
+	dim.Println("An <account> can be an alias, npub, or NIP-05 address (user@domain.com).")
 	dim.Println("Without a message, enters interactive chat mode.")
 	fmt.Println()
 
@@ -618,12 +618,12 @@ func showDMAliases(npub string) error {
 	dim.Println("To add an alias:")
 	dim.Println("  nostr alias <name> <npub|nip05>")
 
-	// Show switch hint only if there are multiple profiles
+	// Show switch hint only if there are multiple accounts
 	entries, _ := listSwitchableProfiles()
 	if len(entries) > 1 {
 		fmt.Println()
-		dim.Println("To switch active profile:")
-		dim.Println("  nostr switch <profile>")
+		dim.Println("To switch active account:")
+		dim.Println("  nostr switch <account>")
 	}
 
 	return nil

@@ -1,6 +1,6 @@
 # nostr-cli
 
-A command-line tool for the Nostr protocol. Post notes, send encrypted DMs, query events, create raw events of any kind, manage profiles, follow users, and interact with relays — all from the terminal.
+A command-line tool for the Nostr protocol. Post notes, send encrypted DMs, query events, create raw events of any kind, manage accounts and profiles, follow users, and interact with relays — all from the terminal.
 
 ## Install
 
@@ -52,14 +52,14 @@ nostr event new --kind 1 --content "Test" --dry-run --json
 nostr event new --kind 1 --content "Hello" --tag t=nostr --tags '[["r","https://example.com"]]'
 ```
 
-### Profiles
+### Accounts & Profiles
 ```bash
-nostr profile alice --json                  # View profile as JSON
+nostr profile alice --json                  # View Nostr profile as JSON
 nostr profile npub1... --refresh --json     # Force refresh from relays
-nostr profiles --json                       # List all local profiles
+nostr accounts --json                       # List all local accounts
 nostr login --new                           # Generate new keypair
 nostr login --nsec nsec1...                 # Import existing key
-nostr switch alice                          # Switch active profile
+nostr switch alice                          # Switch active account
 ```
 
 ### Social
@@ -97,7 +97,7 @@ nostr alias rm alice                        # Remove alias
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias>` | Use a specific profile |
+| `--profile <npub\|alias>` | Use a specific account |
 | `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
 | `--no-color` | Disable ANSI color codes |
 | `--json` | Enriched JSON output (pretty-printed on TTY) |

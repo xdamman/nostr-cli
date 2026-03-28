@@ -1,11 +1,11 @@
 ---
 name: nostr-cli
-description: Post notes, send encrypted DMs, query events, create raw events, manage profiles, follow users, and interact with Nostr relays from the terminal.
+description: Post notes, send encrypted DMs, query events, create raw events, manage accounts and profiles, follow users, and interact with Nostr relays from the terminal.
 ---
 
 # nostr-cli
 
-A command-line tool for interacting with the Nostr protocol. Post notes, send encrypted DMs, query events with flexible filters, create raw events of any kind, manage profiles and aliases, follow users, and manage relays — all from the terminal or within scripts.
+A command-line tool for interacting with the Nostr protocol. Post notes, send encrypted DMs, query events with flexible filters, create raw events of any kind, manage accounts, profiles, and aliases, follow users, and manage relays — all from the terminal or within scripts.
 
 ## Installation Check and Setup
 
@@ -250,13 +250,13 @@ nostr sync --relay <url>   # Sync with a specific relay
 nostr sync --json          # Machine-readable sync output
 ```
 
-### Profile Management
+### Account Management
 ```bash
 nostr login                # Interactive login (import or generate)
 nostr login --new          # Generate new keypair non-interactively
 nostr login --nsec nsec1...  # Import existing key non-interactively
-nostr switch [profile]     # Switch active profile
-nostr profiles             # List all local profiles
+nostr switch [account]     # Switch active account
+nostr accounts             # List all local accounts
 ```
 
 ### User Lookup
@@ -292,7 +292,7 @@ nostr update               # Check for updates and self-update
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias\|username>` | Execute command under a specific profile |
+| `--profile <npub\|alias\|username>` | Execute command under a specific account |
 | `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output (auto-detected when piped) |
 | `--json` | Enriched JSON output (pretty-printed on TTY) |
@@ -351,4 +351,4 @@ nostr post "Bot is online" --jsonl
 - **Sent events**: `~/.nostr/profiles/<npub>/events.jsonl`
 - **DM history**: `~/.nostr/profiles/<npub>/directmessages/<hex>.jsonl`
 
-All profiles, aliases, and relay configurations are stored in `~/.nostr/`. Each profile is isolated with its own keys, relays, and aliases.
+All accounts, aliases, and relay configurations are stored in `~/.nostr/`. Each account is isolated with its own keys, relays, and aliases.

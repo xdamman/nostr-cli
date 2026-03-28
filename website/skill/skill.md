@@ -1,11 +1,11 @@
 ---
 name: nostr-cli
-description: Post notes, send encrypted DMs, manage profiles, follow users, and interact with Nostr relays from the terminal.
+description: Post notes, send encrypted DMs, manage accounts and profiles, follow users, and interact with Nostr relays from the terminal.
 ---
 
 # nostr-cli
 
-A command-line tool for interacting with the Nostr protocol. It enables posting notes, sending encrypted DMs, managing user profiles and aliases, following other users, and managing Nostr relays — all from the terminal or within scripts.
+A command-line tool for interacting with the Nostr protocol. It enables posting notes, sending encrypted DMs, managing accounts, profiles, and aliases, following other users, and managing Nostr relays — all from the terminal or within scripts.
 
 ## Installation Check and Setup
 
@@ -102,8 +102,8 @@ nostr profile alice@example.com --refresh --json
 
 ### Manage Profiles
 ```bash
-nostr profiles              # List all cached profiles
-nostr profiles rm [name]    # Remove a cached profile
+nostr accounts              # List all local accounts
+nostr accounts rm [name]    # Remove a local account
 ```
 
 Flags:
@@ -176,9 +176,9 @@ nostr alias bob alice@example.com
 nostr aliases --json
 ```
 
-### Profile Management
+### Account Management
 ```bash
-nostr switch [profile]    # Switch to a different profile
+nostr switch [account]    # Switch to a different profile
 nostr login               # Log in to a profile
 ```
 
@@ -225,7 +225,7 @@ nostr nip05
 
 ## Global Flags
 
-- `--profile <npub|alias|username>` — Execute command under a specific profile
+- `--profile <npub|alias|username>` — Execute command under a specific account
 - `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
 - `--no-color` — Strip ANSI color codes
 - `--raw` — Output raw Nostr event as compact single-line JSON (wire format)
@@ -327,4 +327,4 @@ nostr login --nsec nsec1abc...
 - **Config directory**: `~/.nostr/`
 - **Sent events**: `~/.nostr/profiles/<npub>/events.jsonl`
 
-All profiles, aliases, and relay configurations are stored in the `~/.nostr/` directory.
+All accounts, aliases, and relay configurations are stored in the `~/.nostr/` directory.

@@ -35,7 +35,7 @@ func findCmd(root *cobra.Command, path ...string) *cobra.Command {
 	for _, name := range path {
 		found := false
 		for _, child := range cmd.Commands() {
-			if child.Name() == name {
+			if child.Name() == name || containsAlias(child.Aliases, name) {
 				cmd = child
 				found = true
 				break
@@ -46,6 +46,15 @@ func findCmd(root *cobra.Command, path ...string) *cobra.Command {
 		}
 	}
 	return cmd
+}
+
+func containsAlias(aliases []string, name string) bool {
+	for _, a := range aliases {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 // hasFlag returns true if cmd (or its parents) exposes the named flag.
