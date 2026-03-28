@@ -260,6 +260,150 @@ func TestActiveProfile_NonNpubDir(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Multi-account tests
+// ---------------------------------------------------------------------------
+
+func TestConfig_MultipleProfileDirs(t *testing.T) {
+	dir := setupTestDir(t)
+
+	npub1 := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	npub2 := "npub1otherprofile234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npub1)
+	createTestProfile(t, dir, npub2)
+
+	// Verify both profile directories exist and are independent
+	dir1, err := ProfileDir(npub1)
+	if err != nil {
+		t.Fatalf("ProfileDir(%q) failed: %v", npub1, err)
+	}
+	dir2, err := ProfileDir(npub2)
+	if err != nil {
+		t.Fatalf("ProfileDir(%q) failed: %v", npub2, err)
+	}
+	if dir1 == dir2 {
+		t.Error("profile dirs should be different")
+	}
+
+	// Verify both contain nsec files
+	for _, d := range []string{dir1, dir2} {
+		if _, err := os.Stat(filepath.Join(d, "nsec")); err != nil {
+			t.Errorf("nsec file missing in %s: %v", d, err)
+		}
+	}
+}
+
+func TestConfig_SwitchActiveProfile(t *testing.T) {
+	dir := setupTestDir(t)
+
+	npubA := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	npubB := "npub1otherprofile234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npubA)
+	createTestProfile(t, dir, npubB)
+
+	// Set active to A
+	if err := SetActiveProfile(npubA); err != nil {
+		t.Fatalf("SetActiveProfile(A) failed: %v", err)
+	}
+	active, err := ActiveProfile()
+	if err != nil {
+		t.Fatalf("ActiveProfile() after setting A: %v", err)
+	}
+	if active != npubA {
+		t.Errorf("active = %q, want %q", active, npubA)
+	}
+
+	// Switch to B
+	if err := SetActiveProfile(npubB); err != nil {
+		t.Fatalf("SetActiveProfile(B) failed: %v", err)
+	}
+	active, err = ActiveProfile()
+	if err != nil {
+		t.Fatalf("ActiveProfile() after setting B: %v", err)
+	}
+	if active != npubB {
+		t.Errorf("active = %q, want %q", active, npubB)
+	}
+
+	// A's data should still be there
+	dirA, _ := ProfileDir(npubA)
+	if _, err := os.Stat(filepath.Join(dirA, "nsec")); err != nil {
+		t.Error("profile A data should still exist after switching to B")
+	}
+}
+
+func TestConfig_LoadRelaysPerProfile(t *testing.T) {
+	dir := setupTestDir(t)
+
+	npub1 := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	npub2 := "npub1otherprofile234567890abcdefghijklmnopqrstuvwxyz12345"
+	createTestProfile(t, dir, npub1)
+	createTestProfile(t, dir, npub2)
+
+	// Set different relays for each profile
+	relays1 := []string{"wss://relay1.example.com", "wss://relay2.example.com"}
+	relays2 := []string{"wss://relay3.example.com", "wss://relay4.example.com"}
+
+	if err := SaveRelays(npub1, relays1); err != nil {
+		t.Fatalf("SaveRelays(1) failed: %v", err)
+	}
+	if err := SaveRelays(npub2, relays2); err != nil {
+		t.Fatalf("SaveRelays(2) failed: %v", err)
+	}
+
+	// Load and verify each has its own relays
+	got1, err := LoadRelays(npub1)
+	if err != nil {
+		t.Fatalf("LoadRelays(1) failed: %v", err)
+	}
+	got2, err := LoadRelays(npub2)
+	if err != nil {
+		t.Fatalf("LoadRelays(2) failed: %v", err)
+	}
+
+	if len(got1) != 2 || got1[0] != "wss://relay1.example.com" {
+		t.Errorf("profile 1 relays = %v, want %v", got1, relays1)
+	}
+	if len(got2) != 2 || got2[0] != "wss://relay3.example.com" {
+		t.Errorf("profile 2 relays = %v, want %v", got2, relays2)
+	}
+}
+
+func TestConfig_LoadNsecPerProfile(t *testing.T) {
+	dir := setupTestDir(t)
+
+	npub1 := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
+	npub2 := "npub1otherprofile234567890abcdefghijklmnopqrstuvwxyz12345"
+
+	// Create profiles with different nsecs
+	profDir1 := filepath.Join(dir, "profiles", npub1)
+	profDir2 := filepath.Join(dir, "profiles", npub2)
+	os.MkdirAll(profDir1, 0700)
+	os.MkdirAll(profDir2, 0700)
+	os.WriteFile(filepath.Join(profDir1, "nsec"), []byte("nsec1profile1key\n"), 0600)
+	os.WriteFile(filepath.Join(profDir2, "nsec"), []byte("nsec1profile2key\n"), 0600)
+
+	// Verify each loads its own key
+	nsec1, err := LoadNsec(npub1)
+	if err != nil {
+		t.Fatalf("LoadNsec(1) failed: %v", err)
+	}
+	nsec2, err := LoadNsec(npub2)
+	if err != nil {
+		t.Fatalf("LoadNsec(2) failed: %v", err)
+	}
+
+	if nsec1 != "nsec1profile1key" {
+		t.Errorf("nsec1 = %q, want %q", nsec1, "nsec1profile1key")
+	}
+	if nsec2 != "nsec1profile2key" {
+		t.Errorf("nsec2 = %q, want %q", nsec2, "nsec1profile2key")
+	}
+	if nsec1 == nsec2 {
+		t.Error("nsecs should be different between profiles")
+	}
+}
+
 func TestProfileDir_NonNpubDir(t *testing.T) {
 	dir := setupTestDir(t)
 

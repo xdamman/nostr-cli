@@ -308,7 +308,8 @@ func loadProfile() (string, error) {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "npub, alias, or username of the account to use (default: active account)")
+	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "Account to use: npub, alias, or username (default: active account)")
+	rootCmd.PersistentFlags().StringVar(&profileFlag, "account", "", "Account to use: npub, alias, or username (alias for --profile)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().IntVar(&timeoutFlag, "timeout", 2000, "Timeout per relay in milliseconds")
 	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event as compact single-line JSON")
