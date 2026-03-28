@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
 	"golang.org/x/term"
 )
 
@@ -20,7 +21,7 @@ func printRaw(v interface{}) {
 // When stdout is a TTY, adds syntax coloring.
 func printJSON(v interface{}) {
 	data, _ := json.MarshalIndent(v, "", "  ")
-	if term.IsTerminal(int(os.Stdout.Fd())) && !noColorFlag && !pipeFlag {
+	if term.IsTerminal(int(os.Stdout.Fd())) && !color.NoColor {
 		fmt.Println(colorizeJSON(string(data)))
 	} else {
 		fmt.Println(string(data))

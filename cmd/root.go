@@ -22,31 +22,36 @@ var (
 	rawFlag     bool
 	jsonFlag    bool
 	jsonlFlag   bool
-	pipeFlag    bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "nostr",
 	Short: "A command-line client for the Nostr protocol",
-	Long: `Nostr is an open protocol for censorship-resistant social networking
-and other decentralized applications. It uses cryptographic keys for
-identity — no accounts, no servers you depend on.
+	Long: `A human and bot-friendly command-line interface for the Nostr protocol.
 
-nostr-cli lets you manage profiles, publish notes, send encrypted DMs,
-and interact with relays from the terminal.
+Nostr is an open protocol for censorship-resistant social networking.
+It uses cryptographic keys for identity — no accounts, no servers you depend on.
 
-A <profile> can be specified as an npub (npub1...), a local alias, or a NIP-05
-address (e.g. user@domain.com).
+A <profile> can be an npub (npub1...), a local alias, or a NIP-05 address
+(e.g. user@domain.com).
 
-Most commands support --json for machine-readable output.`,
+Output formats (available on most commands):
+  --json     Pretty-printed enriched JSON (with colors on TTY)
+  --jsonl    One compact JSON object per line (ideal for piping/bots)
+  --raw      Raw Nostr event JSON (wire format as relays see it)
+
+Colors are automatically disabled when stdout is piped. Use --no-color
+to explicitly disable colors on a TTY.
+
+Run 'nostr' with no arguments to enter the interactive shell, or pipe
+content to post: echo "Hello" | nostr`,
 	// Catch-all: treat unknown first arg as user lookup
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// --pipe mode: disable color, close stdin for daemonization
-		if pipeFlag {
-			noColorFlag = true
-			os.Stdin.Close()
+		// Auto-detect non-TTY stdout: disable color automatically when piped
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
+			color.NoColor = true
 		}
 		// Respect --no-color flag and NO_COLOR env var (https://no-color.org/)
 		if noColorFlag || os.Getenv("NO_COLOR") != "" {
@@ -309,7 +314,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event as compact single-line JSON")
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output enriched JSON (pretty-printed with colors on TTY)")
 	rootCmd.PersistentFlags().BoolVar(&jsonlFlag, "jsonl", false, "Output one JSON object per line (for bot/pipe consumption)")
-	rootCmd.PersistentFlags().BoolVar(&pipeFlag, "pipe", false, "Pipe mode: no color, no prompts, flush stdout, close stdin")
 
 	// Command groups
 	rootCmd.AddGroup(

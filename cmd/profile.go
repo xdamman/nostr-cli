@@ -24,7 +24,24 @@ var profileRefreshFlag bool
 var profileCmd = &cobra.Command{
 	Use:     "profile [profile]",
 	Short:   "Manage and view profiles",
-	Long:    "View a profile. A <profile> can be an npub, alias, or NIP-05 address (e.g. user@domain.com).",
+	Long: `View a user's profile metadata (kind 0).
+
+Without arguments, shows your own profile. With a profile argument, looks up
+that user. A <profile> can be an npub, alias, or NIP-05 address (user@domain.com).
+
+Use --refresh to force a fresh fetch from relays instead of cache.
+
+Output formats:
+  (default)  Human-readable field listing
+  --json     Pretty-printed JSON with all profile fields
+  --jsonl    Compact single-line JSON
+  --raw      Raw JSON
+
+Examples:
+  nostr profile
+  nostr profile alice
+  nostr profile npub1... --json
+  nostr profile alice@example.com --refresh`,
 	GroupID: "profile",
 	RunE:    runProfile,
 }
@@ -32,7 +49,13 @@ var profileCmd = &cobra.Command{
 var profileUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update your profile metadata interactively",
-	RunE:  runProfileUpdate,
+	Long: `Interactively update your profile fields (name, display name, about, picture, NIP-05, website).
+
+Changes are saved locally and published to your configured relays.
+
+Examples:
+  nostr profile update`,
+	RunE: runProfileUpdate,
 }
 
 var profileRmCmd = &cobra.Command{

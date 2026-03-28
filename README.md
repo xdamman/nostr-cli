@@ -13,13 +13,16 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - **Multi-profile support** — switch between identities like git branches
 - **Human-friendly** — use aliases and usernames, not just npubs
 - **Unix-native** — pipes, scripts, cron jobs — it just works
+- **Auto-detection** — colors off when piped, TTY detection for interactive features
 
 ## Features
 
 - 🔑 Login with existing nsec or generate a new keypair
 - 👤 View and update profiles (kind 0)
 - 📝 Post text notes (kind 1)
-- 💬 Encrypted DMs (NIP-04 / NIP-44)
+- 💬 Encrypted DMs (NIP-04 / NIP-44) with interactive chat UI
+- 🔎 Query events from relays with flexible filters
+- 🛠️ Create raw events of any kind
 - 🔄 Follow/unfollow users
 - 🌐 Manage relay lists per profile
 - 🏷️ Create aliases for quick access to contacts
@@ -27,19 +30,20 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - 📖 Built-in NIP reference viewer
 - 🔄 Sync local events with relays
 - 🐚 Interactive shell with feed, posting, and slash commands
+- 🤖 Bot/agent-friendly output formats (--json, --jsonl, --raw)
 
 ## Installation
-
-### Homebrew (macOS / Linux)
-
-```bash
-brew install xdamman/tap/nostr
-```
 
 ### Shell script (macOS / Linux)
 
 ```bash
 curl -sf https://nostrcli.sh/install.sh | sh
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install xdamman/tap/nostr
 ```
 
 ### Debian / Ubuntu (.deb)
@@ -75,131 +79,60 @@ nostr update
 ## Quick Start
 
 ```bash
-nostr login                            # Create or import a profile
-nostr post "Hello Nostr!"             # Post a public note
-nostr dm xavier "See you at the meetup" # Send an encrypted DM
-nostr                                  # Launch the interactive shell
-```
-
-## Examples
-
-### Post a public note
-
-```bash
-$ nostr post "Hello Nostr!"
-
-Posting as xavier to 5 relays
-
-  Signer:    npub1xdm...a8f2
-  Event ID:  a1b2c3d4e5f6...
-
-  ✓ relay.damus.io     142ms
-  ✓ nos.lol             89ms
-  ✓ relay.nostr.band   203ms
-  ✗ eden.nostr.land   2001ms
-  ✓ relay.snort.social 312ms
-
-✓ Published to 4/5 relays
-  Saved locally in ~/.nostr/profiles/npub1xdm.../events.jsonl
-```
-
-### Pipe content to Nostr
-
-```bash
-$ echo "Hello from the command line" | nostr
-Posting as xavier to 5 relays
-  ✓ relay.damus.io  128ms
-  ✓ nos.lol         102ms
-  ...
-✓ Published to 5/5 relays
-```
-
-### Send an encrypted DM
-
-```bash
-$ nostr dm xavier "See you at the meetup"
-✓ DM sent to xavier
-```
-
-```bash
-$ echo "Here's that link" | nostr dm xavier
-✓ DM sent to xavier
-```
-
-### Interactive mode — public feed
-
-Run `nostr` with no arguments to enter the interactive shell. You'll see your feed from followed accounts, and can type to post:
-
-```
-$ nostr
-
-23/03 10:15  fiatjaf     working on a new relay implementation
-23/03 10:18  jb55        zaps are underrated for micropayments
-23/03 10:22  odell       "fix the money, fix the world"
-23/03 10:30  gigi        nostr is the social layer bitcoin needed
-
-xavier> this is amazing!
-  enter to post a public note to 5 relays, ctrl+c to exit
-✓ Published!
-```
-
-### Interactive mode — DM conversation
-
-```
-$ nostr dm xavier
-
-23/03 14:01  xavier   Hey, are you coming to the meetup?
-23/03 14:05  me       Yes! See you there
-
-me> Can't wait 🎉
-  enter to send an encrypted message to xavier over 5 relays, ctrl+c to exit
-✓ Sent!
+nostr login                              # Create or import a profile
+nostr post "Hello Nostr!"               # Post a public note
+nostr dm xavier "See you at the meetup"  # Send an encrypted DM
+nostr                                    # Launch the interactive shell
 ```
 
 ## Commands
-
-### Identity
-
-| Command | Description |
-|---------|-------------|
-| `nostr login` | Create a new profile or import an existing nsec |
-| `nostr switch [alias\|username\|npub]` | Switch between profiles |
-| `nostr profile` | Show your current profile |
-| `nostr profile [npub\|username\|alias]` | Show another user's profile |
-| `nostr profile update` | Interactively update your profile fields |
 
 ### Social
 
 | Command | Description |
 |---------|-------------|
-| `nostr post [message]` | Post a text note (interactive if no message given) |
-| `nostr follow [npub\|username]` | Follow a user |
-| `nostr dm [user] [message]` | Send a DM (interactive mode if no message given). `--json` for structured output |
-| `nostr [npub\|username\|alias]` | View a user's profile and latest 10 notes |
-| `nostr [user] --watch` | Live-stream a user's new notes |
+| `nostr post [message]` | Post a text note (kind 1). Reads from stdin if piped. |
+| `nostr dm [profile] [message]` | Send an encrypted DM, start interactive chat, or stream DMs with `--watch` |
+| `nostr events --kinds <n>` | Query events from relays with filters (kinds, time range, author) |
+| `nostr event new --kind <n> --content <text>` | Create and publish a raw event of any kind |
+| `nostr follow <profile>` | Follow a user |
+| `nostr unfollow <profile>` | Unfollow a user |
+| `nostr following` | List accounts you follow |
+| `nostr [profile]` | View a user's profile and latest notes |
+| `nostr [profile] --watch` | Live-stream a user's new notes |
+| `nostr --watch` | Live-stream notes from all followed accounts |
+
+### Profile
+
+| Command | Description |
+|---------|-------------|
+| `nostr login` | Create a new profile or import an existing nsec |
+| `nostr switch [profile]` | Switch between profiles (interactive picker without args) |
+| `nostr profile` | Show your current profile |
+| `nostr profile [profile]` | Show another user's profile |
+| `nostr profile update` | Interactively update your profile fields |
+| `nostr profiles` | List all local profiles |
 
 ### Infrastructure
 
 | Command | Description |
 |---------|-------------|
-| `nostr relays` | List current relays with connection status |
-| `nostr relays --relay <url\|domain>` | Show a specific relay |
+| `nostr relays` | List relays with live connectivity status |
 | `nostr relays add wss://...` | Add a relay |
-| `nostr relays rm [url\|domain\|number]` | Remove a relay (asks for confirmation) |
+| `nostr relays rm [url\|number]` | Remove a relay |
 | `nostr sync` | Sync local events with relays (interactive) |
-| `nostr sync --relay <url\|domain>` | Sync with a specific relay |
-| `nostr sync --json` | Sync and output results as JSON |
-| `nostr alias [name] [npub\|username]` | Create an alias for a user |
+| `nostr alias [name] [npub\|nip05]` | Create an alias for a user |
+| `nostr aliases` | List all aliases |
 
 ### Reference
 
 | Command | Description |
 |---------|-------------|
-| `nostr nip[0-9]+` | View a NIP specification |
+| `nostr nip [number]` | View a NIP specification in the terminal |
 | `nostr version` | Print version info |
 | `nostr update` | Check for updates and self-update |
 
-> **Tip:** Append `--help` to any command for usage details — e.g. `nostr dm --help`
+> **Tip:** Append `--help` to any command for detailed usage — e.g. `nostr events --help`
 
 ### Global Flags
 
@@ -208,44 +141,165 @@ me> Can't wait 🎉
 | `--profile <npub\|alias\|username>` | Use a specific profile instead of the active one |
 | `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
-| `--raw` | Output raw Nostr event JSON (wire format) |
+| `--json` | Output enriched JSON (pretty-printed with colors on TTY) |
+| `--jsonl` | Output one JSON object per line (for bots/piping) |
+| `--raw` | Output raw Nostr event JSON (wire format as relays see it) |
 
-## Bot / LLM Integration
+### Output Formats: `--raw` vs `--json` vs `--jsonl`
 
-nostr-cli is designed to be used by bots and LLMs.
+- **`--raw`** — The standard Nostr event object, exactly as relays see it. Useful for piping into other nostr tools.
+- **`--json`** — Enriched object with the event plus metadata (relay publish status, timing, resolved names). Pretty-printed with syntax highlighting on TTY.
+- **`--jsonl`** — Same enriched data as `--json` but compact, one object per line. Ideal for streaming, bots, and `jq` pipelines.
 
-- `--raw` — output the standard Nostr event JSON (wire format, as relays see it)
-- `--json` — output enriched JSON with the event + relay publish results
-- `--no-color` — strip ANSI codes for piped output
-- `--watch` — stream events as they arrive (works with `--raw` and `--json`)
+### Auto-Detection Behavior
+
+Colors and interactive features are automatically adjusted based on the environment:
+
+- **stdout is a TTY** → Colors enabled, interactive prompts shown
+- **stdout is piped** → Colors disabled automatically (equivalent to `--no-color`)
+- **stdin is piped** → Content is read as input (e.g. `echo "Hello" | nostr post`)
+
+The `NO_COLOR` environment variable is also respected per [no-color.org](https://no-color.org).
+
+## Examples
+
+### Post a public note
 
 ```bash
-# Post and get the raw event (standard Nostr wire format)
-nostr post "Hello from my bot" --raw | jq -r '.id'
-
-# Post and get event + relay results
-nostr post "Hello" --json | jq '.relays[] | select(.ok) | .url'
-
-# Stream all new notes from followed accounts (JSONL)
-nostr --watch --json
-
-# Stream all incoming DMs as raw events
-nostr dm --watch --raw
-
-# Stream DMs with a specific user
-nostr dm alice --watch --json
-
-# Fetch a profile as JSON
-nostr profile alice@example.com --json
-
-# Non-interactive login
-nostr login --new
-nostr login --nsec nsec1...
+$ nostr post "Hello Nostr!"
+Posting as xavier to 5 relays
+  ✓ relay.damus.io     142ms
+  ✓ nos.lol             89ms
+  ...
+✓ Published to 4/5 relays
 ```
 
-### AI coding agent integration
+### Pipe content to Nostr
 
-Install the nostr skill in your AI coding agent:
+```bash
+$ echo "Hello from the command line" | nostr
+✓ Published to 5/5 relays
+```
+
+### Send an encrypted DM
+
+```bash
+$ nostr dm xavier "See you at the meetup"
+✓ DM sent to xavier
+
+$ echo "Here's that link" | nostr dm xavier
+✓ DM sent to xavier
+```
+
+### Query events
+
+```bash
+# Recent text notes
+$ nostr events --kinds 1 --since 1h
+
+# Decrypt DMs from the last 24 hours as JSONL
+$ nostr events --kinds 4 --since 24h --decrypt --jsonl
+
+# Notes and reactions from a specific author
+$ nostr events --kinds 1,7 --author alice --limit 50 --json
+```
+
+### Create raw events
+
+```bash
+# Publish a text note
+$ nostr event new --kind 1 --content "Hello world"
+
+# Create a reaction
+$ nostr event new --kind 7 --content "+" --tag e=<eventid> --tag p=<pubkey>
+
+# Dry run: sign but don't publish
+$ nostr event new --kind 1 --content "Test" --dry-run --json
+
+# Read content from stdin
+$ echo "Hello" | nostr event new --kind 1 --content -
+```
+
+### Interactive shell
+
+Run `nostr` with no arguments:
+
+```
+$ nostr
+23/03 10:15  fiatjaf     working on a new relay implementation
+23/03 10:18  jb55        zaps are underrated for micropayments
+
+xavier> this is amazing!
+✓ Published!
+```
+
+### Interactive DM conversation
+
+```
+$ nostr dm xavier
+23/03 14:01  xavier   Hey, are you coming to the meetup?
+23/03 14:05  me       Yes! See you there
+
+me> Can't wait 🎉
+✓ Sent!
+```
+
+## Bot / Agent Integration
+
+nostr-cli is designed to be used by bots and AI agents. Output is machine-parseable, colors are auto-disabled when piped, and streaming commands work great with `jq` pipelines.
+
+### Output parsing
+
+```bash
+# Post and capture the event ID
+EVENT_ID=$(nostr post "Hello" --jsonl | jq -r '.id')
+
+# Get relay results
+nostr post "Hello" --json | jq '.relays[] | select(.ok) | .url'
+
+# Profile as JSON
+nostr profile alice --json | jq '.about'
+```
+
+### Streaming events
+
+```bash
+# Stream all incoming DMs as JSONL
+nostr dm --watch --jsonl | while read -r line; do
+  echo "$line" | jq .message
+done
+
+# Stream DMs with a specific user
+nostr dm alice --watch --jsonl
+
+# Query and decrypt recent DMs
+nostr events --kinds 4 --since 1h --decrypt --jsonl
+
+# Stream notes from followed accounts
+nostr --watch --jsonl
+```
+
+### Posting and DMs from scripts
+
+```bash
+# Post from stdin
+echo "Automated alert: server is down" | nostr post
+
+# Send a DM from a pipe
+echo "Alert: disk usage at 90%" | nostr dm ops-team
+
+# Create a raw event non-interactively
+nostr event new --kind 1 --content "Hello" --dry-run --json
+```
+
+### Non-interactive login
+
+```bash
+nostr login --new                    # Generate new keypair
+nostr login --nsec nsec1...          # Import existing key
+```
+
+### AI agent skill installation
 
 ```bash
 # Claude Code
@@ -257,7 +311,7 @@ npx openskills install https://github.com/xdamman/nostr-cli
 
 An [`AGENTS.md`](AGENTS.md) is included at the repo root for tools that auto-load it (Codex, Cursor, Augment, Gemini).
 
-See also: [nostrcli.sh/llms.txt](https://nostrcli.sh/llms.txt)
+See also: [nostrcli.sh/skill/SKILL.md](https://nostrcli.sh/skill/SKILL.md) · [nostrcli.sh/llms.txt](https://nostrcli.sh/llms.txt)
 
 ## Interactive Shell
 
@@ -303,7 +357,7 @@ go test -short ./...
 
 ## Releasing
 
-Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions. Pushing a version tag triggers a build that cross-compiles binaries for all platforms and publishes them to GitHub Releases and the Homebrew tap.
+Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions. Pushing a version tag triggers a build.
 
 ### Supported platforms
 
@@ -312,37 +366,22 @@ Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Acti
 | macOS | Intel (amd64) | Intel Macs |
 | macOS | Apple Silicon (arm64) | M1/M2/M3/M4 Macs |
 | Linux | x86_64 (amd64) | Standard PCs, servers |
-| Linux | ARM64 (arm64) | Raspberry Pi, Asahi Linux, Snapdragon laptops |
+| Linux | ARM64 (arm64) | Raspberry Pi, Asahi Linux |
 | Windows | x86_64 (amd64) | Standard PCs |
-| Windows | ARM64 (arm64) | Snapdragon PCs (Surface Pro X, etc.) |
+| Windows | ARM64 (arm64) | Snapdragon PCs |
 
 ### How to release
 
 ```bash
-# 1. Make sure main is clean and tests pass
-git checkout main
-git pull
+git checkout main && git pull
 go test ./...
-
-# 2. Tag a new version (follow semver)
 git tag v0.2.0
 git push origin v0.2.0
 ```
 
-That's it. The GitHub Action will:
-- Cross-compile 6 binaries (3 OS × 2 architectures)
-- Create a GitHub Release with changelogs and downloadable archives
-- Update the Homebrew formula in [xdamman/homebrew-tap](https://github.com/xdamman/homebrew-tap)
-
-Users will then get the new version via `nostr update`, `brew upgrade nostr`, or re-running the install script.
-
-### Version numbers
-
-The version is derived entirely from the git tag — there is no version file to edit. GoReleaser injects the tag into the binary at build time via ldflags.
-
 ## Contributing
 
-Contributions welcome! Check [docs/ROADMAP.md](docs/ROADMAP.md) for planned features and [docs/COMMANDS.md](docs/COMMANDS.md) for command specs.
+Contributions welcome! Check [docs/ROADMAP.md](docs/ROADMAP.md) for planned features.
 
 1. Fork the repo
 2. Create a feature branch

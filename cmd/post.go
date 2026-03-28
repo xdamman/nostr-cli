@@ -25,8 +25,29 @@ var postCmd = &cobra.Command{
 	Use:     "post [message]",
 	Short:   "Publish a text note to Nostr",
 	GroupID: "social",
-	Long:  "Publish a kind 1 text note. Pass the message as an argument or enter it interactively.",
-	RunE:  runPost,
+	Long: `Publish a kind 1 text note to your configured relays.
+
+The message can come from:
+  • Command argument: nostr post "Hello world"
+  • Piped stdin:      echo "Hello" | nostr post
+  • Interactive:      nostr post (prompts for input)
+
+Flags:
+  --reply <event-id>  Reply to a specific event (hex, note1, or nevent)
+
+Output formats:
+  (default)  Human-readable relay-by-relay progress
+  --json     Pretty-printed JSON with event + relay results
+  --jsonl    Compact single-line JSON (for piping)
+  --raw      Raw Nostr event JSON (wire format)
+
+Examples:
+  nostr post "Hello Nostr!"
+  echo "Automated post" | nostr post
+  nostr post "Great thread!" --reply note1abc...
+  nostr post "Hello" --json | jq .id
+  echo "Bot message" | nostr post --jsonl`,
+	RunE: runPost,
 }
 
 func init() {

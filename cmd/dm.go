@@ -33,8 +33,31 @@ var dmCmd = &cobra.Command{
 	Use:     "dm [profile] [message]",
 	Short:   "Send an encrypted direct message",
 	GroupID: "social",
-	Long:  "Send a DM to a profile (npub, alias, or nip05). Without a message, enters interactive chat mode.\nWith --watch, listens for incoming DMs without a send prompt.\nWithout arguments, shows your aliases.",
-	RunE:  runDM,
+	Long: `Send an NIP-04 encrypted direct message to a profile.
+
+A <profile> can be an npub, alias, or NIP-05 address (e.g. user@domain.com).
+
+Modes:
+  nostr dm <profile> <message>   Send a one-shot DM
+  echo "msg" | nostr dm <profile> Send from stdin
+  nostr dm <profile>             Interactive chat (TUI with message history)
+  nostr dm <profile> --watch     Stream messages with this user (no send prompt)
+  nostr dm --watch               Stream ALL incoming DMs from anyone
+  nostr dm                       Show your aliases (quick reference)
+
+Output formats (for one-shot send and --watch):
+  (default)  timestamp:sender:message (human-readable)
+  --json     Pretty-printed JSON with sender info and event details
+  --jsonl    One JSON object per line (ideal for bots and piping)
+  --raw      Raw Nostr event JSON (wire format, still encrypted)
+
+Examples:
+  nostr dm alice "Hey, how's it going?"
+  echo "Automated alert" | nostr dm alice
+  nostr dm alice --watch --jsonl
+  nostr dm --watch --jsonl | jq .message
+  nostr dm alice "Hello" --json`,
+	RunE: runDM,
 }
 
 func init() {

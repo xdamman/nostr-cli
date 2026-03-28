@@ -1,11 +1,11 @@
 ---
 name: nostr-cli
-description: Post notes, send encrypted DMs, manage profiles, follow users, and interact with Nostr relays from the terminal.
+description: Post notes, send encrypted DMs, query events, create raw events, manage profiles, follow users, and interact with Nostr relays from the terminal.
 ---
 
 # nostr-cli
 
-A command-line tool for interacting with the Nostr protocol. It enables posting notes, sending encrypted DMs, managing user profiles and aliases, following other users, and managing Nostr relays — all from the terminal or within scripts.
+A command-line tool for interacting with the Nostr protocol. Post notes, send encrypted DMs, query events with flexible filters, create raw events of any kind, manage profiles and aliases, follow users, and manage relays — all from the terminal or within scripts.
 
 ## Installation Check and Setup
 
@@ -19,6 +19,24 @@ nostr version
 curl -sL https://nostrcli.sh/install.sh | bash
 ```
 
+## Auto-Detection Behavior
+
+nostr-cli auto-detects the environment:
+- **stdout is a TTY** → Colors enabled, interactive prompts shown
+- **stdout is piped** → Colors disabled automatically, no interactive prompts
+- **stdin is piped** → Content read as input (e.g. `echo "Hello" | nostr post`)
+- The `NO_COLOR` env var and `--no-color` flag also disable colors explicitly
+
+## Output Formats
+
+Most commands support three machine-readable output formats:
+
+| Flag | Description | Use case |
+|------|-------------|----------|
+| `--json` | Pretty-printed enriched JSON (event + metadata) | Human inspection, debugging |
+| `--jsonl` | Compact single-line JSON per event | Piping, bots, streaming, `jq` |
+| `--raw` | Raw Nostr event JSON (wire format) | Forwarding to other nostr tools |
+
 ## Command Reference
 
 ### Posting Notes
@@ -26,16 +44,18 @@ curl -sL https://nostrcli.sh/install.sh | bash
 nostr post [message]
 ```
 
+Publishes a kind 1 text note. Message can come from argument, stdin, or interactive prompt.
+
 Flags:
-- `--reply <event-id>` — Reply to a specific event
-- `--json` — Output result as JSON (includes event ID, signature, etc.)
-- `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
+- `--reply <event-id>` — Reply to a specific event (hex, note1, or nevent)
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 Examples:
 ```bash
 nostr post "Hello Nostr"
 echo "My message" | nostr post
-nostr post "Reply" --reply <event-id> --json
+nostr post "Reply" --reply note1abc... --jsonl
+EVENT_ID=$(nostr post "Message" --jsonl | jq -r '.id')
 ```
 
 ### Direct Messages
@@ -43,16 +63,74 @@ nostr post "Reply" --reply <event-id> --json
 nostr dm <user> [message]
 ```
 
-Sends NIP-44 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
+Send NIP-04 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
+
+Modes:
+- `nostr dm <user> <message>` — Send one-shot DM
+- `echo "msg" | nostr dm <user>` — Send from stdin
+- `nostr dm <user>` — Interactive chat (TUI)
+- `nostr dm <user> --watch` — Stream messages with this user
+- `nostr dm --watch` — Stream ALL incoming DMs
+- `nostr dm` — Show aliases
 
 Flags:
-- `--json` — Output event and relay results as JSON
+- `--watch` — Stream incoming DMs (no send prompt)
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 Examples:
 ```bash
-nostr dm npub1... "Hello"
-nostr dm alice@example.com "Message" --json
-echo "Content" | nostr dm alice
+nostr dm alice "Hello"
+echo "Alert" | nostr dm alice
+nostr dm --watch --jsonl | while read -r line; do echo "$line" | jq .message; done
+nostr dm alice --watch --jsonl
+```
+
+### Query Events
+```bash
+nostr events --kinds <kinds> [flags]
+```
+
+Query events from relays with flexible filters.
+
+Flags:
+- `--kinds <n,n,...>` — Event kinds, comma-separated (required). Common: 0 (profile), 1 (note), 3 (follows), 4 (DM), 7 (reaction)
+- `--since <time>` — Start time: duration (1h, 7d, 30m), unix timestamp, or ISO date (2024-01-01)
+- `--until <time>` — End time: same formats as --since
+- `--author <user>` — Filter by author (npub, alias, or NIP-05)
+- `--limit <n>` — Maximum events to return (default: 50)
+- `--decrypt` — Decrypt kind 4 DM content (requires private key)
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+Examples:
+```bash
+nostr events --kinds 1 --since 1h
+nostr events --kinds 4 --since 24h --decrypt --jsonl
+nostr events --kinds 1,7 --author alice --limit 50 --json
+nostr events --kinds 0,1,3 --since 2024-01-01 --jsonl
+```
+
+### Create Raw Events
+```bash
+nostr event new --kind <n> --content <text> [flags]
+```
+
+Create, sign, and publish a Nostr event of any kind.
+
+Flags:
+- `--kind <n>` — Event kind number (required)
+- `--content <text>` — Event content (required, use `-` for stdin)
+- `--tag key=value` — Tags in key=value format (repeatable)
+- `--pow <n>` — Proof of work difficulty (leading zero bits)
+- `--dry-run` — Sign but don't publish (outputs signed event)
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+Examples:
+```bash
+nostr event new --kind 1 --content "Hello world"
+nostr event new --kind 7 --content "+" --tag e=<eventid> --tag p=<pubkey>
+nostr event new --kind 0 --content '{"name":"bot","about":"I am a bot"}'
+echo "Hello" | nostr event new --kind 1 --content -
+nostr event new --kind 1 --content "Test" --dry-run --json
 ```
 
 ### User Profiles
@@ -60,25 +138,25 @@ echo "Content" | nostr dm alice
 nostr profile [user]
 ```
 
+View profile metadata. Without arguments, shows your own profile.
+
 Flags:
-- `--json` — Structured JSON output
 - `--refresh` — Force fetch from relays instead of cache
+- `--json` / `--jsonl` / `--raw` — Structured output
 
 Examples:
 ```bash
-nostr profile alice
-nostr profile npub1... --json
-nostr profile alice@example.com --refresh --json
+nostr profile
+nostr profile alice --json
+nostr profile npub1... --refresh --json
 ```
 
-### Manage Profiles
+### Profile Update
 ```bash
-nostr profiles              # List all cached profiles
-nostr profiles rm [name]    # Remove a cached profile
+nostr profile update
 ```
 
-Flags:
-- `--json` — JSON output for list command
+Interactively update your profile fields (name, display name, about, picture, NIP-05, website). Changes are published to relays.
 
 ### Follow Management
 ```bash
@@ -86,6 +164,10 @@ nostr follow <user>        # Follow a user
 nostr unfollow <user>      # Unfollow a user
 nostr following            # List users you follow
 ```
+
+Flags for `following`:
+- `--refresh` — Force refresh from relays
+- `--json` / `--jsonl` — Structured output
 
 Examples:
 ```bash
@@ -96,41 +178,22 @@ nostr following --json
 
 ### Relay Management
 ```bash
-nostr relays               # List configured relays
+nostr relays               # List configured relays with live status
 nostr relays add <url>     # Add a relay (wss://... format)
-nostr relays rm <id|url|domain>  # Remove a relay (asks confirmation)
+nostr relays rm <id|url>   # Remove a relay
 ```
 
 Flags:
 - `--json` — JSON output with connection status and ping
 - `--relay <url|domain>` — Show a specific relay only
-- `--yes` / `-y` — Skip confirmation on `rm` (also skipped with `--json`)
+- `--yes` / `-y` — Skip confirmation on `rm`
 
 Examples:
 ```bash
 nostr relays --json
-nostr relays --relay nos.lol --json
 nostr relays add wss://relay.example.com
 nostr relays rm nos.lol -y
 nostr relays rm 1
-```
-
-### Sync Events
-```bash
-nostr sync                 # Interactive relay selection and sync
-nostr sync --relay <url>   # Sync with a specific relay
-nostr sync --json          # Machine-readable sync output
-```
-
-Flags:
-- `--json` — Output sync results as JSON (syncs all relays, no interactive UI)
-- `--relay <url|domain>` — Sync with a specific relay only
-
-Examples:
-```bash
-nostr sync --json
-nostr sync --relay nos.lol --json
-nostr sync --relay wss://nos.lol
 ```
 
 ### Aliases
@@ -144,147 +207,115 @@ Examples:
 ```bash
 nostr alias alice npub1...
 nostr alias bob alice@example.com
-nostr aliases --json
+nostr aliases
+```
+
+### Sync Events
+```bash
+nostr sync                 # Interactive relay selection and sync
+nostr sync --relay <url>   # Sync with a specific relay
+nostr sync --json          # Machine-readable sync output
 ```
 
 ### Profile Management
 ```bash
-nostr switch [profile]    # Switch to a different profile
-nostr login               # Log in to a profile
+nostr login                # Interactive login (import or generate)
+nostr login --new          # Generate new keypair non-interactively
+nostr login --nsec nsec1...  # Import existing key non-interactively
+nostr switch [profile]     # Switch active profile
+nostr profiles             # List all local profiles
 ```
 
-Flags for login:
-- `--new` — Create a new key
-- `--nsec <key>` — Log in with nsec (hex-encoded private key)
-- `--generate` — Generate a new key
-
-Examples:
+### User Lookup
 ```bash
-nostr login --new
-nostr login --nsec nsec1...
-nostr switch alice
-```
-
-### User Feed
-```bash
-nostr [user]
+nostr <user>               # View profile and latest notes
+nostr <user> --watch       # Stream new notes from a user
+nostr --watch              # Stream notes from all followed accounts
 ```
 
 Flags:
-- `--watch` — Watch for new notes in real time
-- `--json` — JSON output
-- `--limit <n>` — Limit number of notes returned (default varies)
-- `--timeout <ms>` — Relay timeout
+- `--watch` — Live-stream new notes (Ctrl+C to exit)
+- `--limit <n>` — Number of notes to show (default: 10)
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
 
-Examples:
+### NIP Reference
 ```bash
-nostr alice
-nostr npub1... --json --limit 10
-nostr alice --watch
-```
-
-### NIP Specification Viewer
-```bash
-nostr nip<N>    # View NIP specification (e.g., nostr nip44)
+nostr nip <number>         # View a NIP specification
 ```
 
 Examples:
 ```bash
-nostr nip44
-nostr nip05
+nostr nip 01
+nostr nip 44
+```
+
+### Other
+```bash
+nostr version              # Print version info
+nostr update               # Check for updates and self-update
 ```
 
 ## Global Flags
 
-- `--profile <npub|alias|username>` — Execute command under a specific profile
-- `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
-- `--no-color` — Strip ANSI color codes
-- `--raw` — Output raw Nostr event JSON (wire format, as relays see it)
-- `--json` — Enriched JSON output with event + relay publish results
-
-### `--raw` vs `--json`
-
-- `--raw` returns the **standard Nostr event object** — the exact JSON that relays receive. Useful for piping into other nostr tools or storing events.
-- `--json` returns an **enriched object** with the event plus metadata like relay publish status, timing, etc. Useful for automation and scripting.
+| Flag | Description |
+|------|-------------|
+| `--profile <npub\|alias\|username>` | Execute command under a specific profile |
+| `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
+| `--no-color` | Disable colored output (auto-detected when piped) |
+| `--json` | Enriched JSON output (pretty-printed on TTY) |
+| `--jsonl` | One JSON object per line (for bots/piping) |
+| `--raw` | Raw Nostr event JSON (wire format) |
 
 ## User Resolution
 
 In commands accepting a `<user>` argument, you can specify:
-- **npub format**: `npub1...` (long form Nostr public key)
+- **npub**: `npub1...` (Nostr public key in bech32)
 - **Alias**: A local alias created with `nostr alias`
-- **NIP-05**: `user@domain.com` (DNS-based user identifier)
+- **NIP-05**: `user@domain.com` (DNS-based identifier)
 
-## Best Practices for Scriptable Usage
+## Bot/Agent Patterns and Recipes
 
-### Output Parsing
-Use `--raw` for the standard event format or `--json` for enriched output:
+### Monitor DMs and respond
 ```bash
-# Raw event (wire format)
-nostr post "Message" --raw | jq '.id'
-
-# Enriched JSON with relay results
-nostr post "Message" --json | jq '.relays[] | select(.ok) | .url'
-
-# Profile as JSON
-nostr profile alice --json | jq '.about'
-nostr relays --json | jq '.[]'
+nostr dm --watch --jsonl | while read -r line; do
+  message=$(echo "$line" | jq -r .message)
+  sender=$(echo "$line" | jq -r .from_npub)
+  # Process message and respond
+  nostr dm "$sender" "Got your message: $message"
+done
 ```
 
-### Streaming Events
+### Automated posting
 ```bash
-# Stream all notes from followed accounts
-nostr --watch --raw              # raw event per line (JSONL)
-nostr --watch --json             # enriched JSON per line
+# Post from a script
+echo "Server status: all systems go" | nostr post --jsonl
 
-# Stream all incoming DMs
-nostr dm --watch --raw           # raw encrypted events
-nostr dm --watch --json          # decrypted with sender info
-
-# Stream DMs with specific user
-nostr dm alice --watch --json
+# Post with event ID capture
+EVENT_ID=$(nostr post "Hello" --jsonl | jq -r '.id')
 ```
 
-### Clean Output
-Use `--no-color` to avoid ANSI escape codes in piped output:
+### Query and process events
 ```bash
-nostr post "Message" --no-color
+# Get recent DMs as structured data
+nostr events --kinds 4 --since 1h --decrypt --jsonl | jq '{from: .author, msg: .content}'
+
+# Export notes from a user
+nostr events --kinds 1 --author alice --since 7d --jsonl > alice_notes.jsonl
 ```
 
-### Posting Messages
-Post from argument or stdin:
+### Non-interactive setup
 ```bash
-# From argument
-nostr post "Hello Nostr"
-
-# From stdin
-echo "My message" | nostr post
-
-# Capture event ID
-EVENT_ID=$(nostr post "Message" --json | jq -r '.id')
-```
-
-### Sending DMs
-Send from argument or stdin:
-```bash
-# From argument
-nostr dm alice "Private message"
-
-# From stdin
-echo "Content" | nostr dm alice
-```
-
-### Login (Non-Interactive)
-```bash
-# New key
 nostr login --new
-
-# Existing nsec key
-nostr login --nsec nsec1abc...
+nostr relays add wss://relay.damus.io
+nostr relays add wss://nos.lol
+nostr post "Bot is online" --jsonl
 ```
 
 ## Configuration
 
 - **Config directory**: `~/.nostr/`
+- **Profiles**: `~/.nostr/profiles/<npub>/`
 - **Sent events**: `~/.nostr/profiles/<npub>/events.jsonl`
+- **DM history**: `~/.nostr/profiles/<npub>/directmessages/<hex>.jsonl`
 
-All profiles, aliases, and relay configurations are stored in the `~/.nostr/` directory.
+All profiles, aliases, and relay configurations are stored in `~/.nostr/`. Each profile is isolated with its own keys, relays, and aliases.

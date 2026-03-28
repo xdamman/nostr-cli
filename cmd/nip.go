@@ -18,7 +18,16 @@ import (
 var nipCmd = &cobra.Command{
 	Use:     "nip [number]",
 	Short:   "View a NIP specification",
-	Long:    "Fetch and display a NIP (Nostr Implementation Possibility) in the terminal.\nExamples: nostr nip 01, nostr nip 44, nostr nip01",
+	Long: `Fetch and render a NIP (Nostr Implementation Possibility) in the terminal.
+
+Accepts various formats: nip 01, nip 44, nip01, NIP-01, nip-44.
+Results are cached for 24 hours.
+
+Examples:
+  nostr nip 01          # NIP-01: Basic protocol
+  nostr nip 04          # NIP-04: Encrypted DMs
+  nostr nip 44          # NIP-44: Versioned encryption
+  nostr nip 65          # NIP-65: Relay list metadata`,
 	GroupID: "reference",
 	Args:    exactArgs(1),
 	RunE:    runNIP,

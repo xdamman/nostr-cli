@@ -30,21 +30,49 @@ var relaysCmd = &cobra.Command{
 	Use:     "relays",
 	Short:   "Manage relays",
 	GroupID: "infra",
-	RunE:    runRelaysList,
+	Long: `List, add, or remove relays for the active profile.
+
+Without subcommands, lists all configured relays with live connectivity status.
+Use --json for machine-readable output with ping times.
+Use --relay to filter to a specific relay.
+
+Examples:
+  nostr relays
+  nostr relays --json
+  nostr relays --relay nos.lol --json
+  nostr relays add wss://relay.example.com
+  nostr relays rm nos.lol -y
+  nostr relays rm 1`,
+	RunE: runRelaysList,
 }
 
 var relaysAddCmd = &cobra.Command{
 	Use:   "add [url]",
 	Short: "Add a relay",
-	Args:  exactArgs(1),
-	RunE:  runRelaysAdd,
+	Long: `Add a relay to your profile's relay list and publish updated NIP-65.
+
+The URL must start with wss:// or ws://.
+
+Examples:
+  nostr relays add wss://relay.example.com`,
+	Args: exactArgs(1),
+	RunE: runRelaysAdd,
 }
 
 var relaysRmCmd = &cobra.Command{
 	Use:   "rm [url or number]",
 	Short: "Remove a relay",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runRelaysRm,
+	Long: `Remove a relay by URL, domain name, or list number.
+
+Without arguments, shows an interactive checkbox picker.
+Use -y/--yes to skip confirmation.
+
+Examples:
+  nostr relays rm nos.lol
+  nostr relays rm 2 -y
+  nostr relays rm wss://relay.example.com`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRelaysRm,
 }
 
 func init() {

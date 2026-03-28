@@ -28,7 +28,20 @@ var (
 var loginCmd = &cobra.Command{
 	Use:     "login",
 	Short:   "Create a new profile or import an existing one",
-	Long:    "Login with an existing nsec or generate a new keypair. Creates a profile in ~/.nostr/profiles/<npub>/.",
+	Long: `Login with an existing nsec or generate a new keypair.
+
+Creates a profile directory in ~/.nostr/profiles/<npub>/ with keys, relays,
+and optionally profile metadata.
+
+Flags:
+  --nsec <key>   Import an existing nsec (non-interactive)
+  --new          Generate a new keypair (skip prompt)
+  --generate     Alias for --new
+
+Examples:
+  nostr login                     # Interactive: import or generate
+  nostr login --new               # Generate new keypair non-interactively
+  nostr login --nsec nsec1...     # Import existing key non-interactively`,
 	GroupID: "profile",
 	RunE:    runLogin,
 }

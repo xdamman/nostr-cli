@@ -33,22 +33,40 @@ var eventsCmd = &cobra.Command{
 	Use:     "events",
 	Short:   "Query events from relays",
 	GroupID: "social",
-	Long: `Query events from relays with filters.
+	Long: `Query events from relays with flexible filters.
+
+The --kinds flag accepts comma-separated event kind numbers (e.g. 1,4,7).
+Common kinds: 0 (profile), 1 (text note), 3 (follow list), 4 (encrypted DM),
+7 (reaction), 10002 (relay list).
+
+The --since and --until flags accept:
+  • Durations: 1h, 24h, 7d, 2w, 30m
+  • Unix timestamps: 1700000000
+  • ISO dates: 2024-01-01, 2024-01-01T15:00:00Z
+
+Use --decrypt to decrypt kind 4 DM content (requires your private key).
+
+Output formats:
+  (default)  Human-readable one-line-per-event summary
+  --json     Pretty-printed enriched JSON (with author npub, timestamp, etc.)
+  --jsonl    One compact JSON object per line (ideal for piping/bots)
+  --raw      Raw Nostr event JSON (wire format as relays see it)
 
 Examples:
-  nostr events --kinds 4 --since 1h --json          # DMs from last hour
-  nostr events --kinds 1 --author npub1... --limit 20 --jsonl
-  nostr events --kinds 0,1,3 --since 2024-01-01 --jsonl`,
+  nostr events --kinds 1 --since 1h                        # Recent text notes
+  nostr events --kinds 4 --since 24h --decrypt --jsonl     # Decrypt DMs, output as JSONL
+  nostr events --kinds 1,7 --author npub1... --limit 50    # Notes and reactions by author
+  nostr events --kinds 0,1,3 --since 2024-01-01 --json     # Multiple kinds since a date`,
 	RunE: runEvents,
 }
 
 func init() {
-	eventsCmd.Flags().StringVar(&eventsKinds, "kinds", "", "Event kinds to filter (comma-separated, required)")
-	eventsCmd.Flags().StringVar(&eventsSince, "since", "", "Since time: duration (1h, 24h, 7d), unix timestamp, or ISO date")
-	eventsCmd.Flags().StringVar(&eventsUntil, "until", "", "Until time: duration (1h, 24h, 7d), unix timestamp, or ISO date")
-	eventsCmd.Flags().StringVar(&eventsAuthor, "author", "", "Filter by author (npub, alias, or nip05)")
-	eventsCmd.Flags().IntVar(&eventsLimit, "limit", 50, "Maximum events to return")
-	eventsCmd.Flags().BoolVar(&eventsDecrypt, "decrypt", false, "Decrypt kind 4 DM content")
+	eventsCmd.Flags().StringVar(&eventsKinds, "kinds", "", "Event kinds to filter, comma-separated (e.g. 1,4,7)")
+	eventsCmd.Flags().StringVar(&eventsSince, "since", "", "Start time: duration (1h, 7d), unix timestamp, or ISO date (2024-01-01)")
+	eventsCmd.Flags().StringVar(&eventsUntil, "until", "", "End time: duration (1h, 7d), unix timestamp, or ISO date (2024-01-01)")
+	eventsCmd.Flags().StringVar(&eventsAuthor, "author", "", "Filter by author (npub, alias, or NIP-05 address)")
+	eventsCmd.Flags().IntVar(&eventsLimit, "limit", 50, "Maximum number of events to return")
+	eventsCmd.Flags().BoolVar(&eventsDecrypt, "decrypt", false, "Decrypt kind 4 DM content (requires private key)")
 	_ = eventsCmd.MarkFlagRequired("kinds")
 	rootCmd.AddCommand(eventsCmd)
 }

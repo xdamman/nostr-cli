@@ -27,23 +27,52 @@ var followCmd = &cobra.Command{
 	Use:     "follow <profile>",
 	Short:   "Follow a profile",
 	GroupID: "social",
-	Args:  exactArgs(1),
-	RunE:  runFollow,
+	Long: `Follow a user by adding them to your contact list (kind 3).
+
+A <profile> can be an npub, alias, or NIP-05 address.
+After following, you'll be prompted to create an alias for quick access.
+
+Output formats:
+  --json/--jsonl  Structured result with follow count
+
+Examples:
+  nostr follow npub1...
+  nostr follow alice@example.com
+  nostr follow alice --json`,
+	Args: exactArgs(1),
+	RunE: runFollow,
 }
 
 var unfollowCmd = &cobra.Command{
 	Use:     "unfollow <profile>",
 	Short:   "Unfollow a profile",
 	GroupID: "social",
-	Args:    exactArgs(1),
-	RunE:    runUnfollow,
+	Long: `Remove a user from your contact list (kind 3).
+
+Examples:
+  nostr unfollow npub1...
+  nostr unfollow alice`,
+	Args: exactArgs(1),
+	RunE: runUnfollow,
 }
 
 var followingCmd = &cobra.Command{
 	Use:     "following",
 	Short:   "List accounts you follow",
 	GroupID: "social",
-	RunE:    runFollowing,
+	Long: `List all accounts in your contact list (kind 3).
+
+Use --refresh to fetch fresh data from relays instead of cache.
+
+Output formats:
+  --json   Pretty-printed JSON array of {npub, name} objects
+  --jsonl  Compact single-line JSON
+
+Examples:
+  nostr following
+  nostr following --json
+  nostr following --refresh`,
+	RunE: runFollowing,
 }
 
 func init() {

@@ -19,7 +19,18 @@ import (
 var switchCmd = &cobra.Command{
 	Use:     "switch [profile]",
 	Short:   "Switch active profile",
-	Long:    "Switch to a different profile. Without arguments, select interactively.\nA <profile> can be an npub, alias, or NIP-05 address.",
+	Long: `Switch to a different profile. Without arguments, shows an interactive picker.
+
+A <profile> can be an npub, alias, or NIP-05 address.
+
+Output formats:
+  --json/--jsonl  List all profiles (no argument) or show switched profile details
+
+Examples:
+  nostr switch                    # Interactive picker
+  nostr switch alice              # Switch by alias
+  nostr switch npub1...           # Switch by npub
+  nostr switch --json             # List all profiles as JSON`,
 	GroupID: "profile",
 	RunE:    runSwitch,
 }

@@ -27,29 +27,47 @@ var eventCmd = &cobra.Command{
 	Use:     "event",
 	Short:   "Event operations",
 	GroupID: "social",
-	Long:    "Commands for creating and inspecting Nostr events.",
+	Long:    "Commands for creating and inspecting raw Nostr events of any kind.",
 }
 
 var eventNewCmd = &cobra.Command{
 	Use:   "new",
 	Short: "Create and publish a new event",
-	Long: `Create and sign a Nostr event of any kind.
+	Long: `Create, sign, and publish a Nostr event of any kind.
+
+Flags:
+  --kind      Event kind number (required). Common kinds: 0 (profile), 1 (text note),
+              3 (follow list), 5 (deletion), 7 (reaction), 30023 (long-form article).
+  --content   Event content string (required). Use '-' to read from stdin.
+  --tag       Tags in key=value format (repeatable). E.g. --tag e=<eventid> --tag p=<pubkey>
+  --pow       Proof of work difficulty (leading zero bits in event ID).
+  --dry-run   Sign the event but don't publish. Outputs the signed event JSON.
+
+With --dry-run, or when --json/--jsonl is set and --dry-run is used, the signed
+event is printed without publishing — useful for inspection or piping to other tools.
+
+Output formats:
+  --json      Pretty-printed JSON (event + relay results, or just event with --dry-run)
+  --jsonl     Compact single-line JSON (ideal for piping)
+  --raw       Raw Nostr event JSON (wire format)
 
 Examples:
   nostr event new --kind 1 --content "Hello world"
-  nostr event new --kind 1 --content "Reply" --tag e=<eventid>
-  nostr event new --kind 0 --content '{"name":"test"}'
+  nostr event new --kind 1 --content "Reply" --tag e=abc123
+  nostr event new --kind 7 --content "+" --tag e=<eventid> --tag p=<pubkey>
+  nostr event new --kind 0 --content '{"name":"bot","about":"I am a bot"}'
   echo "Hello" | nostr event new --kind 1 --content -
-  nostr event new --kind 1 --content "Test" --dry-run --json`,
+  nostr event new --kind 1 --content "Test" --dry-run --json
+  nostr event new --kind 1 --content "Mined" --pow 16`,
 	RunE: runEventNew,
 }
 
 func init() {
-	eventNewCmd.Flags().IntVar(&eventNewKind, "kind", -1, "Event kind (required)")
+	eventNewCmd.Flags().IntVar(&eventNewKind, "kind", -1, "Event kind number (required, e.g. 1 for text note)")
 	eventNewCmd.Flags().StringVar(&eventNewContent, "content", "", "Event content (use '-' to read from stdin)")
-	eventNewCmd.Flags().StringArrayVar(&eventNewTags, "tag", nil, "Tags in key=value format (repeatable)")
-	eventNewCmd.Flags().IntVar(&eventNewPow, "pow", 0, "Proof of work difficulty")
-	eventNewCmd.Flags().BoolVar(&eventNewDryRun, "dry-run", false, "Sign but don't publish (print event)")
+	eventNewCmd.Flags().StringArrayVar(&eventNewTags, "tag", nil, "Tags in key=value format, repeatable (e.g. --tag e=abc --tag p=def)")
+	eventNewCmd.Flags().IntVar(&eventNewPow, "pow", 0, "Proof of work difficulty (leading zero bits)")
+	eventNewCmd.Flags().BoolVar(&eventNewDryRun, "dry-run", false, "Sign but don't publish — print the signed event")
 	_ = eventNewCmd.MarkFlagRequired("kind")
 	_ = eventNewCmd.MarkFlagRequired("content")
 

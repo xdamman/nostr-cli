@@ -13,7 +13,16 @@ import (
 var aliasCmd = &cobra.Command{
 	Use:     "alias [name] [npub|nip05]",
 	Short:   "Manage aliases",
-	Long:    "Create, list, or remove aliases. Aliases are global shortcuts for npubs.\nA <profile> can be an npub or NIP-05 address.",
+	Long: `Create, list, or remove aliases. Aliases are global shortcuts for npubs.
+
+Without arguments, lists all aliases. With two arguments, creates a new alias.
+The target can be an npub or NIP-05 address (user@domain.com).
+
+Examples:
+  nostr alias                              # List all aliases
+  nostr alias alice npub1...               # Create alias
+  nostr alias bob alice@example.com        # Create from NIP-05
+  nostr alias rm alice                     # Remove alias`,
 	GroupID: "infra",
 	RunE:    runAlias,
 }

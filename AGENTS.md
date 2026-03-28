@@ -1,6 +1,6 @@
 # nostr-cli
 
-A command-line tool for the Nostr protocol. Post notes, send encrypted DMs, manage profiles, follow users, and interact with relays — all from the terminal.
+A command-line tool for the Nostr protocol. Post notes, send encrypted DMs, query events, create raw events of any kind, manage profiles, follow users, and interact with relays — all from the terminal.
 
 ## Install
 
@@ -18,8 +18,30 @@ nostr post "Hello Nostr"                    # Post a note
 nostr post "Reply" --reply <event-id>       # Reply to an event
 echo "My message" | nostr post              # Post from stdin
 nostr dm alice "Hello"                      # Send encrypted DM
-nostr dm alice "Hello" --json               # Send DM, JSON output
+nostr dm alice "Hello" --jsonl              # Send DM, JSONL output
 echo "Content" | nostr dm alice             # DM from stdin
+nostr dm --watch --jsonl                    # Stream ALL incoming DMs
+nostr dm alice --watch --jsonl              # Stream DMs with alice
+```
+
+### Query Events
+```bash
+nostr events --kinds 1 --since 1h                    # Recent text notes
+nostr events --kinds 4 --since 24h --decrypt --jsonl  # Decrypt DMs as JSONL
+nostr events --kinds 1,7 --author alice --limit 50    # Notes + reactions by author
+nostr events --kinds 0,1,3 --since 2024-01-01 --json  # Multiple kinds since date
+```
+
+The `--since` and `--until` flags accept: durations (1h, 7d, 30m), unix timestamps, or ISO dates (2024-01-01).
+The `--kinds` flag accepts comma-separated event kinds (e.g. 1,4,7).
+
+### Create Raw Events
+```bash
+nostr event new --kind 1 --content "Hello world"
+nostr event new --kind 7 --content "+" --tag e=<id> --tag p=<pubkey>
+nostr event new --kind 0 --content '{"name":"bot"}'
+echo "Hello" | nostr event new --kind 1 --content -
+nostr event new --kind 1 --content "Test" --dry-run --json
 ```
 
 ### Profiles
@@ -39,15 +61,14 @@ nostr unfollow alice                        # Unfollow a user
 nostr following --json                      # List followed users
 nostr alice --json --limit 10               # View user's recent notes
 nostr alice --watch                         # Live-stream notes
+nostr --watch --jsonl                       # Stream followed accounts' notes
 ```
 
 ### Relays
 ```bash
 nostr relays --json                         # List relays with status
-nostr relays --relay nos.lol --json         # Show a specific relay
 nostr relays add wss://relay.example.com    # Add a relay
-nostr relays rm wss://relay.example.com     # Remove a relay
-nostr relays rm nos.lol -y                  # Remove by domain, skip confirmation
+nostr relays rm nos.lol -y                  # Remove by domain
 ```
 
 ### Sync
@@ -60,17 +81,26 @@ nostr sync --relay nos.lol --json           # Sync a specific relay
 ```bash
 nostr alias alice npub1...                  # Create alias
 nostr alias bob user@domain.com             # Alias from NIP-05
-nostr aliases --json                        # List all aliases
+nostr aliases                               # List all aliases
 nostr alias rm alice                        # Remove alias
 ```
 
 ## Global Flags
 
-- `--profile <npub|alias|username>` — Use a specific profile
-- `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
-- `--no-color` — Disable ANSI color codes
-- `--raw` — Output raw Nostr event JSON (wire format, as relays see it)
-- `--json` — Enriched JSON output with event + relay results (most commands)
+| Flag | Description |
+|------|-------------|
+| `--profile <npub\|alias>` | Use a specific profile |
+| `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
+| `--no-color` | Disable ANSI color codes |
+| `--json` | Enriched JSON output (pretty-printed on TTY) |
+| `--jsonl` | One JSON object per line (for bots/piping) |
+| `--raw` | Raw Nostr event JSON (wire format) |
+
+## Auto-Detection
+
+- Colors are **automatically disabled** when stdout is piped (no `--no-color` needed)
+- Stdin piped content is automatically read as input
+- The `NO_COLOR` environment variable is respected
 
 ## User Resolution
 
@@ -81,11 +111,11 @@ A `<user>` can be:
 
 ## Best Practices
 
-- Use `--json` when parsing output programmatically
-- Use `--no-color` when piping output to other tools
-- Use `--timeout` to control relay response time
+- Use `--jsonl` for streaming/piping (one JSON object per line)
+- Use `--json` for human-readable structured output
+- Use `--raw` for wire-format events
 - Pipe content via stdin: `echo "msg" | nostr post`
-- Capture event IDs: `nostr post "msg" --json | jq -r '.id'`
+- Capture event IDs: `nostr post "msg" --jsonl | jq -r '.id'`
 
 ## Resources
 
