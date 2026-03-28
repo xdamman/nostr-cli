@@ -340,6 +340,7 @@ func watchAllDMs(npub string) error {
 						}
 					} else {
 						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
+						os.Stdout.Sync()
 					}
 					printMu.Unlock()
 				}
@@ -405,6 +406,7 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 			}
 		} else {
 			fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
+			os.Stdout.Sync()
 		}
 	}
 

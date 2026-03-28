@@ -13,23 +13,26 @@ import (
 func printRaw(v interface{}) {
 	data, _ := json.Marshal(v)
 	fmt.Println(string(data))
+	os.Stdout.Sync()
 }
 
 // printJSON outputs a value as pretty-printed JSON.
 // When stdout is a TTY, adds syntax coloring.
 func printJSON(v interface{}) {
 	data, _ := json.MarshalIndent(v, "", "  ")
-	if term.IsTerminal(int(os.Stdout.Fd())) && !noColorFlag {
+	if term.IsTerminal(int(os.Stdout.Fd())) && !noColorFlag && !pipeFlag {
 		fmt.Println(colorizeJSON(string(data)))
 	} else {
 		fmt.Println(string(data))
 	}
+	os.Stdout.Sync()
 }
 
 // printJSONL outputs a value as a single compact JSON line (JSON Lines format).
 func printJSONL(v interface{}) {
 	data, _ := json.Marshal(v)
 	fmt.Println(string(data))
+	os.Stdout.Sync()
 }
 
 // colorizeJSON adds ANSI color codes to JSON output.

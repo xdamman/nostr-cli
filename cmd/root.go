@@ -22,6 +22,7 @@ var (
 	rawFlag     bool
 	jsonFlag    bool
 	jsonlFlag   bool
+	pipeFlag    bool
 )
 
 var rootCmd = &cobra.Command{
@@ -42,6 +43,11 @@ Most commands support --json for machine-readable output.`,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// --pipe mode: disable color, close stdin for daemonization
+		if pipeFlag {
+			noColorFlag = true
+			os.Stdin.Close()
+		}
 		// Respect --no-color flag and NO_COLOR env var (https://no-color.org/)
 		if noColorFlag || os.Getenv("NO_COLOR") != "" {
 			color.NoColor = true
@@ -303,6 +309,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event as compact single-line JSON")
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output enriched JSON (pretty-printed with colors on TTY)")
 	rootCmd.PersistentFlags().BoolVar(&jsonlFlag, "jsonl", false, "Output one JSON object per line (for bot/pipe consumption)")
+	rootCmd.PersistentFlags().BoolVar(&pipeFlag, "pipe", false, "Pipe mode: no color, no prompts, flush stdout, close stdin")
 
 	// Command groups
 	rootCmd.AddGroup(

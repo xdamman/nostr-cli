@@ -159,6 +159,7 @@ func runWatchFeed() error {
 						}
 					} else {
 						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), authorName, content)
+						os.Stdout.Sync()
 					}
 					printMu.Unlock()
 				}
