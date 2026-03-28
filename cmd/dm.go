@@ -120,6 +120,13 @@ func runDM(cmd *cobra.Command, args []string) error {
 		message := strings.Join(args[1:], " ")
 		return sendDM(npub, skHex, myHex, targetHex, message, relays)
 	}
+
+	// Watch mode — don't read stdin
+	if dmWatchFlag {
+		return watchDM(npub, skHex, myHex, targetHex, args[0], relays)
+	}
+
+	// Piped stdin → send as message
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -130,10 +137,6 @@ func runDM(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("empty input from pipe")
 		}
 		return sendDM(npub, skHex, myHex, targetHex, message, relays)
-	}
-
-	if dmWatchFlag {
-		return watchDM(npub, skHex, myHex, targetHex, args[0], relays)
 	}
 
 	// Interactive mode
