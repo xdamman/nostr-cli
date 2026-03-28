@@ -776,7 +776,7 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			return
 		}
 		message := strings.Join(args[1:], " ")
-		go sendDMAsync(npub, skHex, myHex, targetHex, message, relays, statusCh)
+		sendDMAsync(npub, skHex, myHex, targetHex, message, relays, statusCh)
 
 	case "profile":
 		user := npub
@@ -931,7 +931,7 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			return
 		}
 		message := strings.Join(args, " ")
-		go postNoteAsync(npub, myHex, message, relays, statusCh)
+		postNoteAsync(npub, myHex, message, relays, statusCh)
 
 	case "relays":
 		currentRelays, err := config.LoadRelays(npub)
