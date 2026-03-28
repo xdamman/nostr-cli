@@ -1,7 +1,8 @@
 nostr-cli
 .claude
 nostr
-video
+video/node_modules/
+video/out/
 .agent
 .agents
 .windsurf
