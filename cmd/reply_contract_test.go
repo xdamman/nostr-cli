@@ -24,7 +24,7 @@ func TestLLM_Reply_Flags(t *testing.T) {
 
 func TestLLM_Reply_InheritsGlobalFlags(t *testing.T) {
 	cmd := requireCmd(t, "reply")
-	globals := []string{"json", "jsonl", "raw", "no-color", "profile", "timeout"}
+	globals := []string{"json", "jsonl", "raw", "no-color", "account", "timeout"}
 	for _, flag := range globals {
 		t.Run("--"+flag, func(t *testing.T) { requireFlag(t, cmd, flag) })
 	}

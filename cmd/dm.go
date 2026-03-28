@@ -87,7 +87,7 @@ func init() {
 }
 
 func runDM(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}

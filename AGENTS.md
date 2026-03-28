@@ -106,7 +106,7 @@ nostr alias rm alice                        # Remove alias
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias>` | Use a specific account |
+| `--account <npub\|alias>` | Use a specific account |
 | `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
 | `--no-color` | Disable ANSI color codes |
 | `--json` | Enriched JSON output (pretty-printed on TTY) |

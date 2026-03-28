@@ -78,7 +78,7 @@ func updateFeedNameWidth(name string) int {
 }
 
 func runShell() error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return fmt.Errorf("no active account. Run 'nostr login' first")
 	}

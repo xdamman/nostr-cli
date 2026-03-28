@@ -82,7 +82,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 	}
 
 	// No args — show current user's profile
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func humanDuration(d time.Duration) string {
 }
 
 func runProfileUpdate(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}

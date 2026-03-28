@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	profileFlag string
+	accountFlag string
 	noColorFlag bool
 	timeoutFlag int
 	rawFlag     bool
@@ -289,27 +289,26 @@ func resolveProfileName(npub string) string {
 	return ""
 }
 
-// loadProfile resolves the --profile flag to an npub.
+// loadAccount resolves the --account flag to an npub.
 // If no flag is set, returns the active account.
 // The flag value is resolved as: npub → alias → NIP-05 (using the active account's context).
-func loadProfile() (string, error) {
-	if profileFlag == "" {
+func loadAccount() (string, error) {
+	if accountFlag == "" {
 		return config.ActiveProfile()
 	}
-	if strings.HasPrefix(profileFlag, "npub1") {
-		return profileFlag, nil
+	if strings.HasPrefix(accountFlag, "npub1") {
+		return accountFlag, nil
 	}
 	// Resolve using the active account's aliases
 	activeNpub, err := config.ActiveProfile()
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve --profile %q: no active account to look up aliases", profileFlag)
+		return "", fmt.Errorf("cannot resolve --account %q: no active account to look up aliases", accountFlag)
 	}
-	return resolve.ResolveToNpub(activeNpub, profileFlag)
+	return resolve.ResolveToNpub(activeNpub, accountFlag)
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "Account to use: npub, alias, or username (default: active account)")
-	rootCmd.PersistentFlags().StringVar(&profileFlag, "account", "", "Account to use: npub, alias, or username (alias for --profile)")
+	rootCmd.PersistentFlags().StringVar(&accountFlag, "account", "", "Account to use: npub, alias, or username (default: active account)")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().IntVar(&timeoutFlag, "timeout", 2000, "Timeout per relay in milliseconds")
 	rootCmd.PersistentFlags().BoolVar(&rawFlag, "raw", false, "Output raw Nostr event as compact single-line JSON")

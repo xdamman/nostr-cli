@@ -85,7 +85,7 @@ func runEventNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--kind is required")
 	}
 
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}

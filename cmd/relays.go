@@ -91,7 +91,7 @@ type relayInfo struct {
 }
 
 func runRelaysList(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func runRelaysListJSON(relays []string) error {
 }
 
 func runRelaysAdd(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func runRelaysAdd(cmd *cobra.Command, args []string) error {
 }
 
 func runRelaysRm(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}

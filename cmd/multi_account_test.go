@@ -8,11 +8,11 @@ import (
 	"github.com/xdamman/nostr-cli/internal/config"
 )
 
-// Multi-account contract tests — verify the --profile flag works across commands.
+// Multi-account contract tests — verify the --account flag works across commands.
 // These are contract-style tests (no network calls) verifying flag presence and behavior.
 
-// TestMultiAccount_ProfileFlagInherited verifies --profile is available on all subcommands.
-func TestMultiAccount_ProfileFlagInherited(t *testing.T) {
+// TestMultiAccount_AccountFlagInherited verifies --account is available on all subcommands.
+func TestMultiAccount_AccountFlagInherited(t *testing.T) {
 	commands := [][]string{
 		{"follow"},
 		{"unfollow"},
@@ -35,101 +35,84 @@ func TestMultiAccount_ProfileFlagInherited(t *testing.T) {
 			continue
 		}
 		t.Run(cmd.CommandPath(), func(t *testing.T) {
-			requireFlag(t, cmd, "profile")
+			requireFlag(t, cmd, "account")
 		})
 	}
 }
 
-// TestMultiAccount_ProfileAcceptsNpub verifies that setting --profile to an npub
-// makes loadProfile() return that npub directly.
-func TestMultiAccount_ProfileAcceptsNpub(t *testing.T) {
+// TestMultiAccount_AccountAcceptsNpub verifies that setting --account to an npub
+// makes loadAccount() return that npub directly.
+func TestMultiAccount_AccountAcceptsNpub(t *testing.T) {
 	testNpub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsef5cw"
 
-	old := profileFlag
-	defer func() { profileFlag = old }()
+	old := accountFlag
+	defer func() { accountFlag = old }()
 
-	profileFlag = testNpub
-	got, err := loadProfile()
+	accountFlag = testNpub
+	got, err := loadAccount()
 	if err != nil {
-		t.Fatalf("loadProfile() with npub flag: %v", err)
+		t.Fatalf("loadAccount() with npub flag: %v", err)
 	}
 	if got != testNpub {
-		t.Errorf("loadProfile() = %q, want %q", got, testNpub)
+		t.Errorf("loadAccount() = %q, want %q", got, testNpub)
 	}
 }
 
-// TestMultiAccount_ProfileFlagType verifies that --profile is a string flag.
-func TestMultiAccount_ProfileFlagType(t *testing.T) {
-	f := rootCmd.PersistentFlags().Lookup("profile")
-	if f == nil {
-		t.Fatal("--profile flag not found")
-	}
-	if f.Value.Type() != "string" {
-		t.Errorf("--profile type = %q, want \"string\"", f.Value.Type())
-	}
-}
-
-// TestMultiAccount_AccountAliasFlag verifies --account exists as an alias for --profile.
-func TestMultiAccount_AccountAliasFlag(t *testing.T) {
+// TestMultiAccount_AccountFlagType verifies that --account is a string flag.
+func TestMultiAccount_AccountFlagType(t *testing.T) {
 	f := rootCmd.PersistentFlags().Lookup("account")
 	if f == nil {
-		t.Fatal("--account flag not found (should be alias for --profile)")
+		t.Fatal("--account flag not found")
 	}
 	if f.Value.Type() != "string" {
 		t.Errorf("--account type = %q, want \"string\"", f.Value.Type())
 	}
 }
 
-// TestMultiAccount_FollowWithProfile verifies follow has --profile inherited from root.
-func TestMultiAccount_FollowWithProfile(t *testing.T) {
+// TestMultiAccount_FollowWithAccount verifies follow has --account inherited from root.
+func TestMultiAccount_FollowWithAccount(t *testing.T) {
 	cmd := requireCmd(t, "follow")
-	requireFlag(t, cmd, "profile")
-
-	// Verify it's an inherited persistent flag, not a local one
-	if cmd.Flags().Lookup("profile") != nil && cmd.InheritedFlags().Lookup("profile") == nil {
-		// It's defined locally, not inherited — that's wrong but still works
-		t.Log("--profile is local on follow, expected inherited from root")
-	}
+	requireFlag(t, cmd, "account")
 }
 
-// TestMultiAccount_DMWithProfile verifies dm has --profile inherited from root.
-func TestMultiAccount_DMWithProfile(t *testing.T) {
+// TestMultiAccount_DMWithAccount verifies dm has --account inherited from root.
+func TestMultiAccount_DMWithAccount(t *testing.T) {
 	cmd := requireCmd(t, "dm")
-	requireFlag(t, cmd, "profile")
+	requireFlag(t, cmd, "account")
 }
 
-// TestMultiAccount_PostWithProfile verifies post has --profile inherited from root.
-func TestMultiAccount_PostWithProfile(t *testing.T) {
+// TestMultiAccount_PostWithAccount verifies post has --account inherited from root.
+func TestMultiAccount_PostWithAccount(t *testing.T) {
 	cmd := requireCmd(t, "post")
-	requireFlag(t, cmd, "profile")
+	requireFlag(t, cmd, "account")
 }
 
-// TestMultiAccount_EventsWithProfile verifies events has --profile inherited from root.
-func TestMultiAccount_EventsWithProfile(t *testing.T) {
+// TestMultiAccount_EventsWithAccount verifies events has --account inherited from root.
+func TestMultiAccount_EventsWithAccount(t *testing.T) {
 	cmd := requireCmd(t, "events")
-	requireFlag(t, cmd, "profile")
+	requireFlag(t, cmd, "account")
 }
 
-// TestMultiAccount_LoadProfileReturnsFlag verifies loadProfile() returns the flag value when set.
-func TestMultiAccount_LoadProfileReturnsFlag(t *testing.T) {
+// TestMultiAccount_LoadAccountReturnsFlag verifies loadAccount() returns the flag value when set.
+func TestMultiAccount_LoadAccountReturnsFlag(t *testing.T) {
 	testNpub := "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsef5cw"
 
-	old := profileFlag
-	defer func() { profileFlag = old }()
+	old := accountFlag
+	defer func() { accountFlag = old }()
 
-	profileFlag = testNpub
-	got, err := loadProfile()
+	accountFlag = testNpub
+	got, err := loadAccount()
 	if err != nil {
-		t.Fatalf("loadProfile() error: %v", err)
+		t.Fatalf("loadAccount() error: %v", err)
 	}
 	if got != testNpub {
-		t.Errorf("loadProfile() = %q, want %q", got, testNpub)
+		t.Errorf("loadAccount() = %q, want %q", got, testNpub)
 	}
 }
 
-// TestMultiAccount_LoadProfileFallback verifies loadProfile() falls back to ActiveProfile()
-// when --profile is not set.
-func TestMultiAccount_LoadProfileFallback(t *testing.T) {
+// TestMultiAccount_LoadAccountFallback verifies loadAccount() falls back to ActiveProfile()
+// when --account is not set.
+func TestMultiAccount_LoadAccountFallback(t *testing.T) {
 	// Set up a temp config dir with an active profile
 	dir := t.TempDir()
 	config.BaseDirOverride = dir
@@ -141,29 +124,15 @@ func TestMultiAccount_LoadProfileFallback(t *testing.T) {
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte("nsec1test\n"), 0600)
 	config.SetActiveProfile(npub)
 
-	old := profileFlag
-	defer func() { profileFlag = old }()
+	old := accountFlag
+	defer func() { accountFlag = old }()
 
-	profileFlag = ""
-	got, err := loadProfile()
+	accountFlag = ""
+	got, err := loadAccount()
 	if err != nil {
-		t.Fatalf("loadProfile() fallback error: %v", err)
+		t.Fatalf("loadAccount() fallback error: %v", err)
 	}
 	if got != npub {
-		t.Errorf("loadProfile() fallback = %q, want %q", got, npub)
-	}
-}
-
-// TestMultiAccount_AccountFlagInherited verifies --account alias is available on subcommands.
-func TestMultiAccount_AccountFlagInherited(t *testing.T) {
-	commands := []string{"follow", "dm", "post", "events"}
-	for _, name := range commands {
-		cmd := findCmd(rootCmd, name)
-		if cmd == nil {
-			continue
-		}
-		t.Run(name, func(t *testing.T) {
-			requireFlag(t, cmd, "account")
-		})
+		t.Errorf("loadAccount() fallback = %q, want %q", got, npub)
 	}
 }

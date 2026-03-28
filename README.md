@@ -139,7 +139,7 @@ nostr                                    # Launch the interactive shell
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias\|username>` | Use a specific account instead of the active one |
+| `--account <npub\|alias\|username>` | Use a specific account instead of the active one |
 | `--timeout <ms>` | Timeout per relay in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
 | `--json` | Output enriched JSON (pretty-printed with colors on TTY) |

@@ -32,14 +32,14 @@ func TestLoadProfile_ResolvesAlias(t *testing.T) {
 	config.SetActiveProfile(npub)
 	config.SetAlias(npub, "xavier", npub)
 
-	// Save and restore profileFlag
-	old := profileFlag
-	defer func() { profileFlag = old }()
+	// Save and restore accountFlag
+	old := accountFlag
+	defer func() { accountFlag = old }()
 
-	profileFlag = "xavier"
-	resolved, err := loadProfile()
+	accountFlag = "xavier"
+	resolved, err := loadAccount()
 	if err != nil {
-		t.Fatalf("loadProfile() with alias failed: %v", err)
+		t.Fatalf("loadAccount() with alias failed: %v", err)
 	}
 	if resolved != npub {
 		t.Errorf("resolved = %q, want %q", resolved, npub)
@@ -50,13 +50,13 @@ func TestLoadProfile_ResolvesNpub(t *testing.T) {
 	setupCmdTestDir(t)
 	npub := "npub1ycsauae9zj8cd4qwt4g9lydujvk8t9vy0neska92j47kwuwy84pqzkw0se"
 
-	old := profileFlag
-	defer func() { profileFlag = old }()
+	old := accountFlag
+	defer func() { accountFlag = old }()
 
-	profileFlag = npub
-	resolved, err := loadProfile()
+	accountFlag = npub
+	resolved, err := loadAccount()
 	if err != nil {
-		t.Fatalf("loadProfile() with npub failed: %v", err)
+		t.Fatalf("loadAccount() with npub failed: %v", err)
 	}
 	if resolved != npub {
 		t.Errorf("resolved = %q, want %q", resolved, npub)
@@ -69,13 +69,13 @@ func TestLoadProfile_FallsBackToActive(t *testing.T) {
 	createCmdTestProfile(t, dir, npub)
 	config.SetActiveProfile(npub)
 
-	old := profileFlag
-	defer func() { profileFlag = old }()
+	old := accountFlag
+	defer func() { accountFlag = old }()
 
-	profileFlag = ""
-	resolved, err := loadProfile()
+	accountFlag = ""
+	resolved, err := loadAccount()
 	if err != nil {
-		t.Fatalf("loadProfile() with no flag failed: %v", err)
+		t.Fatalf("loadAccount() with no flag failed: %v", err)
 	}
 	if resolved != npub {
 		t.Errorf("resolved = %q, want %q", resolved, npub)

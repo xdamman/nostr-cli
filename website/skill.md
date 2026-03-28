@@ -259,7 +259,7 @@ nostr update               # Check for updates and self-update
 
 | Flag | Description |
 |------|-------------|
-| `--profile <npub\|alias\|username>` | Execute command under a specific account |
+| `--account <npub\|alias\|username>` | Execute command under a specific account |
 | `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output (auto-detected when piped) |
 | `--json` | Enriched JSON output (pretty-printed on TTY) |

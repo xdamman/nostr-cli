@@ -86,7 +86,7 @@ func runFollow(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
 	yellow := color.New(color.FgYellow)
 
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen)
 	yellow := color.New(color.FgYellow)
 
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
@@ -384,7 +384,7 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 }
 
 func runFollowing(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}

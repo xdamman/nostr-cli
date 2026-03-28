@@ -50,7 +50,7 @@ func init() {
 }
 
 func runAlias(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 }
 
 func runAliasRm(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}

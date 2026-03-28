@@ -91,9 +91,9 @@ func TestLLM_GlobalFlags_Raw(t *testing.T) {
 }
 
 func TestLLM_GlobalFlags(t *testing.T) {
-	t.Run("--profile exists", func(t *testing.T) {
-		if rootCmd.PersistentFlags().Lookup("profile") == nil {
-			t.Error("missing --profile global flag")
+	t.Run("--account exists", func(t *testing.T) {
+		if rootCmd.PersistentFlags().Lookup("account") == nil {
+			t.Error("missing --account global flag")
 		}
 	})
 	t.Run("--timeout exists", func(t *testing.T) {
@@ -118,9 +118,9 @@ func TestLLM_GlobalFlags(t *testing.T) {
 }
 
 func TestLLM_GlobalFlagsInherited(t *testing.T) {
-	// LLMs use: nostr post "msg" --timeout 5000 --no-color --profile alice
+	// LLMs use: nostr post "msg" --timeout 5000 --no-color --account alice
 	commands := []string{"post", "dm", "profile", "follow", "unfollow", "following", "relays", "sync"}
-	globals := []string{"profile", "timeout", "no-color", "raw"}
+	globals := []string{"account", "timeout", "no-color", "raw"}
 
 	for _, name := range commands {
 		cmd := findCmd(rootCmd, name)

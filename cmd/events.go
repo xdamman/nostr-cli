@@ -223,7 +223,7 @@ func buildEventsFilter(npub string) (nostr.Filter, []int, error) {
 }
 
 func runEvents(cmd *cobra.Command, args []string) error {
-	npub, err := loadProfile()
+	npub, err := loadAccount()
 	if err != nil {
 		return err
 	}
