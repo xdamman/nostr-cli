@@ -130,6 +130,7 @@ func renderFeedEvent(ev nostr.Event, myHex, promptName string, termW int) []stri
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "")
 	content = strings.TrimSpace(content)
+	content = renderMentions(content)
 	content = renderInlineMarkdown(content)
 
 	avail := termW - prefixLen

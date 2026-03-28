@@ -716,7 +716,7 @@ func watchAllDMs(npub string) error {
 							printJSON(entry)
 						}
 					} else {
-						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
+						fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, renderMentions(plaintext))
 						os.Stdout.Sync()
 					}
 					printMu.Unlock()
@@ -806,7 +806,7 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 				printJSON(entry)
 			}
 		} else {
-			fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, plaintext)
+			fmt.Printf("%s:%s:%s\n", ts.Format("2006-01-02T15:04:05"), senderName, renderMentions(plaintext))
 			os.Stdout.Sync()
 		}
 	}

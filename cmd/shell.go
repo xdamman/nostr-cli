@@ -414,7 +414,8 @@ func wrapNoteWithSep(content string, prefixLen int, newline string) string {
 	content = strings.ReplaceAll(content, "\r", "")
 	content = strings.TrimSpace(content)
 
-	// Apply basic markdown rendering
+	// Apply mention and markdown rendering
+	content = renderMentions(content)
 	content = renderInlineMarkdown(content)
 
 	w := termWidth()
