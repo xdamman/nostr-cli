@@ -32,8 +32,12 @@ func TestLLM_DM_AcceptsUserAndOptionalMessage(t *testing.T) {
 	}
 }
 
-func TestLLM_DM_JSONFlag(t *testing.T) {
-	requireFlag(t, requireCmd(t, "dm"), "json")
+func TestLLM_DM_Flags(t *testing.T) {
+	cmd := requireCmd(t, "dm")
+	t.Run("--json", func(t *testing.T) { requireFlag(t, cmd, "json") })
+	t.Run("--tag", func(t *testing.T) { requireFlag(t, cmd, "tag") })
+	t.Run("--tags", func(t *testing.T) { requireFlag(t, cmd, "tags") })
+	t.Run("--watch", func(t *testing.T) { requireFlag(t, cmd, "watch") })
 }
 
 func TestLLM_DM_InSocialGroup(t *testing.T) {

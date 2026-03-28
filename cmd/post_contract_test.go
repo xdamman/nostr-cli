@@ -19,6 +19,9 @@ func TestLLM_Post_Flags(t *testing.T) {
 	cmd := requireCmd(t, "post")
 	t.Run("--json", func(t *testing.T) { requireFlag(t, cmd, "json") })
 	t.Run("--reply", func(t *testing.T) { requireFlag(t, cmd, "reply") })
+	t.Run("--tag", func(t *testing.T) { requireFlag(t, cmd, "tag") })
+	t.Run("--tags", func(t *testing.T) { requireFlag(t, cmd, "tags") })
+	t.Run("--dry-run", func(t *testing.T) { requireFlag(t, cmd, "dry-run") })
 }
 
 func TestLLM_Post_AcceptsOptionalMessage(t *testing.T) {
