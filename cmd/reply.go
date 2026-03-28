@@ -127,24 +127,19 @@ func runReply(cmd *cobra.Command, args []string) error {
 			promptName = pubHex[:8] + "..."
 		}
 		prompt := sprintPromptPrefix(promptName)
-		promptLen := len(promptName) + 2
 		hint := fmt.Sprintf("enter to reply to %d relays, ctrl+c to cancel", len(relays))
-		editor := ui.NewLineEditor(prompt, promptLen, hint)
-		if editor != nil {
-			cache.LoadProfileCache(npub)
-			editor.MentionCandidates = ui.LoadMentionCandidates(npub)
-			line, ok := editor.ReadLine()
-			if !ok {
-				return nil
-			}
-			message = strings.TrimSpace(line)
-			if len(editor.SelectedMentions) > 0 {
-				var mentionTags [][]string
-				message, mentionTags = ui.ReplaceMentionsForEvent(message, editor.SelectedMentions)
-				mentionPTags = mentionTags
-			}
-		} else {
-			message, _ = ui.ReadLineSimple(prompt)
+		cache.LoadProfileCache(npub)
+		result := ui.RunInlineInput(ui.InlineInputConfig{
+			Prompt:     prompt,
+			Hint:       hint,
+			Candidates: ui.LoadMentionCandidates(npub),
+		})
+		if result.Cancelled {
+			return nil
+		}
+		message = strings.TrimSpace(result.Text)
+		if len(result.Mentions) > 0 {
+			message, mentionPTags = ui.ReplaceMentionsForEvent(message, result.Mentions)
 		}
 	}
 
