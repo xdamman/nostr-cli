@@ -16,6 +16,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
+	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
 // -- DM-specific Bubble Tea messages --
@@ -149,6 +150,14 @@ type dmModel struct {
 	targetName string
 	relays     []string
 	quitting   bool
+
+	// Mention autocomplete
+	mentionCandidates []ui.MentionCandidate
+	mentionResults    []ui.MentionCandidate
+	mentionActive     bool
+	mentionIdx        int
+	mentionQuery      string
+	selectedMentions  []ui.MentionCandidate
 }
 
 // dmProgram holds the running tea.Program for DM mode.
@@ -212,6 +221,31 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle mention autocomplete navigation first
+	if m.mentionActive {
+		switch msg.Type {
+		case tea.KeyUp:
+			if m.mentionIdx > 0 {
+				m.mentionIdx--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.mentionIdx < len(m.mentionResults)-1 {
+				m.mentionIdx++
+			}
+			return m, nil
+		case tea.KeyTab, tea.KeyEnter:
+			if len(m.mentionResults) > 0 && m.mentionIdx < len(m.mentionResults) {
+				m = m.confirmDMMention()
+			}
+			return m, nil
+		case tea.KeyEscape:
+			m.mentionActive = false
+			m.mentionResults = nil
+			return m, nil
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyCtrlD:
 		m.quitting = true
@@ -220,23 +254,40 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		line := strings.TrimSpace(m.input.Value())
 		m.input.Reset()
+		m.mentionActive = false
+		m.mentionResults = nil
 
 		if line == "" {
 			return m, nil
 		}
 
+		// Process mentions
+		content := line
+		var extraTags nostr.Tags
+		if len(m.selectedMentions) > 0 {
+			var mentionTags [][]string
+			content, mentionTags = ui.ReplaceMentionsForEvent(line, m.selectedMentions)
+			for _, tag := range mentionTags {
+				extraTags = append(extraTags, nostr.Tag(tag))
+			}
+			m.selectedMentions = nil
+		}
+
 		// Encrypt and sign
 		sharedSecret := generateSharedSecret(m.skHex, m.targetHex)
-		ciphertext, err := nip04.Encrypt(line, sharedSecret)
+		ciphertext, err := nip04.Encrypt(content, sharedSecret)
 		if err != nil {
 			return m, nil
 		}
+
+		tags := nostr.Tags{nostr.Tag{"p", m.targetHex}}
+		tags = append(tags, extraTags...)
 
 		event := nostr.Event{
 			PubKey:    m.myHex,
 			CreatedAt: nostr.Now(),
 			Kind:      nostr.KindEncryptedDirectMessage,
-			Tags:      nostr.Tags{nostr.Tag{"p", m.targetHex}},
+			Tags:      tags,
 			Content:   ciphertext,
 		}
 		if err := event.Sign(m.skHex); err != nil {
@@ -255,7 +306,84 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+
+	// Check mention trigger
+	m.updateDMMentionState()
+
 	return m, cmd
+}
+
+func (m dmModel) confirmDMMention() dmModel {
+	selected := m.mentionResults[m.mentionIdx]
+	val := m.input.Value()
+
+	atIdx := strings.LastIndex(val, "@"+m.mentionQuery)
+	if atIdx < 0 {
+		atIdx = strings.LastIndex(val, "@")
+	}
+	if atIdx < 0 {
+		m.mentionActive = false
+		return m
+	}
+
+	before := val[:atIdx]
+	after := val[atIdx+1+len(m.mentionQuery):]
+	newVal := before + "@" + selected.DisplayName + after
+	m.input.SetValue(newVal)
+	m.input.SetCursor(len(before) + 1 + len(selected.DisplayName))
+
+	m.selectedMentions = append(m.selectedMentions, selected)
+	m.mentionActive = false
+	m.mentionResults = nil
+	return m
+}
+
+func (m *dmModel) updateDMMentionState() {
+	if len(m.mentionCandidates) == 0 {
+		return
+	}
+	val := m.input.Value()
+	if val == "" {
+		m.mentionActive = false
+		return
+	}
+
+	cursor := m.input.Position()
+	textBeforeCursor := val
+	if cursor < len(val) {
+		textBeforeCursor = val[:cursor]
+	}
+
+	atIdx := -1
+	for i := len(textBeforeCursor) - 1; i >= 0; i-- {
+		if textBeforeCursor[i] == ' ' {
+			break
+		}
+		if textBeforeCursor[i] == '@' {
+			if i == 0 || textBeforeCursor[i-1] == ' ' {
+				atIdx = i
+			}
+			break
+		}
+	}
+
+	if atIdx < 0 {
+		m.mentionActive = false
+		m.mentionResults = nil
+		return
+	}
+
+	query := textBeforeCursor[atIdx+1:]
+	m.mentionQuery = query
+	results := ui.FilterCandidates(m.mentionCandidates, query)
+	if len(results) == 0 {
+		m.mentionActive = false
+		m.mentionResults = nil
+		return
+	}
+	m.mentionActive = true
+	m.mentionResults = results
+	m.mentionIdx = 0
 }
 
 func (m dmModel) publishDMCmd(event nostr.Event) tea.Cmd {
@@ -298,7 +426,10 @@ func (m dmModel) View() string {
 	}
 
 	statusLine := m.renderDMStatus()
-	feedHeight := m.height - 2 // 1 for input, 1 for status
+	mentionLines := m.renderDMMentionMenu()
+	mentionHeight := len(mentionLines)
+
+	feedHeight := m.height - 2 - mentionHeight // 1 for input, 1 for status
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
@@ -311,8 +442,47 @@ func (m dmModel) View() string {
 	var parts []string
 	parts = append(parts, feed)
 	parts = append(parts, m.input.View())
+	if mentionHeight > 0 {
+		parts = append(parts, strings.Join(mentionLines, "\n"))
+	}
 	parts = append(parts, statusLine)
 	return strings.Join(parts, "\n")
+}
+
+func (m dmModel) renderDMMentionMenu() []string {
+	if !m.mentionActive || len(m.mentionResults) == 0 {
+		return nil
+	}
+
+	maxVisible := 7
+	if len(m.mentionResults) < maxVisible {
+		maxVisible = len(m.mentionResults)
+	}
+
+	start := 0
+	if m.mentionIdx >= maxVisible {
+		start = m.mentionIdx - maxVisible + 1
+	}
+	end := start + maxVisible
+	if end > len(m.mentionResults) {
+		end = len(m.mentionResults)
+		start = end - maxVisible
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	var lines []string
+	for i := start; i < end; i++ {
+		c := m.mentionResults[i]
+		entry := c.DisplayName + " (" + ui.TruncateNpub(c.Npub) + ")"
+		if i == m.mentionIdx {
+			lines = append(lines, "  "+cyanStyle.Render("→ "+entry))
+		} else {
+			lines = append(lines, "    "+dimStyle.Render(entry))
+		}
+	}
+	return lines
 }
 
 func (m dmModel) renderDMStatus() string {
@@ -373,6 +543,9 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 	sharedSecret := generateSharedSecret(skHex, targetHex)
 
 	m := newDMModel(npub, myHex, myName, skHex, targetHex, targetName, relays, sharedSecret)
+
+	// Load mention candidates for @ autocomplete
+	m.mentionCandidates = ui.LoadMentionCandidates(npub)
 
 	// Load cached DM history into model
 	storedEvents, _ := cache.QueryDMEvents(npub, targetHex)

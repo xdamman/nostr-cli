@@ -96,6 +96,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 
 	// Get message: from args, piped stdin, or interactive prompt
 	var message string
+	var mentionPTags [][]string
 	if len(args) > 0 {
 		message = strings.Join(args, " ")
 	} else if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -110,11 +111,16 @@ func runPost(cmd *cobra.Command, args []string) error {
 		hint := fmt.Sprintf("enter to post a public note to %d relays, ctrl+c to cancel", len(relays))
 		editor := ui.NewLineEditor(prompt, promptLen, hint)
 		if editor != nil {
+			cache.LoadProfileCache(npub)
+			editor.MentionCandidates = ui.LoadMentionCandidates(npub)
 			line, ok := editor.ReadLine()
 			if !ok {
 				return nil
 			}
 			message = strings.TrimSpace(line)
+			if len(editor.SelectedMentions) > 0 {
+				message, mentionPTags = ui.ReplaceMentionsForEvent(message, editor.SelectedMentions)
+			}
 		} else {
 			message, _ = ui.ReadLineSimple(prompt)
 		}
@@ -158,6 +164,11 @@ func runPost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	event.Tags = append(event.Tags, extraTags...)
+
+	// Add mention p-tags
+	for _, tag := range mentionPTags {
+		event.Tags = append(event.Tags, nostr.Tag(tag))
+	}
 
 	// Sign
 	if err := event.Sign(skHex); err != nil {

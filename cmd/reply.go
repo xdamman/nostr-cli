@@ -112,6 +112,7 @@ func runReply(cmd *cobra.Command, args []string) error {
 
 	// Get message: from args, piped stdin, or interactive prompt
 	var message string
+	var mentionPTags [][]string
 	if len(args) > 1 {
 		message = strings.Join(args[1:], " ")
 	} else if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -130,11 +131,18 @@ func runReply(cmd *cobra.Command, args []string) error {
 		hint := fmt.Sprintf("enter to reply to %d relays, ctrl+c to cancel", len(relays))
 		editor := ui.NewLineEditor(prompt, promptLen, hint)
 		if editor != nil {
+			cache.LoadProfileCache(npub)
+			editor.MentionCandidates = ui.LoadMentionCandidates(npub)
 			line, ok := editor.ReadLine()
 			if !ok {
 				return nil
 			}
 			message = strings.TrimSpace(line)
+			if len(editor.SelectedMentions) > 0 {
+				var mentionTags [][]string
+				message, mentionTags = ui.ReplaceMentionsForEvent(message, editor.SelectedMentions)
+				mentionPTags = mentionTags
+			}
 		} else {
 			message, _ = ui.ReadLineSimple(prompt)
 		}
@@ -163,6 +171,11 @@ func runReply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	tags = append(tags, extraTags...)
+
+	// Add mention p-tags
+	for _, tag := range mentionPTags {
+		tags = append(tags, nostr.Tag(tag))
+	}
 
 	// Build event
 	event := nostr.Event{
