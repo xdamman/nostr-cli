@@ -333,11 +333,17 @@ func watchAllDMs(npub string) error {
 			}
 			defer relay.Close()
 
+			// Subscribe to both incoming (p=myHex) and outgoing (Authors=myHex) DMs
 			sub, err := relay.Subscribe(ctx, nostr.Filters{
 				{
 					Kinds: []int{nostr.KindEncryptedDirectMessage},
 					Tags:  nostr.TagMap{"p": []string{myHex}},
 					Since: &since,
+				},
+				{
+					Kinds:   []int{nostr.KindEncryptedDirectMessage},
+					Authors: []string{myHex},
+					Since:   &since,
 				},
 			})
 			if err != nil {
@@ -363,10 +369,22 @@ func watchAllDMs(npub string) error {
 					seen[ev.ID] = true
 					seenMu.Unlock()
 
-					_ = cache.LogDMEvent(npub, ev.PubKey, *ev)
+					// Determine counterparty for decryption and logging
+					counterparty := ev.PubKey
+					if counterparty == myHex {
+						// Sent by us — counterparty is in p tag
+						for _, tag := range ev.Tags {
+							if len(tag) >= 2 && tag[0] == "p" {
+								counterparty = tag[1]
+								break
+							}
+						}
+					}
+
+					_ = cache.LogDMEvent(npub, counterparty, *ev)
 
 					// Decrypt
-					sharedSecret := generateSharedSecret(skHex, ev.PubKey)
+					sharedSecret := generateSharedSecret(skHex, counterparty)
 					plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
 					if err != nil {
 						continue
@@ -454,6 +472,7 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 		if ev.PubKey == myHex {
 			senderName = "you"
 		}
+		senderNpub, _ := nip19.EncodePublicKey(ev.PubKey)
 
 		printMu.Lock()
 		defer printMu.Unlock()
@@ -464,6 +483,7 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 			entry := map[string]interface{}{
 				"timestamp": ts.Format(time.RFC3339),
 				"from":      senderName,
+				"from_npub": senderNpub,
 				"message":   plaintext,
 				"event_id":  ev.ID,
 				"pubkey":    ev.PubKey,
@@ -532,11 +552,18 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 
 	onConnected()
 
+	// Subscribe to both directions: target→me and me→target
 	filters := nostr.Filters{
 		{
 			Kinds:   []int{nostr.KindEncryptedDirectMessage},
 			Authors: []string{targetHex},
 			Tags:    nostr.TagMap{"p": []string{myHex}},
+			Since:   &since,
+		},
+		{
+			Kinds:   []int{nostr.KindEncryptedDirectMessage},
+			Authors: []string{myHex},
+			Tags:    nostr.TagMap{"p": []string{targetHex}},
 			Since:   &since,
 		},
 	}
