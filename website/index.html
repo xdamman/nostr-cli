@@ -4,11 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>nostr cli — a human and bot-friendly command-line interface for Nostr</title>
-  <meta name="description" content="A fast, scriptable CLI for the Nostr protocol. Post notes, send encrypted DMs, manage profiles, and more — all from your terminal.">
+  <meta name="description" content="A fast, scriptable CLI for the Nostr protocol. Post notes, send encrypted DMs, manage accounts, and more — all from your terminal.">
   <meta property="og:title" content="nostr cli">
   <meta property="og:description" content="A human and bot-friendly command-line interface for the Nostr protocol.">
   <meta property="og:url" content="https://nostrcli.sh">
   <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --purple: #7c3aed;
@@ -339,6 +342,38 @@
 
     footer a:hover { text-decoration: underline; }
 
+    /* ---- Demo Terminal ---- */
+    .demo-terminal {
+      background: var(--bg-terminal);
+      min-height: 320px;
+    }
+
+    .demo-terminal-body {
+      padding: 20px 24px;
+      font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      min-height: 280px;
+      position: relative;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .demo-terminal-body .prompt-char { color: var(--green); }
+    .demo-terminal-body .cmd { color: var(--cyan); }
+    .demo-terminal-body .ok { color: var(--green); }
+    .demo-terminal-body .out { color: var(--text); }
+    .demo-terminal-body .dim { color: #666; }
+
+    .cursor {
+      color: var(--text);
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
     /* ---- Responsive ---- */
     @media (max-width: 600px) {
       .hero { padding: 60px 16px 40px; }
@@ -353,7 +388,7 @@
   <!-- Hero -->
   <div class="hero">
     <h1><span class="accent">nostr</span> <span class="dim">cli</span></h1>
-    <p>A human and bot-friendly command-line interface for the Nostr protocol. Post notes, send encrypted DMs, manage profiles — all from your terminal.</p>
+    <p>A human and bot-friendly command-line interface for the Nostr protocol. Post notes, send encrypted DMs, manage accounts — all from your terminal.</p>
 
     <div class="install-widget" id="install-widget">
       <div class="install-tabs" id="install-tabs">
@@ -381,12 +416,20 @@
     </div>
   </div>
 
-  <!-- Video -->
+  <!-- Animated Terminal Demo -->
   <div class="video-section">
     <div class="video-wrapper">
-      <video autoplay loop muted playsinline>
-        <source src="demo.mp4" type="video/mp4">
-      </video>
+      <div class="demo-terminal">
+        <div class="terminal-bar">
+          <div class="terminal-dot red"></div>
+          <div class="terminal-dot yellow"></div>
+          <div class="terminal-dot green"></div>
+          <div class="terminal-title">nostr-cli</div>
+        </div>
+        <div class="demo-terminal-body" id="demo-terminal">
+          <span class="cursor">▌</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -413,7 +456,7 @@
         <div>Enter your nsec: nsec1&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;</div>
         <div>&nbsp;</div>
         <div class="success">&#10003; Logged in as npub1xsp...uvds</div>
-        <div class="dim">  Keys stored in ~/.nostr/profiles/npub1xsp.../</div>
+        <div class="dim">  Keys stored in ~/.nostr/accounts/npub1xsp.../</div>
       </div>
     </div>
 
@@ -440,7 +483,7 @@
         <div>  <span class="success">&#10003;</span> relay.snort.social 312ms</div>
         <div>&nbsp;</div>
         <div class="success">&#10003; Published to 4/5 relays</div>
-        <div class="dim">  Saved locally in ~/.nostr/profiles/npub1xdm.../events.jsonl</div>
+        <div class="dim">  Saved locally in ~/.nostr/accounts/npub1xdm.../events.jsonl</div>
       </div>
     </div>
 
@@ -532,8 +575,8 @@
     <h2>Why <span class="accent">nostr</span> cli?</h2>
     <div class="features">
       <div class="feature">
-        <h3>Multi-profile</h3>
-        <p>Switch between identities like git branches. Each profile has its own keys, relays, and aliases.</p>
+        <h3>Multi-account</h3>
+        <p>Switch between identities like git branches. Each account has its own keys, relays, and aliases.</p>
       </div>
       <div class="feature">
         <h3>Human-friendly</h3>
@@ -569,20 +612,20 @@
     <table class="commands-table">
       <tr><td colspan="2" class="commands-group">Social</td></tr>
       <tr><td>nostr post [message]</td><td>Post a text note (kind 1). Reads from stdin if piped.</td></tr>
-      <tr><td>nostr dm [profile] [message]</td><td>Send an encrypted DM, interactive chat, or stream with --watch</td></tr>
+      <tr><td>nostr dm [user] [message]</td><td>Send an encrypted DM, interactive chat, or stream with --watch</td></tr>
       <tr><td>nostr events --kinds &lt;n&gt;</td><td>Query events from relays (filter by kind, time, author)</td></tr>
       <tr><td>nostr event new --kind &lt;n&gt;</td><td>Create and publish a raw event of any kind</td></tr>
-      <tr><td>nostr follow [profile]</td><td>Follow a user</td></tr>
-      <tr><td>nostr [profile]</td><td>View a user's profile and latest notes</td></tr>
-      <tr><td>nostr [profile] --watch</td><td>Live-stream a user's new notes</td></tr>
+      <tr><td>nostr follow [user]</td><td>Follow a user</td></tr>
+      <tr><td>nostr [user]</td><td>View a user's profile and latest notes</td></tr>
+      <tr><td>nostr [user] --watch</td><td>Live-stream a user's new notes</td></tr>
       <tr><td>nostr --watch</td><td>Stream notes from all followed accounts</td></tr>
 
-      <tr><td colspan="2" class="commands-group">Profile</td></tr>
-      <tr><td>nostr login</td><td>Create a new profile or import an existing nsec</td></tr>
-      <tr><td>nostr switch [profile]</td><td>Switch between profiles</td></tr>
-      <tr><td>nostr profile</td><td>Show your current profile</td></tr>
+      <tr><td colspan="2" class="commands-group">Account</td></tr>
+      <tr><td>nostr login</td><td>Create a new account or import an existing nsec</td></tr>
+      <tr><td>nostr switch [account]</td><td>Switch between accounts</td></tr>
+      <tr><td>nostr profile</td><td>Show your current profile (kind 0 metadata)</td></tr>
       <tr><td>nostr profile update</td><td>Interactively update your profile metadata</td></tr>
-      <tr><td>nostr profiles</td><td>List all local profiles</td></tr>
+      <tr><td>nostr accounts</td><td>List all local accounts</td></tr>
 
       <tr><td colspan="2" class="commands-group">Infrastructure</td></tr>
       <tr><td>nostr relays</td><td>Manage relays (add, remove, check status)</td></tr>
@@ -596,7 +639,7 @@
     </table>
 
     <p style="margin-top: 20px; color: var(--text-dim); font-size: 0.9rem;">
-      A <code style="color:var(--purple-light)">&lt;profile&gt;</code> can be an alias, npub, or NIP-05 address (e.g. user@domain.com).
+      A <code style="color:var(--purple-light)">&lt;user&gt;</code> can be an alias, npub, or NIP-05 address (e.g. user@domain.com).
       Most commands support <code style="color:var(--purple-light)">--json</code>, <code style="color:var(--purple-light)">--jsonl</code>, and <code style="color:var(--purple-light)">--raw</code> for machine-readable output.
       Colors are auto-disabled when stdout is piped.
     </p>
@@ -737,6 +780,148 @@
 
     // Auto-detect OS on load
     selectOS(detectOS());
+
+    // ---- Animated terminal demo ----
+    (function() {
+      var scenes = [
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr login' },
+            { type: 'out', text: 'Enter your nsec (leave blank to generate a new one): ' },
+            { type: 'out', text: 'Generating new keypair...' },
+            { type: 'ok',  text: '✓ Account created: npub1x7d...k3qf' },
+            { type: 'ok',  text: '✓ Default relays configured (6 relays)' },
+            { type: 'ok',  text: '✓ Active account set' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr post "Hello Nostr! 🤙 First post from the terminal"' },
+            { type: 'ok',  text: '✓ Published to 4 relays' },
+            { type: 'dim', text: '  nevent1qqs...' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr follow jack@primal.net' },
+            { type: 'ok',  text: '✓ Now following jack (npub1sg6...e2uf)' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr dm jack "Hey, love what you\'re building!"' },
+            { type: 'ok',  text: '✓ DM sent (encrypted, NIP-04)' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr accounts' },
+            { type: 'out', text: '  1. alice (npub1x7d...k3qf) ← active' },
+            { type: 'out', text: '  2. bot   (npub1m4k...9h2a)' },
+            { type: 'out', text: '' },
+            { type: 'cmd', text: '$ nostr switch bot' },
+            { type: 'ok',  text: '✓ Switched to account bot (npub1m4k...9h2a)' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr dm --watch --jsonl | jq .message' },
+            { type: 'out', text: '"hey are you there?"' },
+            { type: 'out', text: '"can you check the latest PR?"' },
+          ]
+        },
+      ];
+
+      var el = document.getElementById('demo-terminal');
+      var sceneIdx = 0;
+      var running = false;
+
+      function span(cls, text) {
+        var s = document.createElement('span');
+        s.className = cls;
+        s.textContent = text;
+        return s;
+      }
+
+      function sleep(ms) {
+        return new Promise(function(r) { setTimeout(r, ms); });
+      }
+
+      function appendLine() {
+        var br = document.createElement('br');
+        el.insertBefore(br, el.querySelector('.cursor'));
+      }
+
+      function appendSpan(cls, text) {
+        var s = span(cls, text);
+        el.insertBefore(s, el.querySelector('.cursor'));
+        return s;
+      }
+
+      async function typeText(cls, text, speed) {
+        var s = span(cls, '');
+        el.insertBefore(s, el.querySelector('.cursor'));
+        for (var i = 0; i < text.length; i++) {
+          s.textContent += text[i];
+          await sleep(speed || 30);
+        }
+      }
+
+      async function typeCmd(text) {
+        // Split prompt from command
+        var prompt = text.substring(0, 2); // "$ "
+        var cmd = text.substring(2);
+        appendSpan('prompt-char', prompt);
+        await typeText('cmd', cmd, 25);
+        appendLine();
+      }
+
+      async function showLine(cls, text) {
+        appendSpan(cls, text);
+        appendLine();
+      }
+
+      async function playScene(scene) {
+        for (var i = 0; i < scene.lines.length; i++) {
+          var line = scene.lines[i];
+          if (line.type === 'cmd') {
+            await typeCmd(line.text);
+            await sleep(200);
+          } else {
+            await sleep(80);
+            await showLine(line.type, line.text);
+          }
+        }
+      }
+
+      async function run() {
+        if (running) return;
+        running = true;
+        while (true) {
+          // Clear terminal
+          var cursor = el.querySelector('.cursor');
+          el.innerHTML = '';
+          el.appendChild(cursor);
+
+          await playScene(scenes[sceneIdx]);
+          sceneIdx = (sceneIdx + 1) % scenes.length;
+          await sleep(2500);
+        }
+      }
+
+      // Start when visible
+      if ('IntersectionObserver' in window) {
+        var obs = new IntersectionObserver(function(entries) {
+          if (entries[0].isIntersecting) {
+            run();
+            obs.disconnect();
+          }
+        }, { threshold: 0.3 });
+        obs.observe(el);
+      } else {
+        run();
+      }
+    })();
   </script>
 </body>
 </html>
