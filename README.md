@@ -20,7 +20,7 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - 🔑 Login with existing nsec or generate a new keypair
 - 👤 View and update profiles (kind 0)
 - 📝 Post text notes (kind 1)
-- 💬 Encrypted DMs (NIP-04 / NIP-44) with interactive chat UI
+- 💬 Encrypted DMs (NIP-17 gift wrap / NIP-44 / NIP-04 legacy) with interactive chat UI
 - 🔎 Query events from relays with flexible filters
 - 🛠️ Create raw events of any kind
 - 🔄 Follow/unfollow users

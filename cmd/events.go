@@ -239,16 +239,19 @@ func runEvents(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if we need decrypt capabilities
-	// Kind 4 events are decrypted by default unless --no-decrypt or --raw
+	// Kind 4 and kind 1059 events are decrypted by default unless --no-decrypt or --raw
 	hasKind4 := false
+	hasKind1059 := false
 	for _, k := range kinds {
 		if k == 4 {
 			hasKind4 = true
-			break
+		}
+		if k == 1059 {
+			hasKind1059 = true
 		}
 	}
 
-	shouldDecrypt := hasKind4 && !eventsNoDecrypt && !rawFlag
+	shouldDecrypt := (hasKind4 || hasKind1059) && !eventsNoDecrypt && !rawFlag
 	var skHex, myHex string
 	if shouldDecrypt {
 		nsec, err := config.LoadNsec(npub)
@@ -302,15 +305,28 @@ func runEvents(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// printEvent outputs a single event, decrypting kind 4 if needed.
+// printEvent outputs a single event, decrypting kind 4 and unwrapping kind 1059 if needed.
 func printEvent(ev nostr.Event, skHex, myHex string) {
 	content := ev.Content
+	displayKind := ev.Kind
+	displayPubKey := ev.PubKey
+	protocol := ""
+
+	// Unwrap kind 1059 (NIP-17 gift wrap) automatically when key is available
+	if ev.Kind == nostr.KindGiftWrap && skHex != "" {
+		rumor, err := crypto.UnwrapGiftWrapDM(ev, skHex)
+		if err == nil {
+			content = rumor.Content
+			displayKind = rumor.Kind
+			displayPubKey = rumor.PubKey
+			protocol = "nip17"
+		}
+	}
 
 	// Decrypt kind 4 automatically when key is available
 	if ev.Kind == 4 && skHex != "" {
 		counterparty := ev.PubKey
 		if counterparty == myHex {
-			// Sent by us — counterparty is in p tag
 			for _, tag := range ev.Tags {
 				if len(tag) >= 2 && tag[0] == "p" {
 					counterparty = tag[1]
@@ -322,21 +338,25 @@ func printEvent(ev nostr.Event, skHex, myHex string) {
 		if plain, err := nip04.Decrypt(ev.Content, ss); err == nil {
 			content = plain
 		}
+		protocol = "nip04"
 	}
 
 	if rawFlag {
 		printRaw(ev)
 	} else if jsonFlag || jsonlFlag {
-		authorNpub, _ := nip19.EncodePublicKey(ev.PubKey)
+		authorNpub, _ := nip19.EncodePublicKey(displayPubKey)
 		entry := map[string]interface{}{
 			"id":         ev.ID,
-			"pubkey":     ev.PubKey,
+			"pubkey":     displayPubKey,
 			"author":     authorNpub,
-			"kind":       ev.Kind,
+			"kind":       displayKind,
 			"content":    content,
 			"created_at": ev.CreatedAt,
 			"timestamp":  time.Unix(int64(ev.CreatedAt), 0).Format(time.RFC3339),
 			"tags":       ev.Tags,
+		}
+		if protocol != "" {
+			entry["protocol"] = protocol
 		}
 		if jsonlFlag {
 			printJSONL(entry)
@@ -346,8 +366,8 @@ func printEvent(ev nostr.Event, skHex, myHex string) {
 	} else {
 		// Human-readable: one line per event
 		ts := time.Unix(int64(ev.CreatedAt), 0).Format("2006-01-02T15:04:05")
-		authorNpub, _ := nip19.EncodePublicKey(ev.PubKey)
-		name := cache.ResolveNameByHex(ev.PubKey)
+		authorNpub, _ := nip19.EncodePublicKey(displayPubKey)
+		name := cache.ResolveNameByHex(displayPubKey)
 		if name == "" {
 			name = resolveProfileName(authorNpub)
 		}
@@ -362,7 +382,7 @@ func printEvent(ev nostr.Event, skHex, myHex string) {
 		if len(oneLine) > 120 {
 			oneLine = oneLine[:117] + "..."
 		}
-		fmt.Printf("%s [kind:%d] %s: %s\n", ts, ev.Kind, name, oneLine)
+		fmt.Printf("%s [kind:%d] %s: %s\n", ts, displayKind, name, oneLine)
 	}
 }
 

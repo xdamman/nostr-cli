@@ -91,7 +91,7 @@ nostr reply note1abc... "Test" --dry-run --json
 nostr dm <user> [message]
 ```
 
-Send NIP-04 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
+Send encrypted direct messages (NIP-17 gift wrap by default, NIP-04 legacy with `--nip04`). `<user>` can be an npub, alias, or NIP-05 address.
 
 Modes:
 - `nostr dm <user> <message>` — Send one-shot DM

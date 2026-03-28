@@ -32,13 +32,17 @@ var (
 	dmTagFlags   []string
 	dmTagsJSON   string
 	dmSinceFlag  string
+	dmNip04Flag  bool
 )
 
 var dmCmd = &cobra.Command{
 	Use:     "dm [account] [message]",
 	Short:   "Send an encrypted direct message",
 	GroupID: "social",
-	Long: `Send an NIP-04 encrypted direct message to a user.
+	Long: `Send an encrypted direct message to a user.
+
+By default, messages are sent using NIP-17 gift-wrapped DMs (NIP-44 encryption).
+Use --nip04 to force legacy NIP-04 encryption.
 
 An <account> can be an npub, alias, or NIP-05 address (e.g. user@domain.com).
 
@@ -62,6 +66,7 @@ Watch mode stderr output:
   Use --since with --watch to catch up on missed events (e.g. --since 1h).
 
 Flags:
+  --nip04            Use legacy NIP-04 encryption instead of NIP-17 gift wrap
   --tag key=value    Add extra tags (repeatable). Semicolons for multi-value:
                      --tag custom="a;b;c" → ["custom","a","b","c"]
   --tags '<json>'    Add extra tags as JSON array of arrays
@@ -83,6 +88,7 @@ func init() {
 	dmCmd.Flags().StringArrayVar(&dmTagFlags, "tag", nil, "Extra tags in key=value format (repeatable)")
 	dmCmd.Flags().StringVar(&dmTagsJSON, "tags", "", "Extra tags as JSON array of arrays")
 	dmCmd.Flags().StringVar(&dmSinceFlag, "since", "", "Start time for --watch: duration (1h, 7d), unix timestamp, or ISO date")
+	dmCmd.Flags().BoolVar(&dmNip04Flag, "nip04", false, "Use legacy NIP-04 encryption instead of NIP-17 gift wrap")
 	rootCmd.AddCommand(dmCmd)
 }
 
@@ -153,6 +159,88 @@ func runDM(cmd *cobra.Command, args []string) error {
 }
 
 func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) error {
+	if dmNip04Flag {
+		return sendDMLegacy(npub, skHex, myHex, targetHex, message, relays)
+	}
+	return sendDMNip17(npub, skHex, myHex, targetHex, message, relays)
+}
+
+func sendDMNip17(npub, skHex, myHex, targetHex, message string, relays []string) error {
+	forRecipient, forSelf, err := crypto.CreateGiftWrapDM(message, skHex, myHex, targetHex)
+	if err != nil {
+		return fmt.Errorf("gift wrap failed: %w", err)
+	}
+
+	targetNpub, _ := nip19.EncodePublicKey(targetHex)
+	timeout := time.Duration(timeoutFlag) * time.Millisecond
+
+	if rawFlag || jsonFlag || jsonlFlag {
+		result, pubErr := ui.PublishEventSilent(npub, forRecipient, relays, timeout)
+		// Also publish self-copy (best effort)
+		_, _ = ui.PublishEventSilent(npub, forSelf, relays, timeout)
+
+		if rawFlag {
+			printRaw(forRecipient)
+		} else if jsonlFlag {
+			if result != nil {
+				printJSONL(result)
+			} else {
+				printJSONL(forRecipient)
+			}
+		} else {
+			if result != nil {
+				printJSON(result)
+			} else {
+				printJSON(forRecipient)
+			}
+		}
+		if pubErr != nil && result == nil {
+			return pubErr
+		}
+		return nil
+	}
+
+	cyan := color.New(color.FgCyan).SprintFunc()
+
+	senderName := resolveProfileName(npub)
+	if senderName == "" {
+		senderName = npub[:20] + "..."
+	}
+	recipientName := cache.ResolveNameByHex(targetHex)
+	if recipientName == "" {
+		recipientName = targetNpub[:20] + "..."
+	}
+	if aliases, aErr := config.LoadGlobalAliases(); aErr == nil {
+		for a, n := range aliases {
+			if n == npub {
+				senderName = a
+			}
+			if n == targetNpub {
+				recipientName = a
+			}
+		}
+	}
+
+	fmt.Printf("Sending NIP-17 gift-wrapped DM from %s to %s\n", cyan(senderName), cyan(recipientName))
+	fmt.Println()
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Signer:")), npub)
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Recipient:")), targetNpub)
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Event ID:")), forRecipient.ID)
+	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Protocol:")), "NIP-17 (gift wrap)")
+	fmt.Println()
+
+	_, err = ui.PublishEventToRelays(npub, forRecipient, relays, timeout)
+	if err != nil {
+		return err
+	}
+
+	// Publish self-copy (best effort, don't fail on error)
+	_, _ = ui.PublishEventToRelays(npub, forSelf, relays, timeout)
+
+	return nil
+}
+
+func sendDMLegacy(npub, skHex, myHex, targetHex, message string, relays []string) error {
 	ciphertext, err := nip04.Encrypt(message, generateSharedSecret(skHex, targetHex))
 	if err != nil {
 		return fmt.Errorf("encryption failed: %w", err)
@@ -208,7 +296,6 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 
 	cyan := color.New(color.FgCyan).SprintFunc()
 
-	// Resolve display names
 	senderName := resolveProfileName(npub)
 	if senderName == "" {
 		senderName = npub[:20] + "..."
@@ -217,7 +304,6 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 	if recipientName == "" {
 		recipientName = targetNpub[:20] + "..."
 	}
-	// Check aliases for better names
 	if aliases, aErr := config.LoadGlobalAliases(); aErr == nil {
 		for a, n := range aliases {
 			if n == npub {
@@ -229,7 +315,7 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 		}
 	}
 
-	fmt.Printf("Sending encrypted direct message from %s to %s\n", cyan(senderName), cyan(recipientName))
+	fmt.Printf("Sending NIP-04 encrypted direct message from %s to %s\n", cyan(senderName), cyan(recipientName))
 	fmt.Println()
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Signer:")), npub)
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-12s", "Recipient:")), targetNpub)
@@ -245,7 +331,32 @@ func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) erro
 }
 
 // sendDMAsync sends a DM in the background and reports status to the channel.
+// Uses NIP-17 gift wrap by default, NIP-04 when dmNip04Flag is set.
 func sendDMAsync(npub, skHex, myHex, targetHex, message string, relays []string, statusCh chan<- string) {
+	if dmNip04Flag {
+		sendDMAsyncLegacy(npub, skHex, myHex, targetHex, message, relays, statusCh)
+		return
+	}
+
+	forRecipient, forSelf, err := crypto.CreateGiftWrapDM(message, skHex, myHex, targetHex)
+	if err != nil {
+		statusCh <- fmt.Sprintf("✗ gift wrap failed: %v", err)
+		return
+	}
+
+	ctx := context.Background()
+	if _, err := internalRelay.PublishEvent(ctx, forRecipient, relays); err != nil {
+		statusCh <- fmt.Sprintf("✗ %v", err)
+		return
+	}
+
+	// Publish self-copy (best effort)
+	_, _ = internalRelay.PublishEvent(ctx, forSelf, relays)
+
+	statusCh <- "✓"
+}
+
+func sendDMAsyncLegacy(npub, skHex, myHex, targetHex, message string, relays []string, statusCh chan<- string) {
 	ciphertext, err := nip04.Encrypt(message, generateSharedSecret(skHex, targetHex))
 	if err != nil {
 		statusCh <- fmt.Sprintf("✗ send failed: %v", err)
@@ -333,12 +444,11 @@ func watchAllDMs(npub string) error {
 			}
 			defer relay.Close()
 
-			// Two separate subscriptions for better relay compatibility
-			// Some relays don't handle multi-filter subscriptions correctly
+			// Three separate subscriptions for better relay compatibility
 			merged := make(chan *nostr.Event, 20)
 			var subsActive sync.WaitGroup
 
-			// Subscription 1: Incoming DMs (p tag = my pubkey)
+			// Subscription 1: Incoming NIP-04 DMs (p tag = my pubkey)
 			inSub, err := relay.Subscribe(ctx, nostr.Filters{{
 				Kinds: []int{nostr.KindEncryptedDirectMessage},
 				Tags:  nostr.TagMap{"p": []string{myHex}},
@@ -357,7 +467,7 @@ func watchAllDMs(npub string) error {
 				}()
 			}
 
-			// Subscription 2: Outgoing DMs (author = me)
+			// Subscription 2: Outgoing NIP-04 DMs (author = me)
 			outSub, err := relay.Subscribe(ctx, nostr.Filters{{
 				Kinds:   []int{nostr.KindEncryptedDirectMessage},
 				Authors: []string{myHex},
@@ -376,7 +486,26 @@ func watchAllDMs(npub string) error {
 				}()
 			}
 
-			// Close merged channel when both subs are done
+			// Subscription 3: NIP-17 gift wraps addressed to me (kind 1059)
+			gwSub, err := relay.Subscribe(ctx, nostr.Filters{{
+				Kinds: []int{nostr.KindGiftWrap},
+				Tags:  nostr.TagMap{"p": []string{myHex}},
+				Since: &since,
+			}})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "relay %s: gift wrap subscribe failed: %v\n", url, err)
+			} else {
+				subsActive.Add(1)
+				go func() {
+					defer subsActive.Done()
+					defer gwSub.Unsub()
+					for ev := range gwSub.Events {
+						merged <- ev
+					}
+				}()
+			}
+
+			// Close merged channel when all subs are done
 			go func() {
 				subsActive.Wait()
 				close(merged)
@@ -399,30 +528,47 @@ func watchAllDMs(npub string) error {
 					seen[ev.ID] = true
 					seenMu.Unlock()
 
-					// Determine counterparty for decryption and logging
-					counterparty := ev.PubKey
-					if counterparty == myHex {
-						// Sent by us — counterparty is in p tag
-						for _, tag := range ev.Tags {
-							if len(tag) >= 2 && tag[0] == "p" {
-								counterparty = tag[1]
-								break
+					var senderPubHex, plaintext, protocol string
+
+					if ev.Kind == nostr.KindGiftWrap {
+						// NIP-17 gift wrap — unwrap
+						rumor, err := crypto.UnwrapGiftWrapDM(*ev, skHex)
+						if err != nil {
+							continue
+						}
+						if rumor.Kind != 14 {
+							continue // not a DM rumor
+						}
+						senderPubHex = rumor.PubKey
+						plaintext = rumor.Content
+						protocol = "nip17"
+					} else {
+						// NIP-04 legacy DM
+						counterparty := ev.PubKey
+						if counterparty == myHex {
+							for _, tag := range ev.Tags {
+								if len(tag) >= 2 && tag[0] == "p" {
+									counterparty = tag[1]
+									break
+								}
 							}
 						}
-					}
 
-					_ = cache.LogDMEvent(npub, counterparty, *ev)
+						_ = cache.LogDMEvent(npub, counterparty, *ev)
 
-					// Decrypt
-					sharedSecret := generateSharedSecret(skHex, counterparty)
-					plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
-					if err != nil {
-						continue
+						sharedSecret := generateSharedSecret(skHex, counterparty)
+						var err error
+						plaintext, err = nip04.Decrypt(ev.Content, sharedSecret)
+						if err != nil {
+							continue
+						}
+						senderPubHex = ev.PubKey
+						protocol = "nip04"
 					}
 
 					// Resolve sender name
-					senderNpub, _ := nip19.EncodePublicKey(ev.PubKey)
-					senderName := cache.ResolveNameByHex(ev.PubKey)
+					senderNpub, _ := nip19.EncodePublicKey(senderPubHex)
+					senderName := cache.ResolveNameByHex(senderPubHex)
 					if senderName == "" {
 						senderName = resolveProfileName(senderNpub)
 					}
@@ -446,7 +592,8 @@ func watchAllDMs(npub string) error {
 							"from_npub": senderNpub,
 							"message":   plaintext,
 							"event_id":  ev.ID,
-							"pubkey":    ev.PubKey,
+							"pubkey":    senderPubHex,
+							"protocol":  protocol,
 						}
 						if jsonlFlag {
 							printJSONL(entry)
@@ -498,11 +645,30 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 
 	onMessage := func(ev *nostr.Event, plaintext string) {
 		ts := time.Unix(int64(ev.CreatedAt), 0)
+
+		// Determine protocol and real sender
+		var protocol, senderPubHex string
+		if ev.Kind == nostr.KindGiftWrap {
+			protocol = "nip17"
+			// For gift wraps, the plaintext already came from the unwrapped rumor.
+			// The actual sender pubkey was extracted during unwrap.
+			// We need to re-unwrap to get the sender, or pass it through.
+			// For now, try to unwrap again (cheap since we already have the event).
+			if rumor, err := crypto.UnwrapGiftWrapDM(*ev, skHex); err == nil {
+				senderPubHex = rumor.PubKey
+			} else {
+				senderPubHex = ev.PubKey
+			}
+		} else {
+			protocol = "nip04"
+			senderPubHex = ev.PubKey
+		}
+
 		senderName := targetName
-		if ev.PubKey == myHex {
+		if senderPubHex == myHex {
 			senderName = "you"
 		}
-		senderNpub, _ := nip19.EncodePublicKey(ev.PubKey)
+		senderNpub, _ := nip19.EncodePublicKey(senderPubHex)
 
 		printMu.Lock()
 		defer printMu.Unlock()
@@ -516,7 +682,8 @@ func watchDM(npub, skHex, myHex, targetHex, inputName string, relays []string) e
 				"from_npub": senderNpub,
 				"message":   plaintext,
 				"event_id":  ev.ID,
-				"pubkey":    ev.PubKey,
+				"pubkey":    senderPubHex,
+				"protocol":  protocol,
 			}
 			if jsonlFlag {
 				printJSONL(entry)
@@ -582,11 +749,11 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 
 	onConnected()
 
-	// Two separate subscriptions for better relay compatibility
+	// Three separate subscriptions for better relay compatibility
 	merged := make(chan *nostr.Event, 20)
 	var subsActive sync.WaitGroup
 
-	// Subscription 1: target→me
+	// Subscription 1: NIP-04 target→me
 	inSub, err := relay.Subscribe(ctx, nostr.Filters{{
 		Kinds:   []int{nostr.KindEncryptedDirectMessage},
 		Authors: []string{targetHex},
@@ -606,7 +773,7 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 		}()
 	}
 
-	// Subscription 2: me→target
+	// Subscription 2: NIP-04 me→target
 	outSub, err := relay.Subscribe(ctx, nostr.Filters{{
 		Kinds:   []int{nostr.KindEncryptedDirectMessage},
 		Authors: []string{myHex},
@@ -626,7 +793,26 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 		}()
 	}
 
-	// Close merged channel when both subs are done
+	// Subscription 3: NIP-17 gift wraps addressed to me
+	gwSub, err := relay.Subscribe(ctx, nostr.Filters{{
+		Kinds: []int{nostr.KindGiftWrap},
+		Tags:  nostr.TagMap{"p": []string{myHex}},
+		Since: &since,
+	}})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "relay %s: gift wrap subscribe failed: %v\n", url, err)
+	} else {
+		subsActive.Add(1)
+		go func() {
+			defer subsActive.Done()
+			defer gwSub.Unsub()
+			for ev := range gwSub.Events {
+				merged <- ev
+			}
+		}()
+	}
+
+	// Close merged channel when all subs are done
 	go func() {
 		subsActive.Wait()
 		close(merged)
@@ -650,14 +836,30 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 			seen[ev.ID] = true
 			seenMu.Unlock()
 
-			_ = cache.LogDMEvent(npub, targetHex, *ev)
+			if ev.Kind == nostr.KindGiftWrap {
+				// NIP-17 gift wrap — unwrap and check if from/to target
+				rumor, err := crypto.UnwrapGiftWrapDM(*ev, skHex)
+				if err != nil {
+					continue
+				}
+				if rumor.Kind != 14 {
+					continue
+				}
+				// Filter: only show DMs involving the target
+				if rumor.PubKey != targetHex && rumor.PubKey != myHex {
+					continue
+				}
+				onMessage(ev, rumor.Content)
+			} else {
+				_ = cache.LogDMEvent(npub, targetHex, *ev)
 
-			plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
-			if err != nil {
-				continue
+				plaintext, err := nip04.Decrypt(ev.Content, sharedSecret)
+				if err != nil {
+					continue
+				}
+
+				onMessage(ev, plaintext)
 			}
-
-			onMessage(ev, plaintext)
 		}
 	}
 }

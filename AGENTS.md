@@ -23,11 +23,12 @@ echo "My message" | nostr post              # Post from stdin
 nostr reply note1abc... "Great post!"       # Reply with NIP-10 threading
 nostr reply <eventId> "I agree" --tag t=nostr  # Reply with extra tags
 nostr reply nevent1... "Check" --tags '[["p","<hex>"]]'  # Reply with JSON tags
-nostr dm alice "Hello"                      # Send encrypted DM
+nostr dm alice "Hello"                      # Send NIP-17 gift-wrapped DM (default)
+nostr dm alice "Hello" --nip04              # Send legacy NIP-04 encrypted DM
 nostr dm alice "Hello" --jsonl              # Send DM, JSONL output
 nostr dm alice "Hello" --tag subject=hi     # DM with extra tags
 echo "Content" | nostr dm alice             # DM from stdin
-nostr dm --watch --jsonl                    # Stream ALL incoming DMs
+nostr dm --watch --jsonl                    # Stream ALL incoming DMs (NIP-04 + NIP-17)
 nostr dm --watch --since 1h --jsonl         # Catch up and stream DMs
 nostr dm alice --watch --jsonl              # Stream DMs with alice
 ```
