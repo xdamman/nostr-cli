@@ -120,14 +120,24 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("\nDownloading...")
-
 	// Determine OS and arch
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
 	tarball := fmt.Sprintf("nostr_%s_%s.tar.gz", goos, goarch)
 	downloadURL := fmt.Sprintf("https://github.com/xdamman/nostr-cli/releases/download/%s/%s", latest.TagName, tarball)
+
+	// HEAD request to get size before downloading
+	headResp, headErr := client.Head(downloadURL)
+	if headErr == nil && headResp.StatusCode == 200 && headResp.ContentLength > 0 {
+		sizeMB := float64(headResp.ContentLength) / (1024 * 1024)
+		fmt.Printf("\nDownloading %s (%.1f MB)...\n", tarball, sizeMB)
+	} else {
+		fmt.Printf("\nDownloading %s...\n", tarball)
+	}
+	if headResp != nil {
+		headResp.Body.Close()
+	}
 
 	resp, err = client.Get(downloadURL)
 	if err != nil {
