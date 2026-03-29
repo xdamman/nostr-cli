@@ -14,13 +14,13 @@ func setupCmdTestDir(t *testing.T) string {
 	dir := t.TempDir()
 	config.BaseDirOverride = dir
 	t.Cleanup(func() { config.BaseDirOverride = "" })
-	os.MkdirAll(filepath.Join(dir, "profiles"), 0700)
+	os.MkdirAll(filepath.Join(dir, "accounts"), 0700)
 	return dir
 }
 
 func createCmdTestProfile(t *testing.T, dir, npub string) {
 	t.Helper()
-	profDir := filepath.Join(dir, "profiles", npub)
+	profDir := filepath.Join(dir, "accounts", npub)
 	os.MkdirAll(profDir, 0700)
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte("nsec1test\n"), 0600)
 }

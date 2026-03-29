@@ -18,7 +18,7 @@ nostr login
 **Behavior:**
 1. Prompt for nsec (leave blank to generate a new keypair)
 2. Derive npub from nsec
-3. Create `~/.nostr/profiles/<npub>/` directory
+3. Create `~/.nostr/accounts/<npub>/` directory
 4. Save nsec (file mode `0600`)
 5. Fetch kind 0 from relays → save as `profile.json`
 6. Set as active account

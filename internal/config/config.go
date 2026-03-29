@@ -31,25 +31,56 @@ func BaseDir() (string, error) {
 	return filepath.Join(home, ".nostr"), nil
 }
 
+// MigrateProfilesDir renames ~/.nostr/profiles to ~/.nostr/accounts if needed.
+func MigrateProfilesDir() {
+	base, err := BaseDir()
+	if err != nil {
+		return
+	}
+
+	oldDir := filepath.Join(base, "profiles")
+	newDir := filepath.Join(base, "accounts")
+
+	// If new dir already exists, nothing to do
+	if _, err := os.Stat(newDir); err == nil {
+		return
+	}
+
+	// If old dir exists, rename it
+	if _, err := os.Stat(oldDir); err == nil {
+		os.Rename(oldDir, newDir)
+
+		// Fix the active symlink if it points to profiles/
+		activeLink := filepath.Join(base, "active")
+		if target, err := os.Readlink(activeLink); err == nil {
+			if strings.HasPrefix(target, "profiles/") {
+				newTarget := strings.Replace(target, "profiles/", "accounts/", 1)
+				os.Remove(activeLink)
+				os.Symlink(newTarget, activeLink)
+			}
+		}
+	}
+}
+
 // ProfileDir returns the path to a profile's directory.
 func ProfileDir(npub string) (string, error) {
 	base, err := BaseDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "profiles", npub)
+	dir := filepath.Join(base, "accounts", npub)
 	if _, err := os.Stat(dir); err == nil {
 		return dir, nil
 	}
 	// Directory doesn't exist by npub name — scan non-npub directories
 	// and match by deriving the npub from their nsec file.
 	if strings.HasPrefix(npub, "npub1") {
-		entries, _ := os.ReadDir(filepath.Join(base, "profiles"))
+		entries, _ := os.ReadDir(filepath.Join(base, "accounts"))
 		for _, e := range entries {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), "npub1") {
 				continue
 			}
-			candidate := filepath.Join(base, "profiles", e.Name())
+			candidate := filepath.Join(base, "accounts", e.Name())
 			data, err := os.ReadFile(filepath.Join(candidate, "nsec"))
 			if err != nil {
 				continue
@@ -84,6 +115,7 @@ func ActiveProfileDir() (string, error) {
 
 // ActiveProfile reads the active profile npub from the ~/.nostr/active symlink target.
 func ActiveProfile() (string, error) {
+	MigrateProfilesDir()
 	base, err := BaseDir()
 	if err != nil {
 		return "", err
@@ -102,7 +134,7 @@ func ActiveProfile() (string, error) {
 		// No symlink and no file — try to auto-resolve
 		return autoResolveProfile(base)
 	}
-	// The symlink target is "profiles/<name>", extract the name
+	// The symlink target is "accounts/<name>", extract the name
 	name := filepath.Base(target)
 	if strings.HasPrefix(name, "npub1") {
 		return name, nil
@@ -120,10 +152,10 @@ func ActiveProfile() (string, error) {
 	return npub, nil
 }
 
-// autoResolveProfile finds available profiles and either auto-selects or returns a helpful error.
+// autoResolveProfile finds available accounts and either auto-selects or returns a helpful error.
 func autoResolveProfile(base string) (string, error) {
-	profilesDir := filepath.Join(base, "profiles")
-	entries, err := os.ReadDir(profilesDir)
+	accountsDir := filepath.Join(base, "accounts")
+	entries, err := os.ReadDir(accountsDir)
 	if err != nil {
 		return "", fmt.Errorf("no account set up yet. Run 'nostr login' first")
 	}
@@ -154,7 +186,7 @@ func autoResolveProfile(base string) (string, error) {
 	}
 }
 
-// SetActiveProfile creates a symlink ~/.nostr/active -> ~/.nostr/profiles/<npub>.
+// SetActiveProfile creates a symlink ~/.nostr/active -> ~/.nostr/accounts/<npub>.
 func SetActiveProfile(npub string) error {
 	base, err := BaseDir()
 	if err != nil {
@@ -172,8 +204,8 @@ func SetActiveProfile(npub string) error {
 			os.Remove(link)
 		}
 	}
-	// Create relative symlink: active -> profiles/<npub>
-	return os.Symlink(filepath.Join("profiles", npub), link)
+	// Create relative symlink: active -> accounts/<npub>
+	return os.Symlink(filepath.Join("accounts", npub), link)
 }
 
 // EnsureProfileDir creates the profile directory if it doesn't exist.
@@ -240,7 +272,7 @@ func SaveRelays(npub string, relays []string) error {
 	return os.WriteFile(filepath.Join(dir, "relays.json"), data, 0644)
 }
 
-// LoadCachedRelays reads relays from the per-profile cache (~/.nostr/profiles/<npub>/cache/relays.json).
+// LoadCachedRelays reads relays from the per-profile cache (~/.nostr/accounts/<npub>/cache/relays.json).
 func LoadCachedRelays(npub string) ([]string, error) {
 	dir, err := ProfileDir(npub)
 	if err != nil {
@@ -257,7 +289,7 @@ func LoadCachedRelays(npub string) ([]string, error) {
 	return relays, nil
 }
 
-// SaveCachedRelays writes relays to the per-profile cache (~/.nostr/profiles/<npub>/cache/relays.json).
+// SaveCachedRelays writes relays to the per-profile cache (~/.nostr/accounts/<npub>/cache/relays.json).
 func SaveCachedRelays(npub string, relays []string) error {
 	dir, err := ProfileDir(npub)
 	if err != nil {
@@ -301,14 +333,14 @@ func DefaultRelays() []string {
 	return relays
 }
 
-// CreateProfileSymlink creates a symlink ~/.nostr/profiles/<alias> -> ~/.nostr/profiles/<npub>.
+// CreateProfileSymlink creates a symlink ~/.nostr/accounts/<alias> -> ~/.nostr/accounts/<npub>.
 func CreateProfileSymlink(alias, npub string) error {
 	base, err := BaseDir()
 	if err != nil {
 		return err
 	}
-	link := filepath.Join(base, "profiles", alias)
-	target := filepath.Join(base, "profiles", npub)
+	link := filepath.Join(base, "accounts", alias)
+	target := filepath.Join(base, "accounts", npub)
 
 	// Don't create if target doesn't exist
 	if _, err := os.Stat(target); os.IsNotExist(err) {
@@ -333,7 +365,7 @@ func RemoveProfileSymlink(alias string) error {
 	if err != nil {
 		return err
 	}
-	link := filepath.Join(base, "profiles", alias)
+	link := filepath.Join(base, "accounts", alias)
 	fi, err := os.Lstat(link)
 	if err != nil {
 		return nil // doesn't exist, nothing to do
@@ -550,8 +582,8 @@ func MigrateAliases() error {
 	}
 
 	// Migrate legacy per-profile aliases.csv files
-	profilesDir := filepath.Join(base, "profiles")
-	entries, err := os.ReadDir(profilesDir)
+	accountsDir := filepath.Join(base, "accounts")
+	entries, err := os.ReadDir(accountsDir)
 	if err != nil {
 		return nil
 	}
@@ -560,7 +592,7 @@ func MigrateAliases() error {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "npub1") {
 			continue
 		}
-		csvPath := filepath.Join(profilesDir, e.Name(), "aliases.csv")
+		csvPath := filepath.Join(accountsDir, e.Name(), "aliases.csv")
 		f, err := os.Open(csvPath)
 		if err != nil {
 			continue

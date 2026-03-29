@@ -4,10 +4,10 @@ nostr-cli caches data locally to avoid unnecessary relay fetches and provide fas
 
 ## Cache locations
 
-All cache data lives under `~/.nostr/profiles/<npub>/cache/`:
+All cache data lives under `~/.nostr/accounts/<npub>/cache/`:
 
 ```
-~/.nostr/profiles/<npub>/
+~/.nostr/accounts/<npub>/
 ├── nsec                    # Private key (local profiles only)
 ├── relays.json             # Configured relays
 ├── profile.json            # Profile metadata (local profiles)
@@ -62,8 +62,8 @@ The `cache/` directory can be safely deleted at any time. It will be rebuilt on 
 
 ```bash
 # Clear cache for a specific profile
-rm -rf ~/.nostr/profiles/<npub>/cache/
+rm -rf ~/.nostr/accounts/<npub>/cache/
 
 # Clear all caches
-rm -rf ~/.nostr/profiles/*/cache/
+rm -rf ~/.nostr/accounts/*/cache/
 ```

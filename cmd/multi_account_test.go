@@ -119,7 +119,7 @@ func TestMultiAccount_LoadAccountFallback(t *testing.T) {
 	defer func() { config.BaseDirOverride = "" }()
 
 	npub := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
-	profDir := filepath.Join(dir, "profiles", npub)
+	profDir := filepath.Join(dir, "accounts", npub)
 	os.MkdirAll(profDir, 0700)
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte("nsec1test\n"), 0600)
 	config.SetActiveProfile(npub)

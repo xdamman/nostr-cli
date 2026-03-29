@@ -33,7 +33,7 @@ nostr-cli/
 
 1. **One command = one file** in `cmd/`. Each file registers a Cobra command.
 2. **`internal/` owns all logic.** Commands are thin — parse flags, call internal, print output.
-3. **Profile-scoped state.** Everything is relative to `~/.nostr/profiles/<npub>/`. No global mutable state.
+3. **Profile-scoped state.** Everything is relative to `~/.nostr/accounts/<npub>/`. No global mutable state.
 4. **Offline-first where possible.** Cached profiles, local aliases. Network calls only when needed.
 
 ## Key Packages
@@ -73,7 +73,7 @@ nostr-cli/
 ```
 ~/.nostr/
 ├── active                  # Pointer to current profile npub
-└── profiles/
+└── accounts/
     └── <npub>/
         ├── nsec            # Private key (file mode 0600)
         ├── profile.json    # Cached kind 0 event

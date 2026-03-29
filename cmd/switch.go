@@ -225,8 +225,8 @@ func listSwitchableProfiles() ([]profileEntry, error) {
 		}
 	}
 
-	profilesDir := filepath.Join(base, "profiles")
-	dirEntries, err := os.ReadDir(profilesDir)
+	accountsDir := filepath.Join(base, "accounts")
+	dirEntries, err := os.ReadDir(accountsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -247,7 +247,7 @@ func listSwitchableProfiles() ([]profileEntry, error) {
 		if !strings.HasPrefix(npub, "npub1") {
 			continue
 		}
-		// Only include profiles that have an nsec (owned identities)
+		// Only include accounts that have an nsec (owned identities)
 		if !config.HasNsec(npub) {
 			continue
 		}

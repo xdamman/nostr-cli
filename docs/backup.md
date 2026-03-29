@@ -8,22 +8,22 @@ All nostr-cli data lives under `~/.nostr/`. Backing up this directory preserves 
 
 | File | Description |
 |------|-------------|
-| `~/.nostr/profiles/<npub>/nsec` | Your private key. **If lost, you lose access to your identity.** |
-| `~/.nostr/profiles/<npub>/events.jsonl` | Every event you have signed and published (posts, follows, profile updates). This is your local record of everything you sent. |
-| `~/.nostr/profiles/<npub>/directmessages/` | Encrypted DM conversations. One `.jsonl` file per counterparty containing all sent and received messages. |
+| `~/.nostr/accounts/<npub>/nsec` | Your private key. **If lost, you lose access to your identity.** |
+| `~/.nostr/accounts/<npub>/events.jsonl` | Every event you have signed and published (posts, follows, profile updates). This is your local record of everything you sent. |
+| `~/.nostr/accounts/<npub>/directmessages/` | Encrypted DM conversations. One `.jsonl` file per counterparty containing all sent and received messages. |
 
 ### Important (recoverable but convenient to keep)
 
 | File | Description |
 |------|-------------|
-| `~/.nostr/profiles/<npub>/relays.json` | Your relay configuration. Can be re-fetched from NIP-65 on login. |
-| `~/.nostr/profiles/<npub>/profile.json` | Your profile metadata. Can be re-fetched from relays. |
+| `~/.nostr/accounts/<npub>/relays.json` | Your relay configuration. Can be re-fetched from NIP-65 on login. |
+| `~/.nostr/accounts/<npub>/profile.json` | Your profile metadata. Can be re-fetched from relays. |
 | `~/.nostr/aliases.json` | Global aliases (e.g. `xavier` -> `npub1...`). |
 | `~/.nostr/active` | Symlink to the active profile. |
 
 ### Not needed (cache, safely deletable)
 
-Everything under `~/.nostr/profiles/<npub>/cache/` is re-fetched from relays on demand. See [caching.md](caching.md) for details.
+Everything under `~/.nostr/accounts/<npub>/cache/` is re-fetched from relays on demand. See [caching.md](caching.md) for details.
 
 ## Backup commands
 
@@ -33,7 +33,7 @@ cp -r ~/.nostr ~/nostr-backup
 
 # Back up only essential files (keys + sent events + DMs)
 mkdir -p ~/nostr-backup
-for dir in ~/.nostr/profiles/*/; do
+for dir in ~/.nostr/accounts/*/; do
   name=$(basename "$dir")
   mkdir -p ~/nostr-backup/$name
   cp "$dir/nsec" ~/nostr-backup/$name/ 2>/dev/null

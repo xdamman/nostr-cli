@@ -30,7 +30,7 @@ var loginCmd = &cobra.Command{
 	Short:   "Create a new account or import an existing one",
 	Long: `Login with an existing nsec or generate a new keypair.
 
-Creates an account directory in ~/.nostr/profiles/<npub>/ with keys, relays,
+Creates an account directory in ~/.nostr/accounts/<npub>/ with keys, relays,
 and optionally profile metadata.
 
 Flags:

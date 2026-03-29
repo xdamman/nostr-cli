@@ -378,7 +378,7 @@ All state lives in `~/.nostr/`:
 
 ```
 ~/.nostr/
-└── profiles/
+└── accounts/
     └── <npub>/
         ├── nsec              # Private key (chmod 600)
         ├── profile.json      # Kind 0 metadata

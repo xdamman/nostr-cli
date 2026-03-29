@@ -139,7 +139,7 @@ func LogSentEvent(npub string, event nostr.Event) error {
 }
 
 // LogEvent appends an event as a JSON line to the cache, deduplicating by ID.
-// Only writes to profiles that have an nsec file (local profiles).
+// Only writes to accounts that have an nsec file (local accounts).
 func LogEvent(npub string, event nostr.Event) error {
 	if npub == "" || event.ID == "" {
 		return nil
@@ -180,7 +180,7 @@ func LogEvent(npub string, event nostr.Event) error {
 }
 
 // dmEventsFile returns the path to a DM conversation file:
-// ~/.nostr/profiles/:npub/directmessages/:counterpartyNpub.jsonl
+// ~/.nostr/accounts/:npub/directmessages/:counterpartyNpub.jsonl
 func dmEventsFile(npub, counterpartyHex string) string {
 	dir, err := config.ProfileDir(npub)
 	if err != nil {

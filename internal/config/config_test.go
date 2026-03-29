@@ -14,14 +14,14 @@ func setupTestDir(t *testing.T) string {
 	dir := t.TempDir()
 	BaseDirOverride = dir
 	t.Cleanup(func() { BaseDirOverride = "" })
-	// Create profiles dir
-	os.MkdirAll(filepath.Join(dir, "profiles"), 0700)
+	// Create accounts dir
+	os.MkdirAll(filepath.Join(dir, "accounts"), 0700)
 	return dir
 }
 
 func createTestProfile(t *testing.T, dir, npub string) {
 	t.Helper()
-	profDir := filepath.Join(dir, "profiles", npub)
+	profDir := filepath.Join(dir, "accounts", npub)
 	os.MkdirAll(profDir, 0700)
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte("nsec1test\n"), 0600)
 }
@@ -139,7 +139,7 @@ func TestMigrateAliases_CSV(t *testing.T) {
 	dir, npub := setupTestDirWithProfile(t)
 
 	// Write a per-profile aliases.csv
-	csvPath := filepath.Join(dir, "profiles", npub, "aliases.csv")
+	csvPath := filepath.Join(dir, "accounts", npub, "aliases.csv")
 	f, err := os.Create(csvPath)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestMigrateAliases_NoConflict(t *testing.T) {
 	SetAlias(npub, "alice", existingNpub)
 
 	// Write a CSV with conflicting "alice"
-	csvPath := filepath.Join(dir, "profiles", npub, "aliases.csv")
+	csvPath := filepath.Join(dir, "accounts", npub, "aliases.csv")
 	f, _ := os.Create(csvPath)
 	w := csv.NewWriter(f)
 	w.Write([]string{"alice", "npub1different0000000000000000000000000000000000000000000"})
@@ -243,12 +243,12 @@ func TestActiveProfile_NonNpubDir(t *testing.T) {
 	}
 
 	// Create a profile directory with a username instead of npub
-	profDir := filepath.Join(dir, "profiles", "alice")
+	profDir := filepath.Join(dir, "accounts", "alice")
 	os.MkdirAll(profDir, 0700)
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte(nsec), 0600)
 
 	// Set active profile pointing to the username dir
-	os.Symlink("profiles/alice", filepath.Join(dir, "active"))
+	os.Symlink("accounts/alice", filepath.Join(dir, "active"))
 
 	// ActiveProfile should derive the real npub from the nsec
 	got, err := ActiveProfile()
@@ -375,9 +375,9 @@ func TestConfig_LoadNsecPerProfile(t *testing.T) {
 	npub1 := "npub1testprofile1234567890abcdefghijklmnopqrstuvwxyz12345"
 	npub2 := "npub1otherprofile234567890abcdefghijklmnopqrstuvwxyz12345"
 
-	// Create profiles with different nsecs
-	profDir1 := filepath.Join(dir, "profiles", npub1)
-	profDir2 := filepath.Join(dir, "profiles", npub2)
+	// Create accounts with different nsecs
+	profDir1 := filepath.Join(dir, "accounts", npub1)
+	profDir2 := filepath.Join(dir, "accounts", npub2)
 	os.MkdirAll(profDir1, 0700)
 	os.MkdirAll(profDir2, 0700)
 	os.WriteFile(filepath.Join(profDir1, "nsec"), []byte("nsec1profile1key\n"), 0600)
@@ -400,7 +400,7 @@ func TestConfig_LoadNsecPerProfile(t *testing.T) {
 		t.Errorf("nsec2 = %q, want %q", nsec2, "nsec1profile2key")
 	}
 	if nsec1 == nsec2 {
-		t.Error("nsecs should be different between profiles")
+		t.Error("nsecs should be different between accounts")
 	}
 }
 
@@ -414,14 +414,14 @@ func TestProfileDir_NonNpubDir(t *testing.T) {
 	}
 
 	// Create profile directory with a username
-	profDir := filepath.Join(dir, "profiles", "alice")
+	profDir := filepath.Join(dir, "accounts", "alice")
 	os.MkdirAll(profDir, 0700)
 	os.WriteFile(filepath.Join(profDir, "nsec"), []byte(nsec), 0600)
 	os.WriteFile(filepath.Join(profDir, "aliases.json"),
 		[]byte(`{"bob":"npub1bob00000000000000000000000000000000000000000000000"}`), 0644)
 
 	// Set active symlink to the username dir
-	os.Symlink("profiles/alice", filepath.Join(dir, "active"))
+	os.Symlink("accounts/alice", filepath.Join(dir, "active"))
 
 	// ProfileDir with the real npub should find the "alice" directory via active symlink
 	resolved, err := ProfileDir(npub)

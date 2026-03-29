@@ -409,8 +409,8 @@ nostr post "Bot is online" --jsonl
 ## Configuration
 
 - **Config directory**: `~/.nostr/`
-- **Profiles**: `~/.nostr/profiles/<npub>/`
-- **Sent events**: `~/.nostr/profiles/<npub>/events.jsonl`
-- **DM history**: `~/.nostr/profiles/<npub>/directmessages/<hex>.jsonl`
+- **Profiles**: `~/.nostr/accounts/<npub>/`
+- **Sent events**: `~/.nostr/accounts/<npub>/events.jsonl`
+- **DM history**: `~/.nostr/accounts/<npub>/directmessages/<hex>.jsonl`
 
 All accounts, aliases, and relay configurations are stored in `~/.nostr/`. Each account is isolated with its own keys, relays, and aliases.

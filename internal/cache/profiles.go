@@ -87,7 +87,7 @@ func GetProfile(pubHex string) *CachedProfile {
 }
 
 // PutProfile stores a profile in the in-memory cache and appends to disk.
-// Only writes to disk for profiles that have an nsec file (local profiles).
+// Only writes to disk for accounts that have an nsec file (local accounts).
 func PutProfile(npub string, p *CachedProfile) error {
 	if p == nil || p.PubKey == "" {
 		return nil
