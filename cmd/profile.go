@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"net/url"
@@ -347,14 +346,27 @@ func runProfileUpdate(cmd *cobra.Command, args []string) error {
 		meta = &profile.Metadata{}
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-
-	meta.Name = promptField(reader, "Username", meta.Name)
-	meta.DisplayName = promptField(reader, "Display name", meta.DisplayName)
-	meta.About = promptField(reader, "About", meta.About)
-	meta.Picture = promptField(reader, "Picture URL", meta.Picture)
-	meta.NIP05 = promptField(reader, "NIP-05", meta.NIP05)
-	meta.Website = promptField(reader, "Website", meta.Website)
+	result := ui.RunProfileForm(ui.ProfileFormConfig{
+		Title: "Update your Nostr profile",
+		Fields: []ui.ProfileField{
+			{Label: "Username", Key: "name", Value: meta.Name, Hint: "A short name for @mentions"},
+			{Label: "Display name", Key: "display_name", Value: meta.DisplayName},
+			{Label: "About", Key: "about", Value: meta.About},
+			{Label: "Picture URL", Key: "picture", Value: meta.Picture},
+			{Label: "NIP-05", Key: "nip05", Value: meta.NIP05, Hint: "user@domain.com for verification"},
+			{Label: "Website", Key: "website", Value: meta.Website},
+		},
+	})
+	if result.Cancelled {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+	meta.Name = result.Values["name"]
+	meta.DisplayName = result.Values["display_name"]
+	meta.About = result.Values["about"]
+	meta.Picture = result.Values["picture"]
+	meta.NIP05 = result.Values["nip05"]
+	meta.Website = result.Values["website"]
 
 	// Save locally
 	if err := profile.SaveCached(npub, meta); err != nil {
@@ -383,19 +395,7 @@ func runProfileUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func promptField(reader *bufio.Reader, label, current string) string {
-	if current != "" {
-		fmt.Printf("%s [%s]: ", label, current)
-	} else {
-		fmt.Printf("%s: ", label)
-	}
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return current
-	}
-	return input
-}
+
 
 func printColorField(label func(a ...interface{}) string, name, value string) {
 	if value != "" {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"net/url"
@@ -142,15 +141,24 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 		// Prompt for profile setup
 		if isTTY {
-			fmt.Println()
-			fmt.Println("Set up your Nostr profile (enter to skip any field):")
-			reader := bufio.NewReader(os.Stdin)
 			meta := &profile.Metadata{}
-			meta.Name = promptField(reader, "Username", "")
-			meta.DisplayName = promptField(reader, "Display name", "")
-			meta.About = promptField(reader, "About", "")
-			meta.Picture = promptField(reader, "Picture URL", "")
-			meta.Website = promptField(reader, "Website", "")
+			result := ui.RunProfileForm(ui.ProfileFormConfig{
+				Title: "Set up your Nostr profile",
+				Fields: []ui.ProfileField{
+					{Label: "Username", Key: "name", Hint: "A short name for @mentions (no central server, doesn't need to be unique)"},
+					{Label: "Display name", Key: "display_name"},
+					{Label: "About", Key: "about"},
+					{Label: "Picture URL", Key: "picture", Placeholder: "https://..."},
+					{Label: "Website", Key: "website", Placeholder: "https://..."},
+				},
+			})
+			if !result.Cancelled {
+				meta.Name = result.Values["name"]
+				meta.DisplayName = result.Values["display_name"]
+				meta.About = result.Values["about"]
+				meta.Picture = result.Values["picture"]
+				meta.Website = result.Values["website"]
+			}
 
 			if err := profile.SaveCached(npub, meta); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not save profile: %v\n", err)
@@ -170,7 +178,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			}
 
 			// Alias prompt — default to Name
-			promptAlias(npub, meta.Name, green)
+			setAliasFromUsername(npub, meta.Name, green)
 		}
 	} else {
 		// --- Import existing nsec flow ---
@@ -240,7 +248,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			if meta != nil {
 				name = meta.Name
 			}
-			promptAlias(npub, name, green)
+			setAliasFromUsername(npub, name, green)
 		}
 	}
 
@@ -252,37 +260,26 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	dim.Println("Next steps:")
 	dim.Println("  Post a public note:     nostr post \"Hello Nostr!\"")
-	dim.Println("  Send a direct message:  nostr dm <profile> \"message\"")
-	dim.Println("  Enter interactive mode:  nostr")
-	dim.Println("  Manage relays:          nostr relays add <wss://...>")
+	dim.Println("  Send a direct message:  nostr dm <alias|npub|nip05> \"message\"")
+	dim.Println("  Enter interactive mode: nostr")
+	dim.Println("  Manage relays:          nostr relays")
 
 	return nil
 }
 
-// promptAlias prompts for an alias with the given default name.
-func promptAlias(npub, defaultName string, green *color.Color) {
-	defaultAlias := ""
-	if defaultName != "" {
-		defaultAlias = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(defaultName), " ", "-"))
+// setAliasFromUsername automatically sets an alias from the username.
+func setAliasFromUsername(npub, username string, green *color.Color) {
+	if username == "" {
+		return
 	}
-	if defaultAlias != "" {
-		fmt.Printf("\nChoose an alias for this account [%s]: ", defaultAlias)
+	alias := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(username), " ", "-"))
+	if alias == "" {
+		return
+	}
+	if err := config.SetGlobalAlias(alias, npub); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
 	} else {
-		fmt.Print("\nChoose an alias for this account (enter to skip): ")
-	}
-	scanner := bufio.NewScanner(os.Stdin)
-	if scanner.Scan() {
-		alias := strings.TrimSpace(scanner.Text())
-		if alias == "" && defaultAlias != "" {
-			alias = defaultAlias
-		}
-		if alias != "" {
-			if err := config.SetGlobalAlias(alias, npub); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
-			} else {
-				green.Printf("✓ Alias %s → %s\n", alias, npub)
-			}
-		}
+		green.Printf("✓ Alias set: %s\n", alias)
 	}
 }
 
@@ -354,7 +351,7 @@ func relayChecklist(relays []string) []string {
 			// Prompt for new relay URL
 			inputResult := ui.RunInlineInput(ui.InlineInputConfig{
 				Prompt: "  Relay URL: ",
-				Hint:   "Enter a relay URL (wss://...)",
+				Hint:   "Enter a relay URL (wss://...), ESC to cancel",
 			})
 			if !inputResult.Cancelled && inputResult.Text != "" {
 				newRelay := inputResult.Text
