@@ -8,7 +8,8 @@ export interface TerminalLine {
   delay: number; // frame at which this line appears (relative to scene start)
   typewriter?: boolean; // whether to use typewriter effect
   charsPerFrame?: number;
-  prefix?: "prompt" | "none";
+  prefix?: "prompt" | "user" | "none";
+  prefixText?: string; // custom prefix text (e.g. username for "user" prefix)
 }
 
 export interface RenderedLine {
@@ -19,6 +20,8 @@ export interface RenderedLine {
   typewriterProgress: number; // 0-1
   showCursor: boolean;
   isPrompt: boolean;
+  prefixType: "prompt" | "user" | "none";
+  prefixText?: string;
 }
 
 export function useTerminalLines(
@@ -64,6 +67,8 @@ export function useTerminalLines(
       typewriterProgress,
       showCursor,
       isPrompt: line.prefix === "prompt",
+      prefixType: (line.prefix as "prompt" | "user" | "none") ?? "none",
+      prefixText: line.prefixText,
     };
   });
 }

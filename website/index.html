@@ -516,14 +516,19 @@
         <div class="terminal-dot red"></div>
         <div class="terminal-dot yellow"></div>
         <div class="terminal-dot green"></div>
-        <div class="terminal-title">Send an encrypted DM</div>
+        <div class="terminal-title">Send an encrypted DM (NIP-17)</div>
       </div>
       <div class="terminal-body">
         <div><span class="prompt">$</span> nostr dm xavier "See you at the meetup"</div>
-        <div class="success">&#10003; DM sent to xavier</div>
         <div>&nbsp;</div>
-        <div><span class="prompt">$</span> echo "Here's that link" | nostr dm xavier</div>
-        <div class="success">&#10003; DM sent to xavier</div>
+        <div>  <span class="info">Protocol:</span>     NIP-17 (gift wrap)</div>
+        <div>  <span class="info">Recipient:</span>    npub1xdm...a8f2</div>
+        <div>&nbsp;</div>
+        <div>  <span class="success">&#10003;</span> relay.damus.io      89ms</div>
+        <div>  <span class="success">&#10003;</span> nos.lol             102ms</div>
+        <div>  <span class="success">&#10003;</span> relay.primal.net    145ms</div>
+        <div>&nbsp;</div>
+        <div class="success">&#10003; Published to 3/3 relays</div>
       </div>
     </div>
 
@@ -588,7 +593,7 @@
       </div>
       <div class="feature">
         <h3>Encrypted DMs</h3>
-        <p>NIP-04 / NIP-44 encrypted direct messages with interactive chat mode.</p>
+        <p>NIP-17 gift-wrapped DMs (NIP-44 encryption) by default. NIP-04 legacy supported. Interactive chat mode.</p>
       </div>
       <div class="feature">
         <h3>Interactive shell</h3>
@@ -597,6 +602,10 @@
       <div class="feature">
         <h3>Built-in NIP viewer</h3>
         <p><code>nostr nip 01</code> fetches and renders any NIP specification right in your terminal.</p>
+      </div>
+      <div class="feature">
+        <h3>Long-form articles</h3>
+        <p>Publish NIP-23 articles from markdown files with YAML frontmatter. <code>nostr post -f article.md</code></p>
       </div>
       <div class="feature">
         <h3>Agent-friendly</h3>
@@ -612,7 +621,9 @@
     <table class="commands-table">
       <tr><td colspan="2" class="commands-group">Social</td></tr>
       <tr><td>nostr post [message]</td><td>Post a text note (kind 1). Reads from stdin if piped.</td></tr>
-      <tr><td>nostr dm [user] [message]</td><td>Send an encrypted DM, interactive chat, or stream with --watch</td></tr>
+      <tr><td>nostr post -f article.md</td><td>Publish long-form content (NIP-23, kind 30023)</td></tr>
+      <tr><td>nostr reply &lt;eventId&gt; [msg]</td><td>Reply with NIP-10 threading</td></tr>
+      <tr><td>nostr dm [user] [message]</td><td>Send NIP-17 gift-wrapped DM, interactive chat, or stream with --watch</td></tr>
       <tr><td>nostr events --kinds &lt;n&gt;</td><td>Query events from relays (filter by kind, time, author)</td></tr>
       <tr><td>nostr event new --kind &lt;n&gt;</td><td>Create and publish a raw event of any kind</td></tr>
       <tr><td>nostr follow [user]</td><td>Follow a user</td></tr>
@@ -678,6 +689,9 @@
         <div class="terminal-title">Bot / Agent recipes</div>
       </div>
       <div class="terminal-body">
+        <div class="dim"># Stream DMs addressed to you, decrypted</div>
+        <div><span class="prompt">$</span> nostr events --watch --kinds 4 --me --decrypt --jsonl</div>
+        <div>&nbsp;</div>
         <div class="dim"># Stream DMs and process with jq</div>
         <div><span class="prompt">$</span> nostr dm --watch --jsonl | while read -r line; do</div>
         <div>&nbsp;&nbsp;&nbsp;&nbsp;echo "$line" | jq .message</div>
@@ -685,9 +699,6 @@
         <div>&nbsp;</div>
         <div class="dim"># Query and decrypt recent DMs</div>
         <div><span class="prompt">$</span> nostr events --kinds 4 --since 1h --decrypt --jsonl</div>
-        <div>&nbsp;</div>
-        <div class="dim"># Create a raw event (dry run)</div>
-        <div><span class="prompt">$</span> nostr event new --kind 1 --content "Hello" --dry-run --json</div>
         <div>&nbsp;</div>
         <div class="dim"># Post from a pipe</div>
         <div><span class="prompt">$</span> echo "Hello from a bot" | nostr post --jsonl</div>
@@ -810,7 +821,8 @@
         {
           lines: [
             { type: 'cmd', text: '$ nostr dm jack "Hey, love what you\'re building!"' },
-            { type: 'ok',  text: '✓ DM sent (encrypted, NIP-04)' },
+            { type: 'out', text: '  Protocol: NIP-17 (gift wrap)' },
+            { type: 'ok',  text: '✓ Published to 3/3 relays' },
           ]
         },
         {
@@ -820,14 +832,22 @@
             { type: 'out', text: '  2. bot   (npub1m4k...9h2a)' },
             { type: 'out', text: '' },
             { type: 'cmd', text: '$ nostr switch bot' },
-            { type: 'ok',  text: '✓ Switched to account bot (npub1m4k...9h2a)' },
+            { type: 'ok',  text: '✓ Switched to bot (npub1m4k...9h2a)' },
           ]
         },
         {
           lines: [
-            { type: 'cmd', text: '$ nostr dm --watch --jsonl | jq .message' },
-            { type: 'out', text: '"hey are you there?"' },
-            { type: 'out', text: '"can you check the latest PR?"' },
+            { type: 'cmd', text: '$ nostr events --watch --kinds 4 --me --decrypt --jsonl' },
+            { type: 'out', text: '{"from":"alice","message":"deploy the fix","protocol":"nip17"}' },
+            { type: 'out', text: '{"from":"bob","message":"PR merged ✓","protocol":"nip17"}' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr post -f article.md --title "Building on Nostr"' },
+            { type: 'out', text: '  Publishing article (kind 30023) to 6 relays...' },
+            { type: 'ok',  text: '✓ Published to 5/6 relays' },
+            { type: 'dim', text: '  Slug: building-on-nostr' },
           ]
         },
       ];

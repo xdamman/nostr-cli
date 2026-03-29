@@ -1,6 +1,6 @@
 # nostr-cli
 
-A command-line tool for interacting with the Nostr protocol. Nostr is a decentralized social network protocol.
+A command-line tool for the Nostr protocol. Post notes, send encrypted DMs (NIP-17/NIP-44), query events, create raw events, publish long-form articles (NIP-23), manage accounts, follow users, and interact with relays.
 
 ## Quick Install
 
@@ -12,50 +12,52 @@ brew install xdamman/tap/nostr
 ## Core Features
 
 - **Pipe-friendly**: `echo "hello" | nostr` posts a note, `echo "msg" | nostr dm user` sends a DM
-- **Structured output**: All commands support `--json` for machine-readable output
-- **Raw events**: `--raw` outputs standard Nostr event JSON (wire format)
-- **Customizable display**: `--no-color` disables ANSI colors, `--timeout <ms>` sets relay timeout
-- **Non-interactive**: Supports flags for headless operation: `nostr login --nsec <key>`, `nostr post "msg"`, `nostr dm user "msg"`
+- **Structured output**: `--json` (enriched, pretty), `--jsonl` (one line per event), `--raw` (wire format)
+- **Auto-detection**: Colors off when piped, stdin read as input, NO_COLOR respected
+- **NIP-17 DMs**: Gift-wrapped encrypted DMs by default (NIP-44 encryption), NIP-04 legacy with `--nip04`
+- **Long-form**: Publish NIP-23 articles from markdown with YAML frontmatter
+- **Event queries**: Flexible filters with `--kinds`, `--since`, `--until`, `--author`, `--filter`, `--me`
+- **Live streaming**: `--watch` on events, DMs, and user feeds
+- **Non-interactive**: `nostr login --nsec <key>`, `nostr post "msg"`, `nostr dm user "msg" --jsonl`
 
 ## Commands
 
 ### Posting & Messaging
-- `nostr post [message]` — Post a text note (kind 1). Flags: `--reply`, `--json`, `--timeout`
-- `nostr dm <user> [message]` — Send encrypted DM (NIP-44). User: npub, alias, or nip05. Flags: `--json`
-- `nostr [user]` — View user profile and recent notes. Flags: `--watch`, `--json`, `--limit`
+- `nostr post [message]` — Post a text note (kind 1). Flags: `--tag`, `--tags`, `--dry-run`, `--json`/`--jsonl`/`--raw`
+- `nostr post -f <file>` — Publish long-form article (NIP-23, kind 30023). Flags: `--title`, `--summary`, `--image`, `--slug`, `--draft`, `--hashtag`
+- `nostr post --long` — Write long-form in built-in editor
+- `nostr reply <eventId> [message]` — Reply with NIP-10 threading. Flags: `--tag`, `--tags`, `--json`
+- `nostr dm <user> [message]` — Send NIP-17 gift-wrapped DM. Flags: `--nip04`, `--watch`, `--since`, `--tag`, `--json`/`--jsonl`
+- `nostr events --kinds <n>` — Query events with filters. Flags: `--since`, `--until`, `--author`, `--limit`, `--decrypt`, `--watch`, `--filter`, `--me`
+- `nostr event new --kind <n> --content <text>` — Create raw event. Flags: `--tag`, `--tags`, `--pow`, `--dry-run`
 
-### Profile Management
-- `nostr profile [user]` — View profile metadata. Flags: `--json`, `--refresh`
-- `nostr profiles` — List all local profiles. Flags: `--json`
-- `nostr profiles rm [profile]` — Remove a profile
-- `nostr login` — Create or import profile. Flags: `--new`, `--nsec`
-- `nostr switch [profile]` — Switch active profile
+### Account Management
+- `nostr login` — Create or import account. Flags: `--new`, `--nsec`
+- `nostr switch [account]` — Switch active account (interactive picker without args)
+- `nostr accounts` — List all local accounts. Flags: `--json`
+- `nostr profile [user]` — View profile. Flags: `--refresh`, `--json`
+- `nostr profile update` — Edit profile interactively
 
 ### Social Graph
-- `nostr follow <user>` — Add user to contact list (kind 3)
-- `nostr unfollow <user>` — Remove user from contact list
-- `nostr following` — List followed users
+- `nostr follow <user>` — Follow user (kind 3)
+- `nostr unfollow <user>` — Unfollow user
+- `nostr following` — List followed users. Flags: `--refresh`, `--json`
+- `nostr [user]` — View user profile + notes. Flags: `--watch`, `--limit`, `--json`
 
 ### Configuration
-- `nostr alias <name> <user>` — Create alias for a user
-- `nostr aliases` — List all aliases
-- `nostr alias rm <name>` — Remove an alias
-- `nostr relays` — List relays. Flags: `--json`, `--relay <url|domain>`
-- `nostr relays add <url>` — Add relay
-- `nostr relays rm <url|domain|number>` — Remove relay. Flags: `--yes`/`-y`
-- `nostr sync` — Sync local events with relays. Flags: `--json`, `--relay <url|domain>`
+- `nostr alias <name> <user>` / `nostr aliases` / `nostr alias rm <name>` — Manage aliases
+- `nostr relays` / `nostr relays add <url>` / `nostr relays rm <url>` — Manage relays
+- `nostr sync` — Sync events with relays. Flags: `--json`, `--relay`
+
+### Global Flags
+- `--account <npub|alias>` — Use a specific account
+- `--timeout <ms>` — Relay timeout (default: 2000)
+- `--no-color` — Disable colors
+- `--json` / `--jsonl` / `--raw` — Output formats
 
 ## User Format
 
-A `<user>` can be:
-- npub address (npub1...)
-- Local alias
-- NIP-05 address (user@domain.com)
-
-## Configuration
-
-- Config directory: `~/.nostr/`
-- Event logs: `~/.nostr/profiles/<npub>/events.jsonl`
+A `<user>` can be: npub1... | local alias | user@domain.com (NIP-05)
 
 ## Resources
 

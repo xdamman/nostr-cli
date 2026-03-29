@@ -1,11 +1,11 @@
 ---
 name: nostr-cli
-description: Post notes, send encrypted DMs, manage accounts and profiles, follow users, and interact with Nostr relays from the terminal.
+description: Post notes, send encrypted DMs (NIP-17/NIP-44), query events, create raw events, publish long-form articles (NIP-23), manage accounts, follow users, and interact with Nostr relays from the terminal.
 ---
 
 # nostr-cli
 
-A command-line tool for interacting with the Nostr protocol. It enables posting notes, sending encrypted DMs, managing accounts, profiles, and aliases, following other users, and managing Nostr relays — all from the terminal or within scripts.
+A command-line tool for interacting with the Nostr protocol. Post notes, send encrypted DMs (NIP-17 gift wrap / NIP-44 / NIP-04 legacy), query events with flexible filters, create raw events of any kind, publish long-form articles (NIP-23), manage accounts, profiles, and aliases, follow users, and manage relays — all from the terminal or within scripts.
 
 ## Installation Check and Setup
 
@@ -19,6 +19,22 @@ nostr version
 curl -sL https://nostrcli.sh/install.sh | bash
 ```
 
+## Auto-Detection Behavior
+
+nostr-cli auto-detects the environment:
+- **stdout is a TTY** → Colors enabled, interactive prompts shown
+- **stdout is piped** → Colors disabled automatically, no interactive prompts
+- **stdin is piped** → Content read as input (e.g. `echo "Hello" | nostr post`)
+- The `NO_COLOR` env var and `--no-color` flag also disable colors explicitly
+
+## Output Formats
+
+| Flag | Description | Use case |
+|------|-------------|----------|
+| `--json` | Pretty-printed enriched JSON (event + metadata) | Human inspection, debugging |
+| `--jsonl` | Compact single-line JSON per event | Piping, bots, streaming, `jq` |
+| `--raw` | Raw Nostr event JSON (wire format) | Forwarding to other nostr tools |
+
 ## Command Reference
 
 ### Posting Notes
@@ -26,29 +42,7 @@ curl -sL https://nostrcli.sh/install.sh | bash
 nostr post [message]
 ```
 
-Flags:
-- `--reply <event-id>` — Reply to a specific event
-- `--tag key=value` — Add extra tags (repeatable). Semicolons for multi-value.
-- `--tags '<json>'` — Add extra tags as JSON array
-- `--dry-run` — Sign but don't publish
-- `--json` — Output result as JSON (includes event ID, signature, etc.)
-- `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
-
-Examples:
-```bash
-nostr post "Hello Nostr"
-echo "My message" | nostr post
-nostr post "Reply" --reply <event-id> --json
-nostr post "Tagged" --tag t=nostr --tag t=bitcoin
-nostr post "Custom" --tags '[["t","nostr"]]'
-```
-
-### Replying to Events
-```bash
-nostr reply <eventId> [message]
-```
-
-Reply to an existing event with NIP-10 compliant threading. Fetches the referenced event from relays to determine thread structure.
+Publishes a kind 1 text note. Message can come from argument, stdin, or interactive prompt.
 
 Flags:
 - `--tag key=value` — Add extra tags (repeatable)
@@ -58,273 +52,191 @@ Flags:
 
 Examples:
 ```bash
-nostr reply note1abc... "Great post!"
-nostr reply abc123hex "I agree" --tag t=nostr
-nostr reply nevent1... "Check this" --tags '[["p","<hex>"]]'
-echo "Nice" | nostr reply note1abc...
+nostr post "Hello Nostr"
+echo "My message" | nostr post
+nostr post "Tagged" --tag t=nostr --tag t=bitcoin
+EVENT_ID=$(nostr post "Message" --jsonl | jq -r '.id')
 ```
+
+### Long-Form Content (NIP-23)
+```bash
+nostr post -f <file> [flags]
+nostr post --long [flags]
+```
+
+Publish long-form articles (kind 30023) or drafts (kind 30024).
+
+Flags:
+- `-f, --file <path>` — Read content from a markdown file
+- `--long` — Open built-in multi-line editor
+- `--title <string>` — Article title
+- `--summary <string>` — Article summary
+- `--image <url>` — Header image URL
+- `--slug <string>` — Article identifier / d tag (for updates)
+- `--draft` — Publish as draft (kind 30024 instead of 30023)
+- `--hashtag <string>` — Hashtag topics (repeatable, t tags)
+
+YAML frontmatter in markdown files is auto-parsed. CLI flags override frontmatter.
+
+Examples:
+```bash
+nostr post -f article.md --title "My Article"
+nostr post -f article.md --slug my-article --title "My Article" --summary "Great read"
+nostr post --long --title "Quick Thoughts"
+nostr post -f article.md --draft
+nostr post -f updated.md --slug my-article    # Updates existing article
+nostr post -f article.md --hashtag nostr --hashtag bitcoin
+```
+
+### Replying to Events
+```bash
+nostr reply <eventId> [message]
+```
+
+Reply with NIP-10 compliant threading. Event ID can be hex, note1..., or nevent1....
+
+Flags:
+- `--tag key=value` — Add extra tags (repeatable)
+- `--tags '<json>'` — Add extra tags as JSON array
+- `--dry-run` — Sign but don't publish
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 ### Direct Messages
 ```bash
 nostr dm <user> [message]
 ```
 
-Sends NIP-04 encrypted direct messages. `<user>` can be an npub, alias, or NIP-05 address.
+NIP-17 gift-wrapped DMs by default (NIP-44 encryption). Both NIP-04 and NIP-17 received automatically.
 
 Flags:
-- `--tag key=value` — Add extra tags (repeatable)
-- `--tags '<json>'` — Add extra tags as JSON array
-- `--json` — Output event and relay results as JSON
+- `--nip04` — Force NIP-04 encryption (legacy)
+- `--watch` — Stream incoming DMs
+- `--since <time>` — Start time for --watch
+- `--no-decrypt` — Don't decrypt messages
+- `--tag key=value` / `--tags '<json>'` — Extra tags
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
+
+JSON output includes `protocol` field (`"nip04"` or `"nip17"`).
 
 Examples:
 ```bash
-nostr dm npub1... "Hello"
-nostr dm alice@example.com "Message" --json
-nostr dm alice "Hello" --tag subject=greeting
-echo "Content" | nostr dm alice
+nostr dm alice "Hello"                        # NIP-17 by default
+nostr dm alice "Hello" --nip04                # Legacy NIP-04
+nostr dm --watch --jsonl                      # Stream all DMs
+nostr dm --watch --since 1h --jsonl           # Catch up and stream
 ```
 
-### User Profiles
+### Query Events
 ```bash
-nostr profile [user]
-```
-
-Flags:
-- `--json` — Structured JSON output
-- `--refresh` — Force fetch from relays instead of cache
-
-Examples:
-```bash
-nostr profile alice
-nostr profile npub1... --json
-nostr profile alice@example.com --refresh --json
-```
-
-### Manage Profiles
-```bash
-nostr accounts              # List all local accounts
-nostr accounts rm [name]    # Remove a local account
+nostr events --kinds <kinds> [flags]
 ```
 
 Flags:
-- `--json` — JSON output for list command
-
-### Follow Management
-```bash
-nostr follow <user>        # Follow a user
-nostr unfollow <user>      # Unfollow a user
-nostr following            # List users you follow
-```
+- `--kinds <n,n,...>` — Event kinds, comma-separated
+- `--since <time>` / `--until <time>` — Time range
+- `--author <user>` — Filter by author
+- `--limit <n>` — Max events (default: 50)
+- `--decrypt` — Decrypt kind 4 DMs
+- `--watch` — Live-stream events
+- `--filter key=value` — Tag filter (repeatable)
+- `--me` — Shortcut for `--filter "p=<your_pubkey>"`
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
 
 Examples:
 ```bash
-nostr follow alice
-nostr unfollow npub1...
-nostr following --json
+nostr events --kinds 1 --since 1h
+nostr events --kinds 4 --since 24h --decrypt --jsonl
+nostr events --watch --kinds 4 --me --decrypt --jsonl
+nostr events --watch --kinds 1 --filter "t=bitcoin" --jsonl
 ```
 
-### Relay Management
+### Create Raw Events
 ```bash
-nostr relays               # List configured relays
-nostr relays add <url>     # Add a relay (wss://... format)
-nostr relays rm <id|url|domain>  # Remove a relay (asks confirmation)
+nostr event new --kind <n> --content <text> [flags]
 ```
 
 Flags:
-- `--json` — JSON output with connection status and ping
-- `--relay <url|domain>` — Show a specific relay only
-- `--yes` / `-y` — Skip confirmation on `rm` (also skipped with `--json`)
+- `--kind <n>` — Event kind (required)
+- `--content <text>` — Content (required, `-` for stdin)
+- `--tag key=value` / `--tags '<json>'` — Tags
+- `--pow <n>` — Proof of work difficulty
+- `--dry-run` — Sign but don't publish
+- `--json` / `--jsonl` / `--raw` — Machine-readable output
 
-Examples:
+### Accounts & Profiles
 ```bash
-nostr relays --json
-nostr relays --relay nos.lol --json
-nostr relays add wss://relay.example.com
-nostr relays rm nos.lol -y
-nostr relays rm 1
+nostr profile [user]               # View profile
+nostr profile update               # Edit profile
+nostr accounts                     # List accounts
+nostr login --new                  # Generate keypair
+nostr login --nsec nsec1...        # Import key
+nostr switch [account]             # Switch account
 ```
 
-### Sync Events
+### Social
 ```bash
-nostr sync                 # Interactive relay selection and sync
-nostr sync --relay <url>   # Sync with a specific relay
-nostr sync --json          # Machine-readable sync output
+nostr follow <user>                # Follow
+nostr unfollow <user>              # Unfollow
+nostr following                    # List following
+nostr <user> --watch               # Stream notes
 ```
 
-Flags:
-- `--json` — Output sync results as JSON (syncs all relays, no interactive UI)
-- `--relay <url|domain>` — Sync with a specific relay only
-
-Examples:
+### Relays & Sync
 ```bash
-nostr sync --json
-nostr sync --relay nos.lol --json
-nostr sync --relay wss://nos.lol
+nostr relays                       # List relays
+nostr relays add wss://...         # Add relay
+nostr relays rm <id|url> -y        # Remove relay
+nostr sync --json                  # Sync events
 ```
 
 ### Aliases
 ```bash
-nostr alias <name> <user>    # Create an alias
-nostr aliases                 # List all aliases
-nostr alias rm <name>         # Remove an alias
-```
-
-Examples:
-```bash
-nostr alias alice npub1...
-nostr alias bob alice@example.com
-nostr aliases --json
-```
-
-### Account Management
-```bash
-nostr switch [account]    # Switch to a different profile
-nostr login               # Log in to a profile
-```
-
-Flags for login:
-- `--new` — Create a new key
-- `--nsec <key>` — Log in with nsec (hex-encoded private key)
-- `--generate` — Generate a new key
-
-Examples:
-```bash
-nostr login --new
-nostr login --nsec nsec1...
-nostr switch alice
-```
-
-### User Feed
-```bash
-nostr [user]
-```
-
-Flags:
-- `--watch` — Watch for new notes in real time
-- `--json` — JSON output
-- `--limit <n>` — Limit number of notes returned (default varies)
-- `--timeout <ms>` — Relay timeout
-
-Examples:
-```bash
-nostr alice
-nostr npub1... --json --limit 10
-nostr alice --watch
-```
-
-### NIP Specification Viewer
-```bash
-nostr nip<N>    # View NIP specification (e.g., nostr nip44)
-```
-
-Examples:
-```bash
-nostr nip44
-nostr nip05
+nostr alias <name> <user>          # Create alias
+nostr aliases                      # List aliases
+nostr alias rm <name>              # Remove alias
 ```
 
 ## Global Flags
 
-- `--account <npub|alias|username>` — Execute command under a specific account
-- `--timeout <ms>` — Relay timeout in milliseconds (default: 2000)
-- `--no-color` — Strip ANSI color codes
-- `--raw` — Output raw Nostr event as compact single-line JSON (wire format)
-- `--json` — Enriched JSON output, pretty-printed with colors on TTY
-- `--jsonl` — One JSON object per line, no formatting (for bot/pipe consumption)
-
-### `--raw` vs `--json` vs `--jsonl`
-
-- `--raw` returns the **standard Nostr event object** as a single compact JSON line — the exact wire format relays receive. Useful for piping into other nostr tools.
-- `--json` returns an **enriched object** with the event plus metadata (relay publish status, timing). Pretty-printed with syntax colors when output is a terminal.
-- `--jsonl` returns the same enriched object as `--json` but as a **single line per event** with no formatting. Ideal for bots and streaming pipelines.
+| Flag | Description |
+|------|-------------|
+| `--account <npub\|alias\|username>` | Execute command under a specific account |
+| `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
+| `--no-color` | Disable colored output |
+| `--json` | Enriched JSON output |
+| `--jsonl` | One JSON per line (bots/piping) |
+| `--raw` | Raw Nostr event JSON |
 
 ## User Resolution
 
-In commands accepting a `<user>` argument, you can specify:
-- **npub format**: `npub1...` (long form Nostr public key)
-- **Alias**: A local alias created with `nostr alias`
-- **NIP-05**: `user@domain.com` (DNS-based user identifier)
+- **npub**: `npub1...`
+- **Alias**: local alias
+- **NIP-05**: `user@domain.com`
 
-## Best Practices for Scriptable Usage
+## Bot/Agent Patterns
 
-### Output Parsing
+### Monitor and respond to DMs
 ```bash
-# Raw event — compact single-line JSON (wire format)
-nostr post "Message" --raw | jq '.id'
-
-# Enriched JSON — pretty-printed with colors on TTY
-nostr post "Message" --json
-
-# JSONL — one compact JSON line per event (for pipes/bots)
-nostr post "Message" --jsonl | jq '.relays[] | select(.ok) | .url'
-
-# Piped input works with all output flags
-echo "Hello world" | nostr --raw
-echo "Hello world" | nostr --json
-```
-
-### Building a Bot
-Use `--jsonl` for streaming commands — one JSON object per line, easy to parse:
-```bash
-# Watch all incoming DMs as JSONL (one event per line, runs forever)
-nostr dm --watch --jsonl
-
-# Watch DMs from a specific user
-nostr dm alice --watch --jsonl
-
-# Stream all notes from followed accounts
-nostr --watch --jsonl
-
-# Example: auto-reply bot
 nostr dm --watch --jsonl | while read -r line; do
-  from=$(echo "$line" | jq -r '.from_npub')
-  msg=$(echo "$line" | jq -r '.message')
-  echo "Received from $from: $msg"
-  echo "pong" | nostr dm "$from" --jsonl
+  message=$(echo "$line" | jq -r .message)
+  sender=$(echo "$line" | jq -r .from_npub)
+  nostr dm "$sender" "Got: $message"
 done
 ```
 
-### Clean Output
-Use `--no-color` to avoid ANSI escape codes in piped output:
+### Stream events addressed to you
 ```bash
-nostr post "Message" --no-color
+nostr events --watch --kinds 4 --me --decrypt --jsonl
 ```
 
-### Posting Messages
-Post from argument or stdin:
+### Post with event ID capture
 ```bash
-# From argument
-nostr post "Hello Nostr"
-
-# From stdin
-echo "My message" | nostr post
-
-# Capture event ID
-EVENT_ID=$(nostr post "Message" --json | jq -r '.id')
+EVENT_ID=$(nostr post "Hello" --jsonl | jq -r '.id')
 ```
 
-### Sending DMs
-Send from argument or stdin:
+### Non-interactive setup
 ```bash
-# From argument
-nostr dm alice "Private message"
-
-# From stdin
-echo "Content" | nostr dm alice
-```
-
-### Login (Non-Interactive)
-```bash
-# New key
 nostr login --new
-
-# Existing nsec key
-nostr login --nsec nsec1abc...
+nostr relays add wss://relay.damus.io
+nostr post "Bot is online" --jsonl
 ```
-
-## Configuration
-
-- **Config directory**: `~/.nostr/`
-- **Sent events**: `~/.nostr/profiles/<npub>/events.jsonl`
-
-All accounts, aliases, and relay configurations are stored in the `~/.nostr/` directory.

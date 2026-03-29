@@ -8,6 +8,7 @@ import { Follow } from "./scenes/Follow";
 import { DM } from "./scenes/DM";
 import { Accounts } from "./scenes/Accounts";
 import { BotMode } from "./scenes/BotMode";
+import { LongForm } from "./scenes/LongForm";
 
 const FADE_FRAMES = 10; // ~0.33s fade
 
@@ -25,6 +26,7 @@ const scenes: SceneConfig[] = [
   { id: "dm", start: SCENES.dm.start, end: SCENES.dm.end, component: DM },
   { id: "accounts", start: SCENES.accounts.start, end: SCENES.accounts.end, component: Accounts },
   { id: "botMode", start: SCENES.botMode.start, end: SCENES.botMode.end, component: BotMode },
+  { id: "longForm", start: SCENES.longForm.start, end: SCENES.longForm.end, component: LongForm },
 ];
 
 const Scene: React.FC<{ scene: SceneConfig }> = ({ scene }) => {

@@ -5,23 +5,35 @@ import { TerminalRenderer } from "../TerminalRenderer";
 
 const lines: TerminalLine[] = [
   {
-    text: "nostr accounts",
+    text: "nostr",
     delay: 15,
     typewriter: true,
     color: COLORS.command,
     prefix: "prompt",
   },
-  { text: "1. alice  (npub1x7d...k3qf) ← active", delay: 50, color: COLORS.text, indent: 1 },
-  { text: "2. mybot  (npub1m4k...9h2a)", delay: 60, color: COLORS.textDim, indent: 1 },
-  { text: "", delay: 80 },
+  { text: "", delay: 40 },
   {
-    text: "nostr switch mybot",
-    delay: 100,
+    text: "/switch",
+    delay: 55,
     typewriter: true,
     color: COLORS.command,
-    prefix: "prompt",
+    prefix: "user",
+    prefixText: "xdamman",
   },
-  { text: "✓ Switched to mybot", delay: 135, color: COLORS.success },
+  { text: "", delay: 85 },
+  { text: "Switch account:", delay: 95, color: COLORS.text },
+  { text: "→ xdamman (npub1x7d...k3qf) ← active", delay: 108, color: COLORS.label, indent: 1 },
+  { text: "  mybot   (npub1m4k...9h2a)", delay: 118, color: COLORS.textDim, indent: 1 },
+  { text: "", delay: 140 },
+  { text: "✓ Switched to mybot", delay: 155, color: COLORS.success },
+  { text: "", delay: 170 },
+  {
+    text: "",
+    delay: 185,
+    color: COLORS.text,
+    prefix: "user",
+    prefixText: "mybot",
+  },
 ];
 
 export const Accounts: React.FC = () => {

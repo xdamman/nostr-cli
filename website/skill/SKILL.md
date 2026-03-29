@@ -1,11 +1,11 @@
 ---
 name: nostr-cli
-description: Post notes, send encrypted DMs, query events, create raw events, manage accounts and profiles, follow users, and interact with Nostr relays from the terminal.
+description: Post notes, send encrypted DMs (NIP-17/NIP-44), query events, create raw events, publish long-form articles (NIP-23), manage accounts, follow users, and interact with Nostr relays from the terminal.
 ---
 
 # nostr-cli
 
-A command-line tool for interacting with the Nostr protocol. Post notes, send encrypted DMs, query events with flexible filters, create raw events of any kind, manage accounts, profiles, and aliases, follow users, and manage relays — all from the terminal or within scripts.
+A command-line tool for interacting with the Nostr protocol. Post notes, send encrypted DMs (NIP-17 gift wrap / NIP-44 / NIP-04 legacy), query events with flexible filters, create raw events of any kind, publish long-form articles (NIP-23), manage accounts, profiles, and aliases, follow users, and manage relays — all from the terminal or within scripts.
 
 ## Installation Check and Setup
 
@@ -125,36 +125,43 @@ nostr reply note1abc... "Test" --dry-run --json
 nostr dm <user> [message]
 ```
 
-Send encrypted direct messages (NIP-17 gift wrap by default, NIP-04 legacy with `--nip04`). `<user>` can be an npub, alias, or NIP-05 address.
+Send encrypted direct messages. **NIP-17 gift-wrapped DMs** (NIP-44 encryption) are the default. Both NIP-04 and NIP-17 messages are received and decrypted automatically. Use `--nip04` for legacy NIP-04 encryption.
+
+`<user>` can be an npub, alias, or NIP-05 address.
 
 Modes:
 - `nostr dm <user> <message>` — Send one-shot DM
 - `echo "msg" | nostr dm <user>` — Send from stdin
-- `nostr dm <user>` — Interactive chat (TUI)
+- `nostr dm <user>` — Interactive chat (TUI, auto-detects DM protocol)
 - `nostr dm <user> --watch` — Stream messages with this user
-- `nostr dm --watch` — Stream ALL incoming DMs
+- `nostr dm --watch` — Stream ALL incoming DMs (NIP-04 + NIP-17)
 - `nostr dm` — Show aliases
 
 Flags:
+- `--nip04` — Force NIP-04 encryption (legacy)
 - `--watch` — Stream incoming DMs (no send prompt)
 - `--since <time>` — Start time for --watch: duration (1h, 7d), unix timestamp, or ISO date
+- `--no-decrypt` — Don't decrypt messages (decrypt is default for kind 4)
 - `--tag key=value` — Add extra tags (repeatable)
 - `--tags '<json>'` — Add extra tags as JSON array
 - `--json` / `--jsonl` / `--raw` — Machine-readable output
 
+The `protocol` field in JSON/JSONL output indicates which protocol was used (`"nip04"` or `"nip17"`).
+
 Watch mode stderr output:
 - Connection errors and subscription failures are logged to stderr
 - A "ready" line is printed to stderr when all relay goroutines are launched
-- Use `--since` with `--watch` to catch up on missed events
+- Use `--since` with `--watch` to catch up on missed events then continue streaming
 
 Examples:
 ```bash
-nostr dm alice "Hello"
+nostr dm alice "Hello"                        # NIP-17 by default
+nostr dm alice "Hello" --nip04                # Force NIP-04 legacy
 nostr dm alice "Hello" --tag subject=greeting
 echo "Alert" | nostr dm alice
 nostr dm --watch --jsonl | while read -r line; do echo "$line" | jq .message; done
 nostr dm alice --watch --jsonl
-nostr dm --watch --since 1h --jsonl
+nostr dm --watch --since 1h --jsonl           # Catch up and stream
 ```
 
 ### Query Events

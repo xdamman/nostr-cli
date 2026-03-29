@@ -31,8 +31,11 @@ export const TerminalRenderer: React.FC<TerminalRendererProps> = ({ lines }) => 
               transition: "opacity 0.1s",
             }}
           >
-            {line.isPrompt && (
+            {line.prefixType === "prompt" && (
               <span style={{ color: COLORS.prompt }}>$ </span>
+            )}
+            {line.prefixType === "user" && (
+              <span style={{ color: COLORS.prompt }}>{line.prefixText ?? "user"}&gt; </span>
             )}
             <span style={{ color: line.color }}>{displayText}</span>
             {line.showCursor && <Cursor />}

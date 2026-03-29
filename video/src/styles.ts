@@ -26,14 +26,15 @@ export const FONT = {
 } as const;
 
 export const FPS = 30;
-export const DURATION_FRAMES = 1650; // ~55 seconds
+export const DURATION_FRAMES = 1800; // ~60 seconds
 
 // Scene timing in frames
 export const SCENES = {
   login:    { start: 0,    end: 240 },   // 0-8s
-  post:     { start: 240,  end: 480 },   // 8-16s
-  follow:   { start: 480,  end: 780 },   // 16-26s
-  dm:       { start: 780,  end: 1020 },  // 26-34s
-  accounts: { start: 1020, end: 1260 },  // 34-42s
-  botMode:  { start: 1260, end: 1650 },  // 42-55s
+  post:     { start: 240,  end: 450 },   // 8-15s
+  follow:   { start: 450,  end: 690 },   // 15-23s
+  dm:       { start: 690,  end: 960 },   // 23-32s
+  accounts: { start: 960,  end: 1170 },  // 32-39s
+  botMode:  { start: 1170, end: 1440 },  // 39-48s
+  longForm: { start: 1440, end: 1800 },  // 48-60s
 } as const;

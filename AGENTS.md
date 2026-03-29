@@ -1,6 +1,6 @@
 # nostr-cli
 
-A command-line tool for the Nostr protocol. Post notes, send encrypted DMs, query events, create raw events of any kind, manage accounts and profiles, follow users, and interact with relays — all from the terminal.
+A command-line tool for the Nostr protocol. Post notes, send encrypted DMs (NIP-17/NIP-44), query events, create raw events of any kind, publish long-form articles (NIP-23), manage accounts and profiles, follow users, and interact with relays — all from the terminal.
 
 ## Install
 
@@ -15,7 +15,6 @@ Verify: `nostr version`
 ### Post & Message
 ```bash
 nostr post "Hello Nostr"                    # Post a note
-nostr post "Reply" --reply <event-id>       # Reply to an event (simple)
 nostr post "Tagged" --tag t=nostr           # Post with extra tags
 nostr post "Custom" --tags '[["t","nostr"]]' # Tags as JSON array
 nostr post "Test" --dry-run --json          # Sign but don't publish
@@ -28,9 +27,12 @@ nostr post --long --title "Quick Thoughts"               # Write in built-in edi
 nostr post -f article.md --draft                         # Publish as draft (kind 30024)
 nostr post -f updated.md --slug my-article               # Update existing article
 nostr post -f article.md --hashtag nostr --hashtag bitcoin  # With hashtags
+nostr post -f article.md --title "T" --summary "S" --image https://img.url/h.jpg
+
 nostr reply note1abc... "Great post!"       # Reply with NIP-10 threading
 nostr reply <eventId> "I agree" --tag t=nostr  # Reply with extra tags
 nostr reply nevent1... "Check" --tags '[["p","<hex>"]]'  # Reply with JSON tags
+
 nostr dm alice "Hello"                      # Send NIP-17 gift-wrapped DM (default)
 nostr dm alice "Hello" --nip04              # Send legacy NIP-04 encrypted DM
 nostr dm alice "Hello" --jsonl              # Send DM, JSONL output
@@ -115,12 +117,20 @@ nostr alias rm alice                        # Remove alias
 
 | Flag | Description |
 |------|-------------|
-| `--account <npub\|alias>` | Use a specific account |
+| `--account <npub\|alias>` | Use a specific account (replaces deprecated `--profile`) |
 | `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
 | `--no-color` | Disable ANSI color codes |
 | `--json` | Enriched JSON output (pretty-printed on TTY) |
 | `--jsonl` | One JSON object per line (for bots/piping) |
 | `--raw` | Raw Nostr event JSON (wire format) |
+
+## DM Protocol: NIP-17 and NIP-04
+
+- **NIP-17 gift-wrapped DMs** are the default for sending (NIP-44 encryption)
+- **Both NIP-04 and NIP-17** are received and decrypted automatically
+- Use `--nip04` to force legacy NIP-04 encryption
+- The `protocol` field in JSON/JSONL output indicates which protocol was used (`"nip04"` or `"nip17"`)
+- In interactive mode, the DM protocol is auto-detected per conversation
 
 ## Auto-Detection
 
@@ -135,13 +145,54 @@ A `<user>` can be:
 - `alice` — Local alias
 - `user@domain.com` — NIP-05 address
 
-## Best Practices
+## Bot / Agent Patterns
 
-- Use `--jsonl` for streaming/piping (one JSON object per line)
-- Use `--json` for human-readable structured output
-- Use `--raw` for wire-format events
-- Pipe content via stdin: `echo "msg" | nostr post`
-- Capture event IDs: `nostr post "msg" --jsonl | jq -r '.id'`
+### Stream DMs and respond
+```bash
+nostr dm --watch --jsonl | while read -r line; do
+  message=$(echo "$line" | jq -r .message)
+  sender=$(echo "$line" | jq -r .from_npub)
+  protocol=$(echo "$line" | jq -r .protocol)
+  nostr dm "$sender" "Got: $message"
+done
+```
+
+### Stream events addressed to you (bot inbox)
+```bash
+nostr events --watch --kinds 4 --me --decrypt --jsonl | while read -r line; do
+  echo "$line" | jq '{from: .author, msg: .content, protocol: .protocol}'
+done
+```
+
+### Stream with catch-up
+```bash
+# Get last hour of DMs, then continue streaming
+nostr dm --watch --since 1h --jsonl
+```
+
+### Filter by tags
+```bash
+nostr events --watch --kinds 1 --filter "t=bitcoin" --jsonl
+```
+
+### Post and capture event ID
+```bash
+EVENT_ID=$(nostr post "Hello" --jsonl | jq -r '.id')
+```
+
+### Use a specific account for bot operations
+```bash
+nostr post "Bot message" --account mybot --jsonl
+nostr dm alice "Alert" --account mybot
+```
+
+### Non-interactive setup
+```bash
+nostr login --new
+nostr relays add wss://relay.damus.io
+nostr relays add wss://nos.lol
+nostr post "Bot is online" --jsonl
+```
 
 ## Resources
 
