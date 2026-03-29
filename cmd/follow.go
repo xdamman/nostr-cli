@@ -22,7 +22,10 @@ import (
 	"golang.org/x/term"
 )
 
-var followingRefreshFlag bool
+var (
+	followingRefreshFlag bool
+	followAliasFlag      string
+)
 
 var followCmd = &cobra.Command{
 	Use:     "follow <account>",
@@ -77,6 +80,7 @@ Examples:
 }
 
 func init() {
+	followCmd.Flags().StringVar(&followAliasFlag, "alias", "", "Set a local alias for this user")
 	followingCmd.Flags().BoolVar(&followingRefreshFlag, "refresh", false, "Force refresh from relays")
 	rootCmd.AddCommand(followCmd)
 	rootCmd.AddCommand(unfollowCmd)
@@ -165,10 +169,28 @@ func runFollow(cmd *cobra.Command, args []string) error {
 
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
 
-	if rawFlag {
-		_, _ = ui.PublishEventSilent(npub, *contacts, relays, timeout)
+	if rawFlag || jsonFlag || jsonlFlag {
+		_, pubErr := ui.PublishEventSilent(npub, *contacts, relays, timeout)
 		cacheFollowingFromTags(npub, contacts.Tags)
-		ui.PrintRawEvent(*contacts)
+		if rawFlag {
+			printRaw(contacts)
+		} else {
+			result := map[string]interface{}{
+				"ok":              pubErr == nil,
+				"action":          "follow",
+				"user":            targetNpub,
+				"following_count": len(contacts.Tags),
+				"event_id":        contacts.ID,
+			}
+			if pubErr != nil {
+				result["error"] = pubErr.Error()
+			}
+			if jsonlFlag {
+				printJSONL(result)
+			} else {
+				printJSON(result)
+			}
+		}
 		return nil
 	}
 
@@ -181,21 +203,6 @@ func runFollow(cmd *cobra.Command, args []string) error {
 
 	// Update following cache
 	cacheFollowingFromTags(npub, contacts.Tags)
-
-	if jsonFlag || jsonlFlag {
-		result := map[string]interface{}{
-			"ok":              true,
-			"action":          "follow",
-			"user":            targetNpub,
-			"following_count": len(contacts.Tags),
-		}
-		if jsonlFlag {
-			printJSONL(result)
-		} else {
-			printJSON(result)
-		}
-		return nil
-	}
 
 	green.Printf("✓ Now following %s\n", targetNpub)
 
@@ -232,44 +239,43 @@ func runFollow(cmd *cobra.Command, args []string) error {
 		}
 
 		if existingAlias != "" {
-			dim := color.New(color.Faint)
-			dim.Printf("  Alias: %s\n", existingAlias)
-		} else {
+			if !rawFlag && !jsonFlag && !jsonlFlag {
+				dim := color.New(color.Faint)
+				dim.Printf("  Alias: %s\n", existingAlias)
+			}
+		} else if followAliasFlag != "" {
+			// Explicit --alias flag
+			if err := config.SetAlias(npub, followAliasFlag, targetNpub); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
+			} else if !rawFlag && !jsonFlag && !jsonlFlag {
+				green.Printf("✓ Alias %s → %s\n", followAliasFlag, targetNpub)
+			}
+		} else if term.IsTerminal(int(os.Stdin.Fd())) && !rawFlag && !jsonFlag && !jsonlFlag {
+			// Interactive: prompt for alias
 			defaultAlias := ""
 			if defaultName != "" {
 				defaultAlias = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(defaultName), " ", "-"))
 			}
-
-			// Non-interactive: auto-accept default alias
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				if defaultAlias != "" {
-					if err := config.SetAlias(npub, defaultAlias, targetNpub); err != nil {
+			if defaultAlias != "" {
+				fmt.Printf("Create an alias for this user [%s]: ", defaultAlias)
+			} else {
+				fmt.Print("Create an alias for this user (enter to skip): ")
+			}
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				alias := strings.TrimSpace(scanner.Text())
+				if alias == "" && defaultAlias != "" {
+					alias = defaultAlias
+				}
+				if alias != "" {
+					if err := config.SetAlias(npub, alias, targetNpub); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
 					} else {
-						green.Printf("✓ Alias %s → %s\n", defaultAlias, targetNpub)
-					}
-				}
-			} else {
-				if defaultAlias != "" {
-					fmt.Printf("Create an alias for this user [%s]: ", defaultAlias)
-				} else {
-					fmt.Print("Create an alias for this user (enter to skip): ")
-				}
-				scanner := bufio.NewScanner(os.Stdin)
-				if scanner.Scan() {
-					alias := strings.TrimSpace(scanner.Text())
-					if alias == "" && defaultAlias != "" {
-						alias = defaultAlias
-					}
-					if alias != "" {
-						if err := config.SetAlias(npub, alias, targetNpub); err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
-						} else {
-							green.Printf("✓ Alias %s → %s\n", alias, targetNpub)
-						}
+						green.Printf("✓ Alias %s → %s\n", alias, targetNpub)
 					}
 				}
 			}
+			// Non-interactive without --alias: skip alias silently
 		}
 	}
 
