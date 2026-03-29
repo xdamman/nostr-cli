@@ -100,13 +100,33 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Determine OS and arch
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+	tarball := fmt.Sprintf("nostr_%s_%s.tar.gz", goos, goarch)
+	downloadURL := fmt.Sprintf("https://github.com/xdamman/nostr-cli/releases/download/%s/%s", latest.TagName, tarball)
+
+	// HEAD request to get size
+	var sizeMB float64
+	headResp, headErr := client.Head(downloadURL)
+	if headErr == nil && headResp.StatusCode == 200 && headResp.ContentLength > 0 {
+		sizeMB = float64(headResp.ContentLength) / (1024 * 1024)
+	}
+	if headResp != nil {
+		headResp.Body.Close()
+	}
+
 	// Show latest version
 	fmt.Println()
 	fmt.Println(label("Latest version:"))
-	fmt.Printf("  Version: %s\n", latest.TagName)
-	fmt.Printf("  Date:    %s\n", latest.PublishedAt)
+	fmt.Printf("  Version:  %s\n", latest.TagName)
+	fmt.Printf("  Date:     %s\n", latest.PublishedAt)
 	if latest.Name != "" {
-		fmt.Printf("  Name:    %s\n", latest.Name)
+		fmt.Printf("  Name:     %s\n", latest.Name)
+	}
+	fmt.Printf("  File:     %s\n", tarball)
+	if sizeMB > 0 {
+		fmt.Printf("  Size:     %.1f MB\n", sizeMB)
 	}
 
 	if !updateYesFlag {
@@ -120,24 +140,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine OS and arch
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-
-	tarball := fmt.Sprintf("nostr_%s_%s.tar.gz", goos, goarch)
-	downloadURL := fmt.Sprintf("https://github.com/xdamman/nostr-cli/releases/download/%s/%s", latest.TagName, tarball)
-
-	// HEAD request to get size before downloading
-	headResp, headErr := client.Head(downloadURL)
-	if headErr == nil && headResp.StatusCode == 200 && headResp.ContentLength > 0 {
-		sizeMB := float64(headResp.ContentLength) / (1024 * 1024)
-		fmt.Printf("\nDownloading %s (%.1f MB)...\n", tarball, sizeMB)
-	} else {
-		fmt.Printf("\nDownloading %s...\n", tarball)
-	}
-	if headResp != nil {
-		headResp.Body.Close()
-	}
+	fmt.Println("\nDownloading...")
 
 	resp, err = client.Get(downloadURL)
 	if err != nil {
