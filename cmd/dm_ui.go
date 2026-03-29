@@ -183,6 +183,8 @@ type dmModel struct {
 	targetName string
 	relays     []string
 	quitting   bool
+	useNip04   bool   // true = NIP-04, false = NIP-17
+	protoLabel string // "NIP-17" or "NIP-04 — peer uses legacy protocol"
 
 	// Mention autocomplete
 	mentionCandidates []ui.MentionCandidate
@@ -306,7 +308,7 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedMentions = nil
 		}
 
-		if dmNip04Flag {
+		if m.useNip04 {
 			// Legacy NIP-04 encrypt + kind 4
 			sharedSecret := generateSharedSecret(m.skHex, m.targetHex)
 			ciphertext, err := nip04.Encrypt(content, sharedSecret)
@@ -571,7 +573,11 @@ func (m dmModel) renderDMStatus() string {
 	if m.status != "" {
 		return dimStyle.Render("  " + m.status)
 	}
-	hint := fmt.Sprintf("enter to send encrypted message to %s over %d relays, ctrl+c to exit", m.targetName, len(m.relays))
+	proto := m.protoLabel
+	if proto == "" {
+		proto = "NIP-17"
+	}
+	hint := fmt.Sprintf("Connected to %s (%s) · %d relays · ctrl+c to exit", m.targetName, proto, len(m.relays))
 	return dimStyle.Render("  " + hint)
 }
 
@@ -633,6 +639,22 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 	storedEvents, _ := cache.QueryDMEvents(npub, targetHex)
 	if len(storedEvents) > 0 {
 		m.feed.addEvents(storedEvents)
+	}
+
+	// Auto-detect DM protocol from history
+	if dmNip04Flag {
+		// Explicit --nip04 flag overrides everything
+		m.useNip04 = true
+		m.protoLabel = "NIP-04"
+	} else {
+		// Check last received message's protocol
+		detectedNip04 := detectDMProtocol(storedEvents, myHex, targetHex, skHex)
+		m.useNip04 = detectedNip04
+		if detectedNip04 {
+			m.protoLabel = "NIP-04 — peer uses legacy protocol"
+		} else {
+			m.protoLabel = "NIP-17"
+		}
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -822,4 +844,48 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 	cancel()
 	dmProgram = nil
 	return nil
+}
+
+// detectDMProtocol examines stored DM events and returns true if the last
+// received message from the target used NIP-04 (kind 4). Returns false (NIP-17)
+// if the last received message is a gift wrap (kind 1059) or if there's no history.
+func detectDMProtocol(events []nostr.Event, myHex, targetHex, skHex string) bool {
+	// Sort by CreatedAt descending to find the most recent
+	type scored struct {
+		kind      int
+		createdAt nostr.Timestamp
+	}
+	var candidates []scored
+
+	for _, ev := range events {
+		if ev.Kind == nostr.KindEncryptedDirectMessage {
+			// NIP-04: check if it's from the target
+			if ev.PubKey == targetHex {
+				candidates = append(candidates, scored{kind: 4, createdAt: ev.CreatedAt})
+			}
+		} else if ev.Kind == nostr.KindGiftWrap {
+			// NIP-17: unwrap to check sender
+			rumor, err := crypto.UnwrapGiftWrapDM(ev, skHex)
+			if err != nil {
+				continue
+			}
+			if rumor.PubKey == targetHex {
+				candidates = append(candidates, scored{kind: 1059, createdAt: ev.CreatedAt})
+			}
+		}
+	}
+
+	if len(candidates) == 0 {
+		return false // No history → default to NIP-17
+	}
+
+	// Find the most recent received message
+	latest := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.createdAt > latest.createdAt {
+			latest = c
+		}
+	}
+
+	return latest.kind == 4 // NIP-04
 }

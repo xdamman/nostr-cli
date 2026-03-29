@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/cobra"
+	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/nip05"
@@ -279,7 +281,11 @@ func printProfileFields(npub string, meta *profile.Metadata, label func(a ...int
 	printColorField(label, "Website", meta.Website)
 	printColorField(label, "Lightning", meta.LUD16)
 
-	relays, _ := config.LoadRelaysWithFallback(npub)
+	// Use cached relays only — no network fetch for display
+	relays, err := config.LoadRelays(npub)
+	if err != nil {
+		relays, _ = config.LoadCachedRelays(npub)
+	}
 	if len(relays) > 0 {
 		fmt.Printf("%-14s\n", label("Relays:"))
 		for _, r := range relays {
@@ -289,6 +295,8 @@ func printProfileFields(npub string, meta *profile.Metadata, label func(a ...int
 				dim.Printf("  %s\n", r)
 			}
 		}
+	} else if !profileRefreshFlag {
+		dim.Printf("%-14s %s\n", label("Relays:"), "No relays cached (use --refresh to fetch)")
 	}
 }
 
@@ -459,17 +467,48 @@ func runProfileRm(cmd *cobra.Command, args []string) error {
 }
 
 // printNIP05Field prints the NIP-05 field with verification status.
+// Uses cached verification result when available (< 24h old).
+// Only verifies on --refresh; otherwise shows the address without ✓/✗.
 func printNIP05Field(label func(a ...interface{}) string, nip05Addr string, pubHex string) {
 	if nip05Addr == "" {
 		return
 	}
 	green := color.New(color.FgGreen).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
 
-	verified := nip05.Verify(nip05Addr, pubHex)
-	if verified {
-		fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, green("✓"))
-	} else {
-		fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, red("✗"))
+	// Derive npub for cache lookup
+	npubForCache := ""
+	if npub, err := nip19.EncodePublicKey(pubHex); err == nil {
+		npubForCache = npub
 	}
+
+	if profileRefreshFlag {
+		// Force verify and cache the result
+		verified := nip05.Verify(nip05Addr, pubHex)
+		if npubForCache != "" {
+			_ = cache.SaveNIP05Cache(npubForCache, nip05Addr, verified)
+		}
+		if verified {
+			fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, green("✓"))
+		} else {
+			fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, red("✗"))
+		}
+		return
+	}
+
+	// Try cached result (< 24h)
+	if npubForCache != "" {
+		if cached := cache.LoadNIP05Cache(npubForCache, 24*time.Hour); cached != nil && cached.NIP05 == nip05Addr {
+			if cached.Verified {
+				fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, green("✓"))
+			} else {
+				fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, red("✗"))
+			}
+			return
+		}
+	}
+
+	// No cached result and not refreshing — show without verification
+	fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, dim("(unverified)"))
 }
