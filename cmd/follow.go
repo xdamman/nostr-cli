@@ -19,6 +19,7 @@ import (
 	"github.com/xdamman/nostr-cli/internal/profile"
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"github.com/xdamman/nostr-cli/internal/ui"
+	"golang.org/x/term"
 )
 
 var followingRefreshFlag bool
@@ -238,22 +239,34 @@ func runFollow(cmd *cobra.Command, args []string) error {
 			if defaultName != "" {
 				defaultAlias = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(defaultName), " ", "-"))
 			}
-			if defaultAlias != "" {
-				fmt.Printf("Create an alias for this user [%s]: ", defaultAlias)
-			} else {
-				fmt.Print("Create an alias for this user (enter to skip): ")
-			}
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				alias := strings.TrimSpace(scanner.Text())
-				if alias == "" && defaultAlias != "" {
-					alias = defaultAlias
-				}
-				if alias != "" {
-					if err := config.SetAlias(npub, alias, targetNpub); err != nil {
+
+			// Non-interactive: auto-accept default alias
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				if defaultAlias != "" {
+					if err := config.SetAlias(npub, defaultAlias, targetNpub); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
 					} else {
-						green.Printf("✓ Alias %s → %s\n", alias, targetNpub)
+						green.Printf("✓ Alias %s → %s\n", defaultAlias, targetNpub)
+					}
+				}
+			} else {
+				if defaultAlias != "" {
+					fmt.Printf("Create an alias for this user [%s]: ", defaultAlias)
+				} else {
+					fmt.Print("Create an alias for this user (enter to skip): ")
+				}
+				scanner := bufio.NewScanner(os.Stdin)
+				if scanner.Scan() {
+					alias := strings.TrimSpace(scanner.Text())
+					if alias == "" && defaultAlias != "" {
+						alias = defaultAlias
+					}
+					if alias != "" {
+						if err := config.SetAlias(npub, alias, targetNpub); err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: could not set alias: %v\n", err)
+						} else {
+							green.Printf("✓ Alias %s → %s\n", alias, targetNpub)
+						}
 					}
 				}
 			}
