@@ -752,8 +752,7 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 
 	case "dm":
 		if len(args) == 0 {
-			// Show list of people to DM
-			printDMTargets(npub)
+			fmt.Printf("__DM_SELECT__")
 			return
 		}
 		if len(args) == 1 {
@@ -841,6 +840,11 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 		}
 
 	case "switch":
+		if len(args) == 0 {
+			fmt.Printf("__SWITCH_START__")
+			return
+		}
+		// Direct switch
 		entries, err := listSwitchableProfiles()
 		if err != nil {
 			color.Red("Error: %v", err)
@@ -850,42 +854,19 @@ func executeSlashCommand(npub, myHex, line string, relays []string, statusCh cha
 			fmt.Println("No other accounts found. Run 'nostr login' to add one.")
 			return
 		}
-		if len(args) > 0 {
-			// Direct switch
-			if err := switchToTarget(args[0], npub, color.New(color.FgGreen)); err != nil {
-				color.Red("Error: %v", err)
-				return
-			}
-			// Update shell prompt name
-			newNpub, _ := config.ActiveProfile()
-			newHex, _ := crypto.NpubToHex(newNpub)
-			if name := cache.ResolveNameByHex(newHex); name != "" {
-				shellPromptName = name
-			} else if meta, _ := profile.LoadCached(newNpub); meta != nil && meta.Name != "" {
-				shellPromptName = meta.Name
-			} else {
-				shellPromptName = newNpub[:16] + "..."
-			}
+		if err := switchToTarget(args[0], npub, color.New(color.FgGreen)); err != nil {
+			color.Red("Error: %v", err)
 			return
 		}
-		// List available accounts
-		cyanFn := color.New(color.FgCyan).SprintFunc()
-		dimFn := color.New(color.Faint).SprintFunc()
-		fmt.Println("Available accounts (use /switch <name> to switch):")
-		for _, e := range entries {
-			active := ""
-			if e.npub == npub {
-				active = " (active)"
-			}
-			if e.name != "" {
-				short := e.npub
-				if len(short) > 20 {
-					short = short[:20] + "..."
-				}
-				fmt.Printf("  %s %s%s\n", cyanFn(e.name), dimFn(short), active)
-			} else {
-				fmt.Printf("  %s%s\n", e.npub, active)
-			}
+		// Update shell prompt name
+		newNpub, _ := config.ActiveProfile()
+		newHex, _ := crypto.NpubToHex(newNpub)
+		if name := cache.ResolveNameByHex(newHex); name != "" {
+			shellPromptName = name
+		} else if meta, _ := profile.LoadCached(newNpub); meta != nil && meta.Name != "" {
+			shellPromptName = meta.Name
+		} else {
+			shellPromptName = newNpub[:16] + "..."
 		}
 
 	case "alias":
