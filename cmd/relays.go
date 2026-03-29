@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/ui"
-	"golang.org/x/term"
 )
 
 var (
@@ -399,215 +397,38 @@ func runRelaysRm(cmd *cobra.Command, args []string) error {
 // Users toggle with space, navigate with arrows/j/k, confirm with enter.
 // All checkboxes start unchecked. Returns sorted indices of selected relays, or nil if cancelled.
 func interactiveRelayPick(relays []string) []int {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return nil
-	}
-
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil
-	}
-	defer term.Restore(fd, oldState)
-
-	cyanFn := color.New(color.FgCyan).SprintFunc()
-	dimSprint := color.New(color.Faint).SprintFunc()
-	greenSprint := color.New(color.FgGreen).SprintFunc()
-	redSprint := color.New(color.FgRed).SprintFunc()
-
-	checked := make([]bool, len(relays))
-	cursor := 0
-	frame := 0
-
-	// Ping results
-	type pingResult struct {
-		idx    int
-		ok     bool
-		pingMs int
-	}
-	pingResults := make(map[int]pingResult)
-	pingCh := make(chan pingResult, len(relays))
+	items := make([]ui.CheckboxItem, len(relays))
 	for i, r := range relays {
-		go func(idx int, relayURL string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			start := time.Now()
-			relay, connErr := nostr.RelayConnect(ctx, relayURL)
-			elapsed := time.Since(start)
-			if connErr == nil {
+		host := r
+		if u, err := url.Parse(r); err == nil && u.Host != "" {
+			host = u.Host
+		}
+		items[i] = ui.CheckboxItem{Label: host}
+	}
+
+	result := ui.RunCheckboxPicker(ui.CheckboxPickerConfig{
+		Title: "Select relays to remove:",
+		Items: items,
+		OnReady: func(index int, statusCh chan<- string) {
+			go func() {
+				start := time.Now()
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				relay, err := nostr.RelayConnect(ctx, relays[index])
+				if err != nil {
+					statusCh <- "✗ timeout"
+					return
+				}
 				relay.Close()
-				pingCh <- pingResult{idx: idx, ok: true, pingMs: int(elapsed.Milliseconds())}
-			} else {
-				pingCh <- pingResult{idx: idx, ok: false}
-			}
-		}(i, r)
+				statusCh <- fmt.Sprintf("✓ %dms", time.Since(start).Milliseconds())
+			}()
+		},
+	})
+
+	if result.Cancelled {
+		return nil
 	}
-
-	pingDone := false
-
-	render := func() {
-		fmt.Print("\r\033[J")
-		for i, r := range relays {
-			host := relayHost(r)
-			var check, status string
-
-			if pr, ok := pingResults[i]; ok {
-				if checked[i] {
-					check = greenSprint("[✓]")
-				} else {
-					check = dimSprint("[ ]")
-				}
-				if pr.ok {
-					status = dimSprint(fmt.Sprintf("  %dms", pr.pingMs))
-				} else {
-					status = redSprint("  unreachable")
-				}
-			} else {
-				if checked[i] {
-					check = greenSprint("[✓]")
-				} else {
-					f := ui.SpinnerFrames[frame%len(ui.SpinnerFrames)]
-					check = dimSprint(fmt.Sprintf("[%s]", f))
-				}
-			}
-
-			var line string
-			if i == cursor {
-				line = fmt.Sprintf("  %s %s%s", check, cyanFn(host), status)
-			} else {
-				line = fmt.Sprintf("  %s %s%s", check, dimSprint(host), status)
-			}
-			fmt.Printf("%s\r\n", line)
-		}
-
-		selectedCount := 0
-		for _, c := range checked {
-			if c {
-				selectedCount++
-			}
-		}
-		var hint string
-		if selectedCount == 0 {
-			hint = "  ↑/↓ navigate, space toggle, ctrl+c to cancel"
-		} else if selectedCount == 1 {
-			hint = fmt.Sprintf("  ↑/↓ navigate, space toggle, enter to remove %d relay, ctrl+c to cancel", selectedCount)
-		} else {
-			hint = fmt.Sprintf("  ↑/↓ navigate, space toggle, enter to remove %d relays, ctrl+c to cancel", selectedCount)
-		}
-		fmt.Printf("\r\n%s\r\n", dimSprint(hint))
-	}
-
-	lines := len(relays) + 2
-
-	rerender := func() {
-		fmt.Printf("\033[%dA", lines)
-		render()
-	}
-
-	render()
-
-	// Input reader goroutine
-	inputCh := make(chan byte, 1)
-	go func() {
-		buf := make([]byte, 1)
-		for {
-			if _, err := os.Stdin.Read(buf); err != nil {
-				close(inputCh)
-				return
-			}
-			inputCh <- buf[0]
-		}
-	}()
-
-	readNext := func() (byte, bool) {
-		select {
-		case b, ok := <-inputCh:
-			return b, ok
-		case <-time.After(20 * time.Millisecond):
-			return 0, false
-		}
-	}
-
-	ticker := time.NewTicker(80 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case res, ok := <-pingCh:
-			if !ok {
-				pingDone = true
-				pingCh = nil
-			} else {
-				pingResults[res.idx] = res
-				if len(pingResults) == len(relays) {
-					pingDone = true
-				}
-			}
-			rerender()
-
-		case b, ok := <-inputCh:
-			if !ok {
-				fmt.Print("\r\033[J")
-				return nil
-			}
-			switch b {
-			case 13: // enter
-				fmt.Print("\r\033[J")
-				var selected []int
-				for i := range relays {
-					if checked[i] {
-						selected = append(selected, i)
-					}
-				}
-				if len(selected) == 0 {
-					return nil
-				}
-				return selected
-			case ' ':
-				checked[cursor] = !checked[cursor]
-				rerender()
-			case 3: // ctrl-c
-				fmt.Print("\r\033[J")
-				return nil
-			case 27: // ESC — arrow key sequence
-				b2, ok := readNext()
-				if !ok || b2 != '[' {
-					break
-				}
-				b3, ok := readNext()
-				if !ok {
-					break
-				}
-				switch b3 {
-				case 'A': // up
-					if cursor > 0 {
-						cursor--
-					}
-				case 'B': // down
-					if cursor < len(relays)-1 {
-						cursor++
-					}
-				}
-				rerender()
-			case 'k':
-				if cursor > 0 {
-					cursor--
-				}
-				rerender()
-			case 'j':
-				if cursor < len(relays)-1 {
-					cursor++
-				}
-				rerender()
-			}
-
-		case <-ticker.C:
-			if !pingDone {
-				frame++
-				rerender()
-			}
-		}
-	}
+	return result.Selected
 }
 
 // publishRelayList publishes a NIP-65 (kind 10002) relay list metadata event.
