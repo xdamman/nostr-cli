@@ -48,6 +48,24 @@ func init() {
 }
 
 func runVersion(cmd *cobra.Command, args []string) {
+	if rawFlag || jsonFlag || jsonlFlag {
+		info := map[string]string{
+			"version": Version,
+			"commit":  CommitSHA,
+			"date":    CommitDate,
+			"message": CommitMsg,
+			"os":      runtime.GOOS,
+			"arch":    runtime.GOARCH,
+		}
+		if rawFlag {
+			printRaw(info)
+		} else if jsonlFlag {
+			printJSONL(info)
+		} else {
+			printJSON(info)
+		}
+		return
+	}
 	label := color.New(color.FgCyan).SprintFunc()
 	fmt.Printf("nostr %s\n", Version)
 	fmt.Printf("%s %s\n", label("Commit:"), CommitSHA)
@@ -75,7 +93,9 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Date:    %s\n", CommitDate)
 
 	// Fetch latest release
-	fmt.Println("\nChecking for updates...")
+	if !jsonFlag && !jsonlFlag && !rawFlag {
+		fmt.Println("\nChecking for updates...")
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get("https://api.github.com/repos/xdamman/nostr-cli/releases/latest")
 	if err != nil {
@@ -96,6 +116,21 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	currentVersion := strings.TrimPrefix(Version, "v")
 
 	if latestVersion == currentVersion {
+		if jsonFlag || jsonlFlag || rawFlag {
+			result := map[string]interface{}{
+				"current_version": Version,
+				"latest_version":  latest.TagName,
+				"up_to_date":      true,
+			}
+			if rawFlag {
+				printRaw(result)
+			} else if jsonlFlag {
+				printJSONL(result)
+			} else {
+				printJSON(result)
+			}
+			return nil
+		}
 		green.Println("\nYou're up to date.")
 		return nil
 	}
@@ -116,17 +151,24 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		headResp.Body.Close()
 	}
 
-	// Show latest version
-	fmt.Println()
-	fmt.Println(label("Latest version:"))
-	fmt.Printf("  Version:  %s\n", latest.TagName)
-	fmt.Printf("  Date:     %s\n", latest.PublishedAt)
-	if latest.Name != "" {
-		fmt.Printf("  Name:     %s\n", latest.Name)
+	// JSON mode: auto-confirm and output result
+	if jsonFlag || jsonlFlag || rawFlag {
+		updateYesFlag = true
 	}
-	fmt.Printf("  File:     %s\n", tarball)
-	if sizeMB > 0 {
-		fmt.Printf("  Size:     %.1f MB\n", sizeMB)
+
+	// Show latest version
+	if !jsonFlag && !jsonlFlag && !rawFlag {
+		fmt.Println()
+		fmt.Println(label("Latest version:"))
+		fmt.Printf("  Version:  %s\n", latest.TagName)
+		fmt.Printf("  Date:     %s\n", latest.PublishedAt)
+		if latest.Name != "" {
+			fmt.Printf("  Name:     %s\n", latest.Name)
+		}
+		fmt.Printf("  File:     %s\n", tarball)
+		if sizeMB > 0 {
+			fmt.Printf("  Size:     %.1f MB\n", sizeMB)
+		}
 	}
 
 	if !updateYesFlag {
@@ -186,6 +228,25 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if err := os.Rename(tmpPath, execPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("cannot replace binary: %w", err)
+	}
+
+	if jsonFlag || jsonlFlag || rawFlag {
+		result := map[string]interface{}{
+			"current_version": Version,
+			"latest_version":  latest.TagName,
+			"up_to_date":      false,
+			"updated":         true,
+			"file":            tarball,
+			"size_mb":         fmt.Sprintf("%.1f", sizeMB),
+		}
+		if rawFlag {
+			printRaw(result)
+		} else if jsonlFlag {
+			printJSONL(result)
+		} else {
+			printJSON(result)
+		}
+		return nil
 	}
 
 	green.Printf("\nUpdated to %s\n", latest.TagName)
