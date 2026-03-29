@@ -11,12 +11,13 @@ import (
 	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/ui"
-	"golang.org/x/term"
 )
 
 var (
@@ -307,206 +308,84 @@ func fetchRelayList(ctx context.Context, pubHex string, relayURLs []string) []st
 	return relays
 }
 
-// relayChecklist shows an interactive checkbox list for relays.
-// Returns the selected relays. Allows toggling with space, adding with 'a', continuing with enter.
+// relayChecklist shows an interactive checkbox list for relays using bubbletea.
+// Returns the selected relays. All relays are checked by default.
 func relayChecklist(relays []string) []string {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		// Non-interactive: return all
-		return relays
-	}
-
-	checked := make([]bool, len(relays))
-	for i := range checked {
-		checked[i] = true // all on by default
-	}
-	cursor := 0
-
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return relays
-	}
-	defer term.Restore(fd, oldState)
-
-	cyan := color.New(color.FgCyan).SprintFunc()
-	dim := color.New(color.Faint).SprintFunc()
-	green := color.New(color.FgGreen).SprintFunc()
-
-	relayHost := func(r string) string {
+	loginRelayHost := func(r string) string {
 		if u, err := url.Parse(r); err == nil && u.Host != "" {
 			return u.Host
 		}
 		return r
 	}
 
-	render := func() {
-		fmt.Print("\r\033[J")
-		for i, r := range relays {
-			check := green("[✓]")
-			if !checked[i] {
-				check = dim("[ ]")
-			}
-			label := relayHost(r)
-			if i == cursor {
-				fmt.Printf("  %s %s\r\n", check, cyan(label))
-			} else {
-				fmt.Printf("  %s %s\r\n", check, dim(label))
-			}
-		}
-		fmt.Printf("\r\n  %s\r\n", dim("space: toggle, a: add relay, enter: continue"))
-	}
-
-	render()
-
-	b := make([]byte, 1)
 	for {
-		if _, err := os.Stdin.Read(b); err != nil {
-			break
+		items := make([]ui.CheckboxItem, len(relays))
+		for i, r := range relays {
+			items[i] = ui.CheckboxItem{
+				Label:   loginRelayHost(r),
+				Checked: true,
+			}
+		}
+		// Add an "Add relay..." option at the bottom
+		items = append(items, ui.CheckboxItem{
+			Label:   "+ Add relay...",
+			Checked: false,
+		})
+
+		result := ui.RunCheckboxPicker(ui.CheckboxPickerConfig{
+			Title: "Select relays for your account:",
+			Items: items,
+		})
+
+		if result.Cancelled {
+			return relays // return all on cancel
 		}
 
-		switch b[0] {
-		case 13: // enter — continue
-			fmt.Print("\r\033[J")
-			var selected []string
-			for i, r := range relays {
-				if checked[i] {
-					selected = append(selected, r)
-				}
+		// Check if "Add relay..." was selected
+		addRelaySelected := false
+		for _, idx := range result.Selected {
+			if idx == len(relays) {
+				addRelaySelected = true
+				break
 			}
-			return selected
-		case ' ': // space — toggle
-			checked[cursor] = !checked[cursor]
-		case 'a': // add relay
-			fmt.Print("\r\033[J")
-			term.Restore(fd, oldState)
-			fmt.Print("  Relay URL (wss://...): ")
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				newRelay := strings.TrimSpace(scanner.Text())
+		}
+
+		if addRelaySelected {
+			// Prompt for new relay URL
+			inputResult := ui.RunInlineInput(ui.InlineInputConfig{
+				Prompt: "  Relay URL: ",
+				Hint:   "Enter a relay URL (wss://...)",
+			})
+			if !inputResult.Cancelled && inputResult.Text != "" {
+				newRelay := inputResult.Text
 				if strings.HasPrefix(newRelay, "wss://") || strings.HasPrefix(newRelay, "ws://") {
 					relays = append(relays, newRelay)
-					checked = append(checked, true)
 				}
 			}
-			oldState, _ = term.MakeRaw(fd)
-		case 3: // ctrl-c
-			fmt.Print("\r\033[J")
-			var selected []string
-			for i, r := range relays {
-				if checked[i] {
-					selected = append(selected, r)
-				}
-			}
-			return selected
-		case 27: // ESC / arrow keys
-			seq := make([]byte, 2)
-			n, _ := os.Stdin.Read(seq)
-			if n >= 2 && seq[0] == '[' {
-				switch seq[1] {
-				case 'A': // up
-					if cursor > 0 {
-						cursor--
-					}
-				case 'B': // down
-					if cursor < len(relays)-1 {
-						cursor++
-					}
-				}
-			} else if n == 1 && seq[0] == '[' {
-				if _, err := os.Stdin.Read(seq[:1]); err == nil {
-					switch seq[0] {
-					case 'A':
-						if cursor > 0 {
-							cursor--
-						}
-					case 'B':
-						if cursor < len(relays)-1 {
-							cursor++
-						}
-					}
-				}
-			}
-		case 'k': // vim up
-			if cursor > 0 {
-				cursor--
-			}
-		case 'j': // vim down
-			if cursor < len(relays)-1 {
-				cursor++
-			}
+			continue // re-show the picker with the new relay
 		}
 
-		// Re-render
-		lines := len(relays) + 2
-		fmt.Printf("\033[%dA", lines)
-		render()
+		// Collect selected relays (excluding the "Add relay..." option)
+		var selected []string
+		for _, idx := range result.Selected {
+			if idx < len(relays) {
+				selected = append(selected, relays[idx])
+			}
+		}
+		if len(selected) == 0 {
+			return relays // fallback: return all
+		}
+		return selected
 	}
-
-	return relays
 }
 
-// readMaskedInput reads input character by character in raw mode,
-// displaying • for all characters except the last 4.
+// readMaskedInput reads a secret input using bubbletea with masked display.
 func readMaskedInput() (string, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		// Fallback: read without masking
-		var line string
-		fmt.Scanln(&line)
-		return strings.TrimSpace(line), nil
+	result := ui.RunSecretInput(ui.SecretInputConfig{
+		Prompt: "Enter your nsec (leave blank to generate a new keypair): ",
+	})
+	if result.Cancelled {
+		return "", fmt.Errorf("interrupted")
 	}
-
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		var line string
-		fmt.Scanln(&line)
-		return strings.TrimSpace(line), nil
-	}
-	defer term.Restore(fd, oldState)
-
-	var buf []byte
-	b := make([]byte, 1)
-
-	for {
-		_, err := os.Stdin.Read(b)
-		if err != nil {
-			return string(buf), err
-		}
-
-		switch b[0] {
-		case 13, 10: // Enter
-			return string(buf), nil
-		case 3: // Ctrl-C
-			return "", fmt.Errorf("interrupted")
-		case 127, 8: // Backspace
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
-				redrawMasked(buf)
-			}
-		case 22: // Ctrl-V (paste) — just continue reading chars
-			continue
-		default:
-			if b[0] >= 32 {
-				buf = append(buf, b[0])
-				redrawMasked(buf)
-			}
-		}
-	}
-}
-
-// redrawMasked redraws the masked input: •••••last4
-func redrawMasked(buf []byte) {
-	display := maskSecret(string(buf))
-	// Clear the line from cursor start, reprint prompt + masked value
-	fmt.Printf("\r\033[K")
-	fmt.Printf("Enter your nsec (leave blank to generate a new keypair): %s", display)
-}
-
-// maskSecret returns a masked version showing only the last 4 characters.
-func maskSecret(s string) string {
-	if len(s) <= 4 {
-		return s
-	}
-	masked := strings.Repeat("•", len(s)-4)
-	return masked + s[len(s)-4:]
+	return result.Value, nil
 }

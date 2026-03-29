@@ -409,18 +409,18 @@ func interactiveRelayPick(relays []string) []int {
 	result := ui.RunCheckboxPicker(ui.CheckboxPickerConfig{
 		Title: "Select relays to remove:",
 		Items: items,
-		OnReady: func(index int, statusCh chan<- string) {
+		OnReady: func(index int, statusCh chan<- ui.CheckboxStatusUpdate) {
 			go func() {
 				start := time.Now()
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
 				relay, err := nostr.RelayConnect(ctx, relays[index])
 				if err != nil {
-					statusCh <- "✗ timeout"
+					statusCh <- ui.CheckboxStatusUpdate{Status: "✗ timeout"}
 					return
 				}
 				relay.Close()
-				statusCh <- fmt.Sprintf("✓ %dms", time.Since(start).Milliseconds())
+				statusCh <- ui.CheckboxStatusUpdate{Status: fmt.Sprintf("✓ %dms", time.Since(start).Milliseconds())}
 			}()
 		},
 	})

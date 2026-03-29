@@ -9,11 +9,13 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	"github.com/xdamman/nostr-cli/internal/resolve"
-	"golang.org/x/term"
+	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
 var switchCmd = &cobra.Command{
@@ -395,10 +397,10 @@ func interactiveSelect(entries []profileEntry, selected int, footer ...string) (
 	if len(footer) > 0 {
 		footerText = footer[0]
 	}
-	nameW, aliasW, npubW := columnWidths(entries)
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		// Not a terminal — fall back to listing
+		nameW, aliasW, npubW := columnWidths(entries)
 		cyan := color.New(color.FgCyan).SprintFunc()
 		bold := color.New(color.Bold).SprintFunc()
 		dim := color.New(color.Faint).SprintFunc()
@@ -419,95 +421,36 @@ func interactiveSelect(entries []profileEntry, selected int, footer ...string) (
 		return -1, nil
 	}
 
-	// Put terminal in raw mode
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		return -1, err
-	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
+	activeNpub, _ := config.ActiveProfile()
 
-	cyan := color.New(color.FgCyan).SprintFunc()
-	dim := color.New(color.Faint).SprintFunc()
-
-	render := func() {
-		// Move cursor to start and clear
-		fmt.Print("\r\033[J") // clear from cursor to end of screen
-		fmt.Print("Select an account (arrow keys to move, enter to select, q to cancel):\r\n\r\n")
-		for i, e := range entries {
-			line := formatEntry(e, nameW, aliasW, npubW, cyan, dim, i == selected)
-			if i == selected {
-				fmt.Printf("  > %s\r\n", line)
-			} else {
-				fmt.Printf("    %s\r\n", line)
-			}
+	items := make([]ui.ListPickerItem, len(entries))
+	for i, e := range entries {
+		label := e.name
+		if e.alias != "" {
+			label += " (" + e.alias + ")"
 		}
-		if footerText != "" {
-			fmt.Printf("\r\n  %s\r\n", dim(footerText))
+		sublabel := e.npub
+		if len(sublabel) > 20 {
+			sublabel = sublabel[:20] + "..."
+		}
+		if e.relayInfo != "" {
+			sublabel += "  " + e.relayInfo
+		}
+		items[i] = ui.ListPickerItem{
+			Label:    label,
+			Sublabel: sublabel,
+			Active:   e.npub == activeNpub,
 		}
 	}
 
-	render()
+	result := ui.RunListPicker(ui.ListPickerConfig{
+		Title:  "Select an account:",
+		Items:  items,
+		Footer: footerText,
+	})
 
-	b := make([]byte, 1)
-	for {
-		if _, err := os.Stdin.Read(b); err != nil {
-			return -1, err
-		}
-
-		switch b[0] {
-		case 13: // enter
-			fmt.Print("\r\033[J")
-			return selected, nil
-		case 'q', 3: // q or Ctrl-C
-			fmt.Print("\r\033[J")
-			return -1, nil
-		case 27: // ESC — could be arrow key or bare Esc
-			seq := make([]byte, 2)
-			n, _ := os.Stdin.Read(seq)
-			if n == 2 && seq[0] == '[' {
-				switch seq[1] {
-				case 'A':
-					if selected > 0 {
-						selected--
-					}
-				case 'B':
-					if selected < len(entries)-1 {
-						selected++
-					}
-				}
-			} else if n == 1 && seq[0] == '[' {
-				if _, err := os.Stdin.Read(seq[:1]); err == nil {
-					switch seq[0] {
-					case 'A':
-						if selected > 0 {
-							selected--
-						}
-					case 'B':
-						if selected < len(entries)-1 {
-							selected++
-						}
-					}
-				}
-			} else {
-				fmt.Print("\r\033[J")
-				return -1, nil
-			}
-		case 'k': // vim up
-			if selected > 0 {
-				selected--
-			}
-		case 'j': // vim down
-			if selected < len(entries)-1 {
-				selected++
-			}
-		}
-
-		// Re-render: move cursor up to overwrite
-		lines := len(entries) + 2 // header + entries
-		if footerText != "" {
-			lines += 2 // blank line + footer
-		}
-		fmt.Printf("\033[%dA", lines)
-		render()
+	if result.Cancelled {
+		return -1, nil
 	}
+	return result.Selected, nil
 }

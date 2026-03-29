@@ -15,13 +15,23 @@ type CheckboxItem struct {
 	Label    string
 	Sublabel string // e.g. ping result, shown dimmed
 	Active   bool   // e.g. mark current/active item
+	Checked  bool   // initial checked state
+}
+
+// CheckboxStatusUpdate carries a status update for a checkbox item.
+type CheckboxStatusUpdate struct {
+	Status     string // new sublabel text
+	SetChecked *bool  // if non-nil, override checked state
 }
 
 // CheckboxPickerConfig configures the checkbox picker.
 type CheckboxPickerConfig struct {
-	Title   string
-	Items   []CheckboxItem
-	OnReady func(index int, statusCh chan<- string) // async status updates per item (e.g. ping)
+	Title    string
+	Items    []CheckboxItem
+	OnReady  func(index int, statusCh chan<- CheckboxStatusUpdate) // async status updates per item
+	// StatusChs, if non-nil, overrides the internally-created status channels.
+	// Must have exactly len(Items) entries. Caller is responsible for feeding and closing them.
+	StatusChs []chan CheckboxStatusUpdate
 }
 
 // CheckboxPickerResult holds the result of a checkbox picker session.
@@ -32,8 +42,9 @@ type CheckboxPickerResult struct {
 
 // statusUpdateMsg delivers an async status update for a specific item.
 type statusUpdateMsg struct {
-	index  int
-	status string
+	index      int
+	status     string
+	setChecked *bool
 }
 
 // checkboxModel is the bubbletea model for the checkbox picker.
@@ -46,18 +57,19 @@ type checkboxModel struct {
 	cancelled bool
 
 	// channels for async status updates, one per item
-	statusChs []chan string
+	statusChs []chan CheckboxStatusUpdate
 }
 
 func newCheckboxModel(cfg CheckboxPickerConfig) checkboxModel {
 	n := len(cfg.Items)
 	checked := make([]bool, n)
 	sublabels := make([]string, n)
-	statusChs := make([]chan string, n)
+	statusChs := make([]chan CheckboxStatusUpdate, n)
 
 	for i, item := range cfg.Items {
+		checked[i] = item.Checked
 		sublabels[i] = item.Sublabel
-		statusChs[i] = make(chan string, 1)
+		statusChs[i] = make(chan CheckboxStatusUpdate, 1)
 	}
 
 	return checkboxModel{
@@ -71,13 +83,13 @@ func newCheckboxModel(cfg CheckboxPickerConfig) checkboxModel {
 }
 
 // waitForStatus returns a tea.Cmd that waits on a status channel for a given index.
-func waitForStatus(index int, ch <-chan string) tea.Cmd {
+func waitForStatus(index int, ch <-chan CheckboxStatusUpdate) tea.Cmd {
 	return func() tea.Msg {
-		status, ok := <-ch
+		update, ok := <-ch
 		if !ok {
 			return nil
 		}
-		return statusUpdateMsg{index: index, status: status}
+		return statusUpdateMsg{index: index, status: update.Status, setChecked: update.SetChecked}
 	}
 }
 
@@ -93,7 +105,16 @@ func (m checkboxModel) Init() tea.Cmd {
 func (m checkboxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case statusUpdateMsg:
-		m.sublabels[msg.index] = msg.status
+		if msg.index >= 0 && msg.index < len(m.sublabels) {
+			m.sublabels[msg.index] = msg.status
+			if msg.setChecked != nil {
+				m.checked[msg.index] = *msg.setChecked
+			}
+		}
+		// Continue listening for more updates on this channel
+		if msg.index >= 0 && msg.index < len(m.statusChs) {
+			return m, waitForStatus(msg.index, m.statusChs[msg.index])
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -215,6 +236,11 @@ func RunCheckboxPicker(cfg CheckboxPickerConfig) CheckboxPickerResult {
 	}
 
 	m := newCheckboxModel(cfg)
+
+	// Use caller-provided status channels if available
+	if cfg.StatusChs != nil && len(cfg.StatusChs) == len(cfg.Items) {
+		m.statusChs = cfg.StatusChs
+	}
 
 	// Trigger OnReady callbacks to start async work
 	if cfg.OnReady != nil {
