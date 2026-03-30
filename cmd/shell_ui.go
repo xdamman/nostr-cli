@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -94,10 +96,9 @@ type shellModel struct {
 	height int
 
 	// Input
-	input      textinput.Model
-	draftLines []string // multiline draft: alt+enter adds lines, enter sends all
-	showMenu   bool
-	menuSel    int
+	input    textarea.Model
+	showMenu bool
+	menuSel  int
 
 	// Mention autocomplete
 	mentionCandidates []ui.MentionCandidate
@@ -141,15 +142,18 @@ type shellModel struct {
 }
 
 func newShellModel(npub, myHex, skHex string, relays []string, promptName string) shellModel {
-	ti := textinput.New()
-	ti.Focus()
-	ti.CharLimit = 0 // no limit
-	ti.Prompt = greenStyle.Render(promptName) + "> "
-	ti.Width = 0 // will be set on WindowSizeMsg
+	ta := textarea.New()
+	ta.Focus()
+	ta.CharLimit = 0
+	ta.ShowLineNumbers = false
+	ta.SetHeight(1)
+	ta.MaxHeight = 5
+	ta.Prompt = ""
+	ta.KeyMap.InsertNewline = key.NewBinding() // disable Enter as newline
 
 	return shellModel{
 		feed:        newFeed(maxFeedLines),
-		input:       ti,
+		input:       ta,
 		npub:        npub,
 		myHex:       myHex,
 		skHex:       skHex,
@@ -169,7 +173,8 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = msg.Width - len(m.promptName) - 3 // "name> " + margin
+		promptLen := len(m.promptName) + 2 // "name> "
+		m.input.SetWidth(msg.Width - promptLen)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -284,27 +289,14 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case msg.Type == tea.KeyEnter && msg.Alt:
-		// Alt+Enter: add current line to draft and continue composing
-		line := m.input.Value()
-		if line != "" || len(m.draftLines) > 0 {
-			m.draftLines = append(m.draftLines, line)
-			m.input.Reset()
-		}
+		// Alt+Enter / Shift+Enter: insert newline
+		m.input.InsertString("\n")
 		return m, nil
 
 	case msg.Type == tea.KeyEnter:
-		// Collect full text from draft lines + current input
-		currentLine := m.input.Value()
-		var fullText string
-		if len(m.draftLines) > 0 {
-			allLines := append(m.draftLines, currentLine)
-			fullText = strings.Join(allLines, "\n")
-			m.draftLines = nil
-		} else {
-			fullText = currentLine
-		}
-		line := strings.TrimSpace(fullText)
+		line := strings.TrimSpace(m.input.Value())
 		m.input.Reset()
+		m.input.SetHeight(1)
 		m.mentionActive = false
 		m.mentionResults = nil
 
@@ -375,9 +367,10 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showMenu = false
 			return m, nil
 		}
-		// Esc clears draft if present
-		if len(m.draftLines) > 0 {
-			m.draftLines = nil
+		// Esc clears multiline input
+		if strings.Contains(m.input.Value(), "\n") {
+			m.input.Reset()
+			m.input.SetHeight(1)
 			return m, nil
 		}
 
@@ -440,7 +433,6 @@ func (m shellModel) confirmShellMention() shellModel {
 	after := val[atIdx+1+len(m.mentionQuery):]
 	newVal := before + "@" + selected.DisplayName + after
 	m.input.SetValue(newVal)
-	m.input.SetCursor(len(before) + 1 + len(selected.DisplayName))
 
 	m.selectedMentions = append(m.selectedMentions, selected)
 	m.mentionActive = false
@@ -459,20 +451,17 @@ func (m *shellModel) updateShellMentionState() {
 	}
 
 	// Find the last '@' not followed by a space
-	cursor := m.input.Position()
+	// Assume cursor at end of text (textarea doesn't expose position)
 	textBeforeCursor := val
-	if cursor < len(val) {
-		textBeforeCursor = val[:cursor]
-	}
 
 	atIdx := -1
 	for i := len(textBeforeCursor) - 1; i >= 0; i-- {
-		if textBeforeCursor[i] == ' ' {
+		if textBeforeCursor[i] == ' ' || textBeforeCursor[i] == '\n' {
 			break
 		}
 		if textBeforeCursor[i] == '@' {
-			// Valid if at start or preceded by space
-			if i == 0 || textBeforeCursor[i-1] == ' ' {
+			// Valid if at start or preceded by space/newline
+			if i == 0 || textBeforeCursor[i-1] == ' ' || textBeforeCursor[i-1] == '\n' {
 				atIdx = i
 			}
 			break
@@ -516,7 +505,7 @@ func (m shellModel) View() string {
 		return m.renderDMComposeView()
 	}
 
-	// Layout: feed area | draft lines | input line | menu | mention | status
+	// Layout: feed area | input line | menu | mention | status
 	menuLines := m.renderMenu()
 	menuHeight := len(menuLines)
 
@@ -526,11 +515,15 @@ func (m shellModel) View() string {
 	mentionLines := m.renderMentionMenu()
 	mentionHeight := len(mentionLines)
 
-	// Draft lines above input
-	draftHeight := len(m.draftLines)
+	// Input height (textarea auto-grows)
+	inputLines := strings.Count(m.input.Value(), "\n") + 1
+	if inputLines > 5 {
+		inputLines = 5
+	}
+	inputHeight := inputLines
 
 	// Calculate feed height
-	feedHeight := m.height - 2 - menuHeight - mentionHeight - draftHeight // 1 for status, 1 for input
+	feedHeight := m.height - 1 - inputHeight - menuHeight - mentionHeight // 1 for status
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
@@ -538,15 +531,20 @@ func (m shellModel) View() string {
 	// Render feed: take last feedHeight lines
 	feed := m.renderFeed(feedHeight)
 
-	// Build the view: feed | draft | input | menu | mention | status bar
+	// Build the view: feed | prompt+input | menu | mention | status bar
+	prompt := greenStyle.Render(m.promptName) + "> "
+	inputView := m.input.View()
+	// Prepend prompt to first line of textarea
+	inputViewLines := strings.SplitN(inputView, "\n", 2)
+	if len(inputViewLines) > 1 {
+		inputView = prompt + inputViewLines[0] + "\n" + inputViewLines[1]
+	} else {
+		inputView = prompt + inputView
+	}
+
 	var parts []string
 	parts = append(parts, feed)
-	if draftHeight > 0 {
-		for _, dl := range m.draftLines {
-			parts = append(parts, dimStyle.Render("  │ ")+dl)
-		}
-	}
-	parts = append(parts, m.input.View())
+	parts = append(parts, inputView)
 	if menuHeight > 0 {
 		parts = append(parts, strings.Join(menuLines, "\n"))
 	}
@@ -784,7 +782,7 @@ func (m shellModel) handleSwitchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.myHex = newHex
 			m.promptName = newName
 			shellPromptName = newName
-			m.input.Prompt = greenStyle.Render(newName) + "> "
+			// Prompt is rendered separately in View()
 
 			// Reload nsec for new account
 			if nsec, err := config.LoadNsec(newNpub); err == nil {
