@@ -234,7 +234,7 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 }
 
 func (m dmModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, typingTickCmd())
+	return typingTickCmd()
 }
 
 // typingTickCmd sends a typingTickMsg every second.
@@ -571,6 +571,7 @@ func (m dmModel) publishDMCmd(event nostr.Event) tea.Cmd {
 func (m dmModel) publishNip17Cmd(forRecipient, forSelf nostr.Event) tea.Cmd {
 	npub := m.npub
 	relays := m.relays
+	eventID := forRecipient.ID
 	return func() tea.Msg {
 		total := len(relays)
 		timeout := time.Duration(timeoutFlag) * time.Millisecond
@@ -580,10 +581,16 @@ func (m dmModel) publishNip17Cmd(forRecipient, forSelf nostr.Event) tea.Cmd {
 
 		recipientOK := make(map[string]bool)
 		selfOK := make(map[string]bool)
+		confirmed := false
 
 		for res := range ch {
 			if res.OK {
 				recipientOK[res.URL] = true
+				// Un-dim on first relay confirmation
+				if !confirmed && dmProgram != nil {
+					confirmed = true
+					dmProgram.Send(dmConfirmMsg{EventID: eventID})
+				}
 			}
 		}
 		for res := range ch2 {
