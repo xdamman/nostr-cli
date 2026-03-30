@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -150,6 +151,7 @@ func newShellModel(npub, myHex, skHex string, relays []string, promptName string
 	ta.MaxHeight = 5
 	ta.Prompt = ""
 	ta.KeyMap.InsertNewline = key.NewBinding() // disable Enter as newline
+	ta.Cursor.SetMode(cursor.CursorHide)
 
 	return shellModel{
 		feed:        newFeed(maxFeedLines),

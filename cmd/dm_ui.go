@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -223,6 +224,7 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 	ta.MaxHeight = 5
 	ta.Prompt = ""
 	ta.KeyMap.InsertNewline = key.NewBinding() // disable Enter as newline
+	ta.Cursor.SetMode(cursor.CursorHide)
 
 	return dmModel{
 		feed:       newDMFeedBT(sharedSecret, skHex, 200),
