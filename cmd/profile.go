@@ -2,13 +2,19 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
+	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/cobra"
 	"github.com/xdamman/nostr-cli/internal/cache"
@@ -16,11 +22,17 @@ import (
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/nip05"
 	"github.com/xdamman/nostr-cli/internal/profile"
+	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/resolve"
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
 
-var profileRefreshFlag bool
+var (
+	profileRefreshFlag bool
+	profileEventsFlag  int
+	profileKindsFlag   string
+	profileWatchFlag   bool
+)
 
 var profileCmd = &cobra.Command{
 	Use:     "profile [profile]",
@@ -68,6 +80,9 @@ var profileRmCmd = &cobra.Command{
 
 func init() {
 	profileCmd.Flags().BoolVar(&profileRefreshFlag, "refresh", false, "Fetch fresh profile from relays")
+	profileCmd.Flags().IntVarP(&profileEventsFlag, "events", "n", 0, "Number of past events to show")
+	profileCmd.Flags().StringVar(&profileKindsFlag, "kinds", "1", "Event kinds to show (comma-separated)")
+	profileCmd.Flags().BoolVar(&profileWatchFlag, "watch", false, "Watch for new events in real-time")
 	profileCmd.AddCommand(profileUpdateCmd)
 	rootCmd.AddCommand(profileCmd)
 }
@@ -76,23 +91,74 @@ func runProfile(cmd *cobra.Command, args []string) error {
 	label := color.New(color.FgCyan).SprintFunc()
 	errColor := color.New(color.FgRed)
 
+	// If --watch is set and -n is not explicitly set, default to 5
+	if profileWatchFlag && !cmd.Flags().Changed("events") {
+		profileEventsFlag = 5
+	}
+
+	var targetNpub string
+
 	if len(args) > 0 {
 		// User specified a target — look them up, do NOT fall back to current user
 		userArg := strings.TrimPrefix(args[0], "@")
-		return lookupUserProfile(userArg, label, errColor)
+
+		// For JSON output with events, we need to handle differently
+		if (rawFlag || jsonFlag || jsonlFlag) && (profileEventsFlag > 0 || profileWatchFlag) {
+			// Resolve npub first
+			activeNpub, _ := config.ActiveProfile()
+			npub := userArg
+			if !strings.HasPrefix(userArg, "npub1") {
+				resolved, err := resolve.ResolveToNpub(activeNpub, userArg)
+				if err != nil {
+					errColor.Fprintf(os.Stderr, "Error: user %q not found\n", userArg)
+					os.Exit(1)
+				}
+				npub = resolved
+			}
+			return showProfileWithEvents(npub)
+		}
+
+		if err := lookupUserProfile(userArg, label, errColor); err != nil {
+			return err
+		}
+
+		// Resolve npub for events
+		activeNpub, _ := config.ActiveProfile()
+		npub := userArg
+		if !strings.HasPrefix(userArg, "npub1") {
+			resolved, err := resolve.ResolveToNpub(activeNpub, userArg)
+			if err != nil {
+				return nil // profile was shown, events fail silently
+			}
+			npub = resolved
+		}
+		targetNpub = npub
+	} else {
+		// No args — show current user's profile
+		npub, err := loadAccount()
+		if err != nil {
+			return err
+		}
+
+		if rawFlag || jsonFlag || jsonlFlag {
+			if profileEventsFlag > 0 || profileWatchFlag {
+				return showProfileWithEvents(npub)
+			}
+			return showProfileJSON(npub)
+		}
+
+		if err := showProfile(npub, label); err != nil {
+			return err
+		}
+		targetNpub = npub
 	}
 
-	// No args — show current user's profile
-	npub, err := loadAccount()
-	if err != nil {
-		return err
+	// Show events if requested
+	if profileEventsFlag > 0 || profileWatchFlag {
+		return showProfileEvents(targetNpub)
 	}
 
-	if rawFlag || jsonFlag || jsonlFlag {
-		return showProfileJSON(npub)
-	}
-
-	return showProfile(npub, label)
+	return nil
 }
 
 func lookupUserProfile(user string, label func(a ...interface{}) string, errColor *color.Color) error {
@@ -511,4 +577,358 @@ func printNIP05Field(label func(a ...interface{}) string, nip05Addr string, pubH
 
 	// No cached result and not refreshing — show without verification
 	fmt.Printf("%-14s %s %s\n", label("NIP-05:"), nip05Addr, dim("(unverified)"))
+}
+
+// parseKinds parses a comma-separated list of event kinds into []int.
+func parseKinds(s string) ([]int, error) {
+	parts := strings.Split(s, ",")
+	kinds := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		k, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid kind %q: %w", p, err)
+		}
+		kinds = append(kinds, k)
+	}
+	if len(kinds) == 0 {
+		return []int{1}, nil
+	}
+	return kinds, nil
+}
+
+// getRelaysForProfile returns merged relays for fetching events.
+func getRelaysForProfile(npub string) []string {
+	activeNpub, _ := config.ActiveProfile()
+	var relays []string
+	if activeNpub != "" {
+		relays, _ = config.LoadRelays(activeNpub)
+	}
+	targetRelays, _ := config.LoadRelaysWithFallback(npub)
+	seen := make(map[string]bool, len(relays))
+	for _, r := range relays {
+		seen[r] = true
+	}
+	for _, r := range targetRelays {
+		if !seen[r] {
+			seen[r] = true
+			relays = append(relays, r)
+		}
+	}
+	for _, r := range config.DefaultRelays() {
+		if !seen[r] {
+			relays = append(relays, r)
+		}
+	}
+	return relays
+}
+
+// formatEventLine formats a single event for human-readable display.
+func formatEventLine(ev *nostr.Event) string {
+	ts := time.Unix(int64(ev.CreatedAt), 0).Format("2006-01-02 15:04")
+	kindLabel := fmt.Sprintf("[kind %d]", ev.Kind)
+
+	content := ev.Content
+	// For articles (kind 30023), show title tag if present
+	if ev.Kind == 30023 {
+		for _, tag := range ev.Tags {
+			if len(tag) >= 2 && tag[0] == "title" {
+				content = tag[1] + " (article)"
+				break
+			}
+		}
+	}
+
+	// Render mentions and inline markdown
+	content = renderMentions(content)
+	content = renderInlineMarkdown(content)
+
+	// Truncate to ~200 chars
+	if len(content) > 200 {
+		content = content[:200] + "..."
+	}
+
+	// Replace newlines with spaces for single-line display
+	content = strings.ReplaceAll(content, "\n", " ")
+
+	return fmt.Sprintf("  %s  %s %s", ts, kindLabel, content)
+}
+
+// showProfileEvents fetches and displays events for a profile (human-readable mode).
+func showProfileEvents(npub string) error {
+	pubHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return fmt.Errorf("invalid npub: %w", err)
+	}
+
+	kinds, err := parseKinds(profileKindsFlag)
+	if err != nil {
+		return err
+	}
+
+	relays := getRelaysForProfile(npub)
+	if len(relays) == 0 {
+		return fmt.Errorf("no relays available")
+	}
+
+	dim := color.New(color.Faint)
+	ctx := context.Background()
+
+	if profileEventsFlag > 0 {
+		filter := nostr.Filter{
+			Authors: []string{pubHex},
+			Kinds:   kinds,
+			Limit:   profileEventsFlag,
+		}
+
+		events, err := internalRelay.FetchEvents(ctx, filter, relays)
+		if err != nil {
+			return fmt.Errorf("failed to fetch events: %w", err)
+		}
+
+		if len(events) > 0 {
+			sort.Slice(events, func(i, j int) bool {
+				return events[i].CreatedAt > events[j].CreatedAt
+			})
+			if len(events) > profileEventsFlag {
+				events = events[:profileEventsFlag]
+			}
+
+			fmt.Println()
+			dim.Printf("─── Last %d events ───\n", len(events))
+			for _, ev := range events {
+				fmt.Println(formatEventLine(ev))
+			}
+		}
+	}
+
+	if profileWatchFlag {
+		return watchProfileEvents(npub, pubHex, kinds, relays, dim)
+	}
+
+	return nil
+}
+
+// showProfileWithEvents handles JSON/JSONL/raw output with events included.
+func showProfileWithEvents(npub string) error {
+	pubHex, err := crypto.NpubToHex(npub)
+	if err != nil {
+		return fmt.Errorf("invalid npub: %w", err)
+	}
+
+	kinds, err := parseKinds(profileKindsFlag)
+	if err != nil {
+		return err
+	}
+
+	relays := getRelaysForProfile(npub)
+
+	// Load profile metadata
+	meta, err := profile.LoadCached(npub)
+	if err != nil || meta == nil {
+		ctx := context.Background()
+		meta, err = profile.FetchFromRelays(ctx, npub, relays)
+		if err != nil || meta == nil {
+			return fmt.Errorf("profile not found for %s", npub)
+		}
+		_ = profile.SaveCached(npub, meta)
+	}
+
+	profileObj := map[string]interface{}{
+		"npub": npub,
+	}
+	if meta.Name != "" {
+		profileObj["name"] = meta.Name
+	}
+	if meta.DisplayName != "" {
+		profileObj["display_name"] = meta.DisplayName
+	}
+	if meta.About != "" {
+		profileObj["about"] = meta.About
+	}
+	if meta.Picture != "" {
+		profileObj["picture"] = meta.Picture
+	}
+	if meta.NIP05 != "" {
+		profileObj["nip05"] = meta.NIP05
+	}
+	if meta.Banner != "" {
+		profileObj["banner"] = meta.Banner
+	}
+	if meta.Website != "" {
+		profileObj["website"] = meta.Website
+	}
+	if meta.LUD16 != "" {
+		profileObj["lud16"] = meta.LUD16
+	}
+
+	ctx := context.Background()
+
+	// Fetch events
+	var events []*nostr.Event
+	if profileEventsFlag > 0 {
+		filter := nostr.Filter{
+			Authors: []string{pubHex},
+			Kinds:   kinds,
+			Limit:   profileEventsFlag,
+		}
+		events, _ = internalRelay.FetchEvents(ctx, filter, relays)
+		if len(events) > 0 {
+			sort.Slice(events, func(i, j int) bool {
+				return events[i].CreatedAt > events[j].CreatedAt
+			})
+			if len(events) > profileEventsFlag {
+				events = events[:profileEventsFlag]
+			}
+		}
+	}
+
+	if rawFlag || jsonlFlag {
+		// JSONL: profile line first, then event lines
+		profileLine, _ := json.Marshal(profileObj)
+		fmt.Println(string(profileLine))
+		for _, ev := range events {
+			evJSON, _ := json.Marshal(ev)
+			fmt.Println(string(evJSON))
+		}
+	} else if jsonFlag {
+		// JSON: object with profile and events
+		output := map[string]interface{}{
+			"profile": profileObj,
+			"events":  events,
+		}
+		printJSON(output)
+	}
+
+	// Watch mode for JSONL/raw streaming
+	if profileWatchFlag {
+		return watchProfileEventsJSON(pubHex, kinds, relays)
+	}
+
+	return nil
+}
+
+// watchProfileEvents streams new events in human-readable format.
+func watchProfileEvents(npub, pubHex string, kinds []int, relays []string, dim *color.Color) error {
+	fmt.Println()
+	dim.Println("─── Watching for new events (Ctrl+C to exit) ───")
+	fmt.Println()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\nStopped watching.")
+		cancel()
+		os.Exit(0)
+	}()
+
+	since := nostr.Now()
+
+	for _, relayURL := range relays {
+		go func(url string) {
+			connectCtx, connectCancel := context.WithTimeout(ctx, internalRelay.ConnectTimeout)
+			defer connectCancel()
+
+			relay, err := nostr.RelayConnect(connectCtx, url)
+			if err != nil {
+				return
+			}
+			defer relay.Close()
+
+			filters := nostr.Filters{
+				{
+					Authors: []string{pubHex},
+					Kinds:   kinds,
+					Since:   &since,
+				},
+			}
+
+			sub, err := relay.Subscribe(ctx, filters)
+			if err != nil {
+				return
+			}
+			defer sub.Unsub()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ev, ok := <-sub.Events:
+					if !ok {
+						return
+					}
+					fmt.Println(formatEventLine(ev))
+				}
+			}
+		}(relayURL)
+	}
+
+	<-ctx.Done()
+	return nil
+}
+
+// watchProfileEventsJSON streams new events in JSON format.
+func watchProfileEventsJSON(pubHex string, kinds []int, relays []string) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+		os.Exit(0)
+	}()
+
+	since := nostr.Now()
+
+	for _, relayURL := range relays {
+		go func(url string) {
+			connectCtx, connectCancel := context.WithTimeout(ctx, internalRelay.ConnectTimeout)
+			defer connectCancel()
+
+			relay, err := nostr.RelayConnect(connectCtx, url)
+			if err != nil {
+				return
+			}
+			defer relay.Close()
+
+			filters := nostr.Filters{
+				{
+					Authors: []string{pubHex},
+					Kinds:   kinds,
+					Since:   &since,
+				},
+			}
+
+			sub, err := relay.Subscribe(ctx, filters)
+			if err != nil {
+				return
+			}
+			defer sub.Unsub()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ev, ok := <-sub.Events:
+					if !ok {
+						return
+					}
+					evJSON, _ := json.Marshal(ev)
+					fmt.Println(string(evJSON))
+				}
+			}
+		}(relayURL)
+	}
+
+	<-ctx.Done()
+	return nil
 }
