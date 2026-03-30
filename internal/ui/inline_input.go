@@ -87,7 +87,7 @@ func newInlineModel(cfg InlineInputConfig) inlineModel {
 }
 
 func (m inlineModel) Init() tea.Cmd {
-	return textinput.Blink
+	return nil
 }
 
 func (m inlineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

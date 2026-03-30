@@ -106,7 +106,7 @@ func newProfileFormModel(cfg ProfileFormConfig) profileFormModel {
 }
 
 func (m profileFormModel) Init() tea.Cmd {
-	return textinput.Blink
+	return nil
 }
 
 func (m profileFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

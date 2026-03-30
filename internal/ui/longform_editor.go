@@ -68,7 +68,7 @@ func newLongFormModel(cfg LongFormEditorConfig) longFormModel {
 }
 
 func (m longFormModel) Init() tea.Cmd {
-	return textarea.Blink
+	return nil
 }
 
 func (m longFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
