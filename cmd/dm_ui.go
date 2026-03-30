@@ -829,7 +829,15 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 					if rumor.Kind != 14 {
 						continue
 					}
-					if rumor.PubKey != targetHex && rumor.PubKey != myHex {
+					// Filter: only messages between me and the target
+					if rumor.PubKey == targetHex {
+						// Incoming from target — OK
+					} else if rumor.PubKey == myHex {
+						// Sent by me — verify recipient is the target
+						if rumor.Tags.GetFirst([]string{"p", targetHex}) == nil {
+							continue
+						}
+					} else {
 						continue
 					}
 					_ = cache.LogDMEvent(npub, targetHex, rumor)
@@ -980,7 +988,15 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 						if rumor.Kind != 14 {
 							continue
 						}
-						if rumor.PubKey != targetHex && rumor.PubKey != myHex {
+						// Filter: only messages between me and the target
+						if rumor.PubKey == targetHex {
+							// Incoming from target — OK
+						} else if rumor.PubKey == myHex {
+							// Sent by me — verify recipient is the target
+							if rumor.Tags.GetFirst([]string{"p", targetHex}) == nil {
+								continue
+							}
+						} else {
 							continue
 						}
 						_ = cache.LogDMEvent(npub, targetHex, rumor)
