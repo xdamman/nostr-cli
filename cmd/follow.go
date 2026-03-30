@@ -117,10 +117,15 @@ func runFollow(cmd *cobra.Command, args []string) error {
 
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 
-	sp := ui.NewSpinner("Fetching contact list...")
 	ctx := context.Background()
-	contacts, err := fetchContactList(ctx, myHex, relays)
-	sp.Stop()
+	var contacts *nostr.Event
+	if rawFlag || jsonFlag || jsonlFlag {
+		contacts, err = fetchContactList(ctx, myHex, relays)
+	} else {
+		sp := ui.NewSpinner("Fetching contact list...")
+		contacts, err = fetchContactList(ctx, myHex, relays)
+		sp.Stop()
+	}
 	if err != nil {
 		return err
 	}
@@ -181,6 +186,8 @@ func runFollow(cmd *cobra.Command, args []string) error {
 				"user":            targetNpub,
 				"following_count": len(contacts.Tags),
 				"event_id":        contacts.ID,
+				"event":           contacts,
+				"relays":          relays,
 			}
 			if pubErr != nil {
 				result["error"] = pubErr.Error()
@@ -308,10 +315,15 @@ func runUnfollow(cmd *cobra.Command, args []string) error {
 
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 
-	sp := ui.NewSpinner("Fetching contact list...")
 	ctx := context.Background()
-	contacts, err := fetchContactList(ctx, myHex, relays)
-	sp.Stop()
+	var contacts *nostr.Event
+	if rawFlag || jsonFlag || jsonlFlag {
+		contacts, err = fetchContactList(ctx, myHex, relays)
+	} else {
+		sp := ui.NewSpinner("Fetching contact list...")
+		contacts, err = fetchContactList(ctx, myHex, relays)
+		sp.Stop()
+	}
 	if err != nil {
 		return err
 	}
@@ -453,10 +465,15 @@ func runFollowing(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sp := ui.NewSpinner("Fetching contact list...")
 	ctx := context.Background()
-	contacts, err := fetchContactList(ctx, myHex, relays)
-	sp.Stop()
+	var contacts *nostr.Event
+	if rawFlag || jsonFlag || jsonlFlag {
+		contacts, err = fetchContactList(ctx, myHex, relays)
+	} else {
+		sp := ui.NewSpinner("Fetching contact list...")
+		contacts, err = fetchContactList(ctx, myHex, relays)
+		sp.Stop()
+	}
 	if err != nil {
 		return err
 	}
