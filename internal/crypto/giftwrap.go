@@ -49,6 +49,22 @@ func CreateGiftWrapDM(content, skHex, senderPubHex, recipientPubHex string) (for
 	return
 }
 
+// CreateGiftWrapEvent gift-wraps an arbitrary rumor for a single recipient.
+// Unlike CreateGiftWrapDM, it does NOT create a self-copy.
+func CreateGiftWrapEvent(rumor nostr.Event, skHex, recipientPubHex string) (nostr.Event, error) {
+	encryptFor := func(plaintext string) (string, error) {
+		convKey, err := nip44.GenerateConversationKey(recipientPubHex, skHex)
+		if err != nil {
+			return "", err
+		}
+		return nip44.Encrypt(plaintext, convKey)
+	}
+	sign := func(ev *nostr.Event) error {
+		return ev.Sign(skHex)
+	}
+	return nip59.GiftWrap(rumor, recipientPubHex, encryptFor, sign, nil)
+}
+
 // UnwrapGiftWrapDM unwraps a NIP-17 gift-wrapped event.
 func UnwrapGiftWrapDM(event nostr.Event, skHex string) (rumor nostr.Event, err error) {
 	return nip59.GiftUnwrap(event, func(otherpubkey, ciphertext string) (string, error) {

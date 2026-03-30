@@ -426,24 +426,46 @@ func (m dmModel) sendTypingCmd() tea.Cmd {
 	myHex := m.myHex
 	targetHex := m.targetHex
 	relays := m.relays
+	useNip04 := m.useNip04
 	return func() tea.Msg {
-		publishTypingIndicator(skHex, myHex, targetHex, relays)
+		publishTypingIndicator(skHex, myHex, targetHex, relays, useNip04)
 		return nil
 	}
 }
 
-// publishTypingIndicator sends an ephemeral kind 10003 typing event.
-func publishTypingIndicator(skHex, myHex, targetHex string, relays []string) {
-	event := nostr.Event{
+// publishTypingIndicator sends a typing indicator event.
+// In NIP-04 mode it publishes a plain ephemeral kind 10003.
+// In NIP-17 mode it gift-wraps the kind 10003 rumor so the relay
+// only sees random pubkey + recipient — no sender leak.
+func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, useNip04 bool) {
+	ctx := context.Background()
+
+	if useNip04 {
+		event := nostr.Event{
+			Kind:      10003,
+			Content:   "",
+			Tags:      nostr.Tags{{"p", targetHex}},
+			CreatedAt: nostr.Now(),
+			PubKey:    myHex,
+		}
+		event.Sign(skHex)
+		internalRelay.PublishEventQuiet(ctx, event, relays)
+		return
+	}
+
+	// NIP-17: gift-wrap the typing indicator
+	rumor := nostr.Event{
 		Kind:      10003,
 		Content:   "",
 		Tags:      nostr.Tags{{"p", targetHex}},
 		CreatedAt: nostr.Now(),
 		PubKey:    myHex,
 	}
-	event.Sign(skHex)
-	ctx := context.Background()
-	internalRelay.PublishEventQuiet(ctx, event, relays)
+	wrapped, err := crypto.CreateGiftWrapEvent(rumor, skHex, targetHex)
+	if err != nil {
+		return
+	}
+	internalRelay.PublishEventQuiet(ctx, wrapped, relays)
 }
 
 func (m dmModel) confirmDMMention() dmModel {
@@ -790,7 +812,14 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 				// For gift wraps, filter to only show DMs involving the target
 				if evp.Kind == nostr.KindGiftWrap {
 					rumor, err := crypto.UnwrapGiftWrapDM(*evp, skHex)
-					if err != nil || rumor.Kind != 14 {
+					if err != nil {
+						continue
+					}
+					// Skip typing indicators from history
+					if rumor.Kind == 10003 {
+						continue
+					}
+					if rumor.Kind != 14 {
 						continue
 					}
 					if rumor.PubKey != targetHex && rumor.PubKey != myHex {
@@ -933,7 +962,15 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 					// Filter NIP-17 events to only show DMs involving the target
 					if ev.Kind == nostr.KindGiftWrap {
 						rumor, err := crypto.UnwrapGiftWrapDM(*ev, skHex)
-						if err != nil || rumor.Kind != 14 {
+						if err != nil {
+							continue
+						}
+						// Gift-wrapped typing indicator
+						if rumor.Kind == 10003 && rumor.PubKey == targetHex {
+							p.Send(typingMsg{})
+							continue
+						}
+						if rumor.Kind != 14 {
 							continue
 						}
 						if rumor.PubKey != targetHex && rumor.PubKey != myHex {
