@@ -34,6 +34,12 @@ type dmTargetNameMsg struct {
 	Name string
 }
 
+// typingMsg signals the counterparty is typing.
+type typingMsg struct{}
+
+// typingTickMsg fires every second to expire stale typing state.
+type typingTickMsg struct{}
+
 // -- DM feed with decryption --
 
 type dmFeedBT struct {
@@ -197,6 +203,11 @@ type dmModel struct {
 	mentionIdx        int
 	mentionQuery      string
 	selectedMentions  []ui.MentionCandidate
+
+	// Typing indicators
+	lastTypingSent  time.Time // throttle outgoing typing events
+	counterTyping   bool      // is counterparty typing?
+	counterTypingAt time.Time // when we last saw their typing event
 }
 
 // dmProgram holds the running tea.Program for DM mode.
@@ -223,7 +234,14 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 }
 
 func (m dmModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, typingTickCmd())
+}
+
+// typingTickCmd sends a typingTickMsg every second.
+func typingTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return typingTickMsg{}
+	})
 }
 
 func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -248,6 +266,17 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dmTargetNameMsg:
 		m.targetName = msg.Name
 		return m, nil
+
+	case typingMsg:
+		m.counterTyping = true
+		m.counterTypingAt = time.Now()
+		return m, nil
+
+	case typingTickMsg:
+		if m.counterTyping && time.Since(m.counterTypingAt) > 5*time.Second {
+			m.counterTyping = false
+		}
+		return m, typingTickCmd()
 
 	case dmConfirmMsg:
 		delete(m.dimSent, msg.EventID)
@@ -369,13 +398,52 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.publishNip17Cmd(forRecipient, forSelf)
 	}
 
+	var cmds []tea.Cmd
+
+	// Send typing indicator on keystroke (throttled)
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+		if time.Since(m.lastTypingSent) > 3*time.Second {
+			m.lastTypingSent = time.Now()
+			cmds = append(cmds, m.sendTypingCmd())
+		}
+	}
+
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 
 	// Check mention trigger
 	m.updateDMMentionState()
 
-	return m, cmd
+	return m, tea.Batch(cmds...)
+}
+
+// sendTypingCmd publishes an ephemeral typing indicator event.
+func (m dmModel) sendTypingCmd() tea.Cmd {
+	skHex := m.skHex
+	myHex := m.myHex
+	targetHex := m.targetHex
+	relays := m.relays
+	return func() tea.Msg {
+		publishTypingIndicator(skHex, myHex, targetHex, relays)
+		return nil
+	}
+}
+
+// publishTypingIndicator sends an ephemeral kind 10003 typing event.
+func publishTypingIndicator(skHex, myHex, targetHex string, relays []string) {
+	event := nostr.Event{
+		Kind:      10003,
+		Content:   "",
+		Tags:      nostr.Tags{{"p", targetHex}},
+		CreatedAt: nostr.Now(),
+		PubKey:    myHex,
+	}
+	event.Sign(skHex)
+	ctx := context.Background()
+	internalRelay.PublishEventQuiet(ctx, event, relays)
 }
 
 func (m dmModel) confirmDMMention() dmModel {
@@ -591,6 +659,9 @@ func (m dmModel) renderDMMentionMenu() []string {
 func (m dmModel) renderDMStatus() string {
 	if m.status != "" {
 		return dimStyle.Render("  " + m.status)
+	}
+	if m.counterTyping {
+		return dimStyle.Render("  " + m.targetName + " is typing...")
 	}
 	proto := m.protoLabel
 	if proto == "" {
@@ -814,6 +885,26 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 					defer gwSub.Unsub()
 					for ev := range gwSub.Events {
 						merged <- ev
+					}
+				}()
+			}
+
+			// Typing indicators from target (ephemeral kind 10003)
+			typingSub, err := relay.Subscribe(ctx, nostr.Filters{{
+				Kinds:   []int{10003},
+				Authors: []string{targetHex},
+				Tags:    nostr.TagMap{"p": []string{myHex}},
+				Since:   &since,
+			}})
+			if err == nil {
+				subsActive.Add(1)
+				go func() {
+					defer subsActive.Done()
+					defer typingSub.Unsub()
+					for ev := range typingSub.Events {
+						// Don't merge into the DM event stream — send typing msg directly
+						_ = ev
+						p.Send(typingMsg{})
 					}
 				}()
 			}

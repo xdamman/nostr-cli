@@ -121,6 +121,24 @@ func PublishEventWithProgress(ctx context.Context, event nostr.Event, relayURLs 
 	return ch
 }
 
+// PublishEventQuiet publishes an event to the given relays in a fire-and-forget
+// fashion with no output or error reporting. Used for ephemeral events like
+// typing indicators.
+func PublishEventQuiet(ctx context.Context, event nostr.Event, relayURLs []string) {
+	for _, u := range relayURLs {
+		go func(u string) {
+			relayCtx, cancel := context.WithTimeout(ctx, PublishTimeout)
+			defer cancel()
+			r, err := nostr.RelayConnect(relayCtx, u)
+			if err != nil {
+				return
+			}
+			defer r.Close()
+			_ = r.Publish(relayCtx, event)
+		}(u)
+	}
+}
+
 // FetchEvent fetches the latest event matching the filter from the given relays.
 func FetchEvent(ctx context.Context, filter nostr.Filter, relayURLs []string) (*nostr.Event, error) {
 	if len(relayURLs) == 0 {
