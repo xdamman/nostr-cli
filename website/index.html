@@ -560,16 +560,17 @@
         <div class="terminal-dot red"></div>
         <div class="terminal-dot yellow"></div>
         <div class="terminal-dot green"></div>
-        <div class="terminal-title">Interactive mode &mdash; DM conversation</div>
+        <div class="terminal-title">Interactive mode &mdash; DM conversation (with typing indicators)</div>
       </div>
       <div class="terminal-body">
         <div><span class="prompt">$</span> nostr dm xavier</div>
-        <div class="info">Chatting with xavier</div>
+        <div class="info">Chatting with xavier <span class="dim">(NIP-17 gift wrap)</span></div>
         <div>&nbsp;</div>
         <div class="dim">23/03 14:01  xavier   Hey, are you coming to the meetup?</div>
         <div class="dim">23/03 14:05  me       Yes! See you there</div>
+        <div class="dim" style="color: #58a6ff; font-style: italic;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;xavier is typing...</div>
         <div>&nbsp;</div>
-        <div><span class="input">me&gt;</span> Can't wait!</div>
+        <div><span class="input">me&gt;</span> Can't wait! <span class="dim">(Alt+Enter for multiline)</span></div>
         <div class="success">&#10003; Sent!</div>
       </div>
     </div>
@@ -593,11 +594,15 @@
       </div>
       <div class="feature">
         <h3>Encrypted DMs</h3>
-        <p>NIP-17 gift-wrapped DMs (NIP-44 encryption) by default. NIP-04 legacy supported. Interactive chat mode.</p>
+        <p>NIP-17 gift-wrapped DMs with typing indicators. NIP-04 legacy supported. Interactive chat with Alt+Enter multiline.</p>
+      </div>
+      <div class="feature">
+        <h3>Profile &amp; Events</h3>
+        <p><code>nostr profile user -n 10</code> &mdash; view profiles with past events, filter by kind, live-stream with <code>--watch</code>.</p>
       </div>
       <div class="feature">
         <h3>Interactive shell</h3>
-        <p>Live feed, posting, and slash commands. Like a tiny Nostr client in your terminal.</p>
+        <p>Live feed, posting, and slash commands. Multiline with Alt+Enter. Like a tiny Nostr client in your terminal.</p>
       </div>
       <div class="feature">
         <h3>Built-in NIP viewer</h3>
@@ -609,7 +614,7 @@
       </div>
       <div class="feature">
         <h3>Agent-friendly</h3>
-        <p><code>--jsonl</code> for streaming, <code>--json</code> for inspection, event queries, and auto-detected piping. Built for bots.</p>
+        <p><code>--jsonl</code> for streaming, <code>--json</code> for inspection, NIP-05 identities, and <code>bot: true</code> (NIP-24). Built for bots.</p>
       </div>
     </div>
   </section>
@@ -626,7 +631,8 @@
       <tr><td>nostr dm [user] [message]</td><td>Send NIP-17 gift-wrapped DM, interactive chat, or stream with --watch</td></tr>
       <tr><td>nostr events --kinds &lt;n&gt;</td><td>Query events from relays (filter by kind, time, author)</td></tr>
       <tr><td>nostr event new --kind &lt;n&gt;</td><td>Create and publish a raw event of any kind</td></tr>
-      <tr><td>nostr follow [user]</td><td>Follow a user</td></tr>
+      <tr><td>nostr follow [user]</td><td>Follow a user (--alias, --json)</td></tr>
+      <tr><td>nostr profile [user] -n 10</td><td>View profile and past events (--kinds, --watch)</td></tr>
       <tr><td>nostr [user]</td><td>View a user's profile and latest notes</td></tr>
       <tr><td>nostr [user] --watch</td><td>Live-stream a user's new notes</td></tr>
       <tr><td>nostr --watch</td><td>Stream notes from all followed accounts</td></tr>
@@ -833,6 +839,17 @@
             { type: 'out', text: '' },
             { type: 'cmd', text: '$ nostr switch bot' },
             { type: 'ok',  text: '✓ Switched to bot (npub1m4k...9h2a)' },
+          ]
+        },
+        {
+          lines: [
+            { type: 'cmd', text: '$ nostr profile fiatjaf -n 3' },
+            { type: 'out', text: '  Name:    fiatjaf' },
+            { type: 'out', text: '  NIP-05:  fiatjaf@nostr.com ✓' },
+            { type: 'out', text: '' },
+            { type: 'dim', text: '  30/03 10:15  working on a new relay implementation' },
+            { type: 'dim', text: '  30/03 09:42  just shipped NIP-XX support' },
+            { type: 'dim', text: '  29/03 22:10  the protocol is the product' },
           ]
         },
         {

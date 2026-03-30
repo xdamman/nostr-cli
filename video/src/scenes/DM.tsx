@@ -13,7 +13,7 @@ const lines: TerminalLine[] = [
     prefix: "prompt",
   },
   { text: "", delay: 85 },
-  { text: "Protocol:     NIP-17 (gift wrap)", delay: 95, color: COLORS.label, indent: 1 },
+  { text: "Protocol:     NIP-17 (gift wrap) encrypted", delay: 95, color: COLORS.label, indent: 1 },
   { text: "Signer:       npub1x7d...k3qf", delay: 108, color: COLORS.textDim, indent: 1 },
   { text: "Recipient:    npub1sg6...e2uf", delay: 118, color: COLORS.textDim, indent: 1 },
   { text: "", delay: 130 },
@@ -22,6 +22,8 @@ const lines: TerminalLine[] = [
   { text: "✓ nos.lol             102ms", delay: 165, color: COLORS.success, indent: 1 },
   { text: "✓ relay.primal.net    145ms", delay: 175, color: COLORS.success, indent: 1 },
   { text: "✓ Published to 3/3 relays", delay: 190, color: COLORS.success },
+  { text: "", delay: 200 },
+  { text: "fiatjaf is typing...", delay: 215, color: COLORS.cyan },
 ];
 
 export const DM: React.FC = () => {

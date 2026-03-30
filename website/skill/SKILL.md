@@ -148,6 +148,15 @@ Flags:
 
 The `protocol` field in JSON/JSONL output indicates which protocol was used (`"nip04"` or `"nip17"`).
 
+Typing indicators:
+- In interactive DM mode, ephemeral kind 10003 events show typing activity
+- Gift-wrapped in NIP-17 mode for metadata privacy, plain ephemeral in NIP-04 mode
+- Shows "\<name\> is typing..." in the status bar
+
+Multiline input:
+- Use Alt+Enter to insert newlines in interactive DM and shell modes
+- Visual line-wrapping textarea for long messages
+
 Watch mode stderr output:
 - Connection errors and subscription failures are logged to stderr
 - A "ready" line is printed to stderr when all relay goroutines are launched
@@ -225,9 +234,12 @@ nostr event new --kind 1 --content "Hello" --tag t=nostr --tags '[["r","https://
 nostr profile [user]
 ```
 
-View profile metadata. Without arguments, shows your own profile.
+View profile metadata and past events. Without arguments, shows your own profile.
 
 Flags:
+- `-n, --events <n>` — Number of past events to show
+- `--kinds <n,n,...>` — Filter events by kind (comma-separated)
+- `--watch` — Live-stream new events from this user
 - `--refresh` — Force fetch from relays instead of cache
 - `--json` / `--jsonl` / `--raw` — Structured output
 
@@ -236,6 +248,10 @@ Examples:
 nostr profile
 nostr profile alice --json
 nostr profile npub1... --refresh --json
+nostr profile fiatjaf -n 5                 # Show profile + last 5 events
+nostr profile fiatjaf -n 10 --kinds 1,7    # Filter by event kind
+nostr profile fiatjaf --watch              # Live-stream new events
+nostr profile fiatjaf -n 20 --jsonl        # Events as JSONL for bots
 ```
 
 ### Profile Update
@@ -252,6 +268,10 @@ nostr unfollow <user>      # Unfollow a user
 nostr following            # List users you follow
 ```
 
+Flags for `follow`:
+- `--alias <name>` — Set an explicit alias for the followed user
+- `--json` / `--raw` — Structured output (includes event + relays)
+
 Flags for `following`:
 - `--refresh` — Force refresh from relays
 - `--json` / `--jsonl` — Structured output
@@ -259,6 +279,8 @@ Flags for `following`:
 Examples:
 ```bash
 nostr follow alice
+nostr follow alice --alias al              # Follow with explicit alias
+nostr follow alice --json                  # JSON output with event + relays
 nostr unfollow npub1...
 nostr following --json
 ```
@@ -339,7 +361,9 @@ nostr nip 44
 ### Other
 ```bash
 nostr version              # Print version info
+nostr version --json       # Version info as JSON
 nostr update               # Check for updates and self-update
+nostr update --json        # Update check with JSON output
 ```
 
 ## Global Flags

@@ -75,6 +75,10 @@ nostr event new --kind 1 --content "Hello" --tag t=nostr --tags '[["r","https://
 ### Accounts & Profiles
 ```bash
 nostr profile alice --json                  # View Nostr profile as JSON
+nostr profile alice -n 10                   # View profile + last 10 events
+nostr profile alice -n 5 --kinds 1,7        # Filter events by kind
+nostr profile alice --watch                 # Live-stream new events
+nostr profile alice -n 10 --jsonl           # Events as JSONL for bot processing
 nostr profile npub1... --refresh --json     # Force refresh from relays
 nostr accounts --json                       # List all local accounts
 nostr login --new                           # Generate new keypair
@@ -85,6 +89,8 @@ nostr switch alice                          # Switch active account
 ### Social
 ```bash
 nostr follow alice                          # Follow a user
+nostr follow alice --alias al               # Follow with explicit alias
+nostr follow alice --json                   # Follow with JSON output (event + relays)
 nostr unfollow alice                        # Unfollow a user
 nostr following --json                      # List followed users
 nostr alice --json --limit 10               # View user's recent notes
@@ -192,6 +198,18 @@ nostr login --new
 nostr relays add wss://relay.damus.io
 nostr relays add wss://nos.lol
 nostr post "Bot is online" --jsonl
+```
+
+## NIP-05 Agent Identities
+
+All nostr-cli agents have verified NIP-05 identities:
+- `agent@xavierdamman.com` — verified NIP-05 addresses for bot accounts
+- Agent profiles set `bot: true` per NIP-24
+
+## Version & Update
+```bash
+nostr version --json                        # Version info as JSON
+nostr update --json                         # Check for updates, JSON output
 ```
 
 ## Resources

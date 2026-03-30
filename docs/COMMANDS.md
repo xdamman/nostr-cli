@@ -65,8 +65,14 @@ nostr profile update                  # Interactive edit
 **Flags:**
 | Flag | Description |
 |------|-------------|
+| `-n, --events <n>` | Number of past events to show |
+| `--kinds <n,n,...>` | Filter events by kind (comma-separated) |
+| `--watch` | Live-stream new events from this user |
 | `--refresh` | Force fetch from relays (bypass cache) |
 | `--json` / `--jsonl` / `--raw` | Structured output |
+
+**Event viewing:**
+When `-n` is specified, the profile is shown followed by the user's most recent events. Combine with `--kinds` to filter by event type and `--watch` to live-stream. Works with `--json`/`--jsonl`/`--raw` for machine-readable output.
 
 **Edge cases:**
 - Unknown npub with no relay data → "Profile not found. Try adding relays."
@@ -180,6 +186,16 @@ nostr dm [user] --watch      # Stream DMs with a specific user
 | `--tag key=value` | Add extra tags (repeatable) |
 | `--tags '<json>'` | Add extra tags as JSON array |
 | `--json` / `--jsonl` / `--raw` | Machine-readable output |
+
+**Typing indicators:**
+- In interactive DM mode, ephemeral kind 10003 events signal typing activity
+- In NIP-17 mode, typing indicators are gift-wrapped for metadata privacy
+- In NIP-04 mode, typing indicators are sent as plain ephemeral events
+- Shows "\<name\> is typing..." in the status bar
+
+**Multiline input:**
+- Use Alt+Enter to insert newlines in interactive DM mode
+- Visual line-wrapping textarea for long messages
 
 **Watch mode:**
 - Connection errors and subscription failures logged to stderr
@@ -296,11 +312,21 @@ nostr unfollow [npub|username|alias]
 nostr following
 ```
 
+**Flags for `follow`:**
+| Flag | Description |
+|------|-------------|
+| `--alias <name>` | Set an explicit alias for the followed user |
+| `--json` / `--raw` | Structured output (includes event + relays) |
+
 **Flags for `following`:**
 | Flag | Description |
 |------|-------------|
 | `--refresh` | Force refresh from relays |
 | `--json` / `--jsonl` | Structured output |
+
+**Behavior notes:**
+- In `--json` mode, the spinner is suppressed and output includes the follow event and relay publish results
+- In non-interactive mode (piped stdin), the alias prompt is skipped
 
 ---
 
@@ -393,7 +419,8 @@ nostr nip44
 Run `nostr` with no arguments to launch the interactive shell:
 
 - Shows your feed from followed users
-- Type to post a note
+- Type to post a note (Alt+Enter for multiline)
+- Visual line-wrapping textarea input
 - Slash commands: `/follow`, `/unfollow`, `/dm`, `/profile`, `/switch`, `/alias`, `/aliases`
 - Tab/arrow-key autocomplete for slash commands and @ mentions
 - `/switch` shows an arrow-key account picker

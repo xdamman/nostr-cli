@@ -22,9 +22,23 @@ const lines: TerminalLine[] = [
     delay: 170,
     color: COLORS.textDim,
   },
+  { text: "", delay: 200 },
   {
-    text: '{"from":"alice","message":"done, shipped to prod","protocol":"nip17","timestamp":"..."}',
-    delay: 220,
+    text: "nostr profile alice -n 5 --jsonl",
+    delay: 215,
+    typewriter: true,
+    charsPerFrame: 0.7,
+    color: COLORS.command,
+    prefix: "prompt",
+  },
+  {
+    text: '{"kind":1,"content":"shipped v2 to prod","created_at":"..."}',
+    delay: 255,
+    color: COLORS.textDim,
+  },
+  {
+    text: '{"kind":1,"content":"fixing the deploy pipeline","created_at":"..."}',
+    delay: 270,
     color: COLORS.textDim,
   },
 ];

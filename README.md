@@ -23,13 +23,15 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - 💬 Encrypted DMs (NIP-17 gift wrap / NIP-44 / NIP-04 legacy) with interactive chat UI
 - 🔎 Query events from relays with flexible filters
 - 🛠️ Create raw events of any kind
-- 🔄 Follow/unfollow users
+- 🔄 Follow/unfollow users with `--alias` and `--json` output
 - 🌐 Manage relay lists per account
 - 🏷️ Create aliases for quick access to contacts
 - 👥 Switch between multiple accounts
 - 📖 Built-in NIP reference viewer
 - 🔄 Sync local events with relays
 - 🐚 Interactive shell with feed, posting, and slash commands
+- ✏️ Multiline input with Alt+Enter in shell and DM modes
+- ⌨️ Typing indicators in interactive DM mode (ephemeral kind 10003)
 - 🤖 Bot/agent-friendly output formats (--json, --jsonl, --raw)
 
 ## Installation
@@ -98,9 +100,10 @@ nostr                                    # Launch the interactive shell
 | `nostr dm [profile] [message]` | Send an encrypted DM, start interactive chat, or stream DMs with `--watch` |
 | `nostr events --kinds <n>` | Query events from relays with filters (kinds, time range, author, tags) |
 | `nostr event new --kind <n> --content <text>` | Create and publish a raw event of any kind |
-| `nostr follow <profile>` | Follow a user |
+| `nostr follow <profile>` | Follow a user (with `--alias` and `--json` support) |
 | `nostr unfollow <profile>` | Unfollow a user |
 | `nostr following` | List accounts you follow |
+| `nostr profile <user> -n 10` | View a user's profile and past events |
 | `nostr [profile]` | View a user's profile and latest notes |
 | `nostr [profile] --watch` | Live-stream a user's new notes |
 | `nostr --watch` | Live-stream notes from all followed accounts |
@@ -113,6 +116,9 @@ nostr                                    # Launch the interactive shell
 | `nostr switch [account]` | Switch between accounts (interactive picker without args) |
 | `nostr profile` | Show your current Nostr profile |
 | `nostr profile [user]` | Show another user's Nostr profile |
+| `nostr profile [user] -n 10` | View a user's past events |
+| `nostr profile [user] --kinds 1,7` | Filter events by kind |
+| `nostr profile [user] --watch` | Live-stream new events |
 | `nostr profile update` | Interactively update your Nostr profile fields |
 | `nostr accounts` | List all local accounts |
 
@@ -132,8 +138,8 @@ nostr                                    # Launch the interactive shell
 | Command | Description |
 |---------|-------------|
 | `nostr nip [number]` | View a NIP specification in the terminal |
-| `nostr version` | Print version info |
-| `nostr update` | Check for updates and self-update |
+| `nostr version` | Print version info (supports `--json`) |
+| `nostr update` | Check for updates and self-update (supports `--json`) |
 
 > **Tip:** Append `--help` to any command for detailed usage — e.g. `nostr events --help`
 
@@ -271,20 +277,48 @@ xavier> this is amazing!
 ✓ Published!
 ```
 
+### View profile and past events
+
+```bash
+# Show profile + last 5 events
+$ nostr profile fiatjaf -n 5
+Name:    fiatjaf
+NIP-05:  fiatjaf@nostr.com ✓
+About:   creating nostr and other things
+
+  30/03 10:15  working on a new relay implementation
+  30/03 09:42  just shipped NIP-XX support
+  29/03 22:10  the protocol is the product
+  29/03 18:30  testing gift-wrapped DMs
+  29/03 15:05  nostr is inevitable
+
+# Filter by event kind
+$ nostr profile fiatjaf -n 10 --kinds 1,7 --jsonl
+
+# Live-stream new events
+$ nostr profile fiatjaf --watch
+```
+
 ### Interactive DM conversation
+
+Interactive DM mode features typing indicators — you'll see "\<name\> is typing..." in the status bar. Typing indicators use ephemeral kind 10003 events, gift-wrapped in NIP-17 mode for metadata privacy.
 
 ```
 $ nostr dm xavier
 23/03 14:01  xavier   Hey, are you coming to the meetup?
 23/03 14:05  me       Yes! See you there
-
+                                          xavier is typing...
 me> Can't wait 🎉
 ✓ Sent!
 ```
 
+Use **Alt+Enter** for multiline messages in both shell and DM interactive modes.
+
 ## Bot / Agent Integration
 
 nostr-cli is designed to be used by bots and AI agents. Output is machine-parseable, colors are auto-disabled when piped, and streaming commands work great with `jq` pipelines.
+
+All agent profiles include NIP-05 identities (e.g. `agent@xavierdamman.com`) and set `bot: true` per NIP-24.
 
 ### Output parsing
 
@@ -297,6 +331,12 @@ nostr post "Hello" --json | jq '.relays[] | select(.ok) | .url'
 
 # Profile as JSON
 nostr profile alice --json | jq '.about'
+
+# View a user's recent events as JSONL
+nostr profile alice -n 10 --jsonl
+
+# Follow with alias and JSON output
+nostr follow alice --alias al --json
 ```
 
 ### Streaming events
@@ -321,6 +361,11 @@ nostr events --watch --kinds 4 --decrypt --jsonl
 
 # Stream only DMs addressed to you, decrypted
 nostr events --watch --kinds 4 --me --decrypt --jsonl
+
+# View a user's events for bot processing
+nostr profile alice -n 20 --kinds 1 --jsonl | while read -r line; do
+  echo "$line" | jq .content
+done
 
 # Stream notes with tag-based filtering
 nostr events --watch --kinds 1 --filter "t=bitcoin" --jsonl
@@ -368,9 +413,10 @@ See also: [nostrcli.sh/skill/SKILL.md](https://nostrcli.sh/skill/SKILL.md) · [n
 Run `nostr` with no arguments to launch the interactive shell:
 
 - Shows your feed from followed users
-- Type to post a note
+- Type to post a note (Alt+Enter for multiline)
 - Slash commands: `/follow`, `/unfollow`, `/dm`, `/profile`, `/switch`, `/alias`, `/aliases`
 - Tab/arrow-key autocomplete for slash commands
+- Visual line-wrapping textarea input
 
 ## Configuration
 
