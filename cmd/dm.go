@@ -171,6 +171,17 @@ func sendDMNip17(npub, skHex, myHex, targetHex, message string, relays []string)
 		return fmt.Errorf("gift wrap failed: %w", err)
 	}
 
+	// Cache a synthetic kind 14 rumor with plaintext content
+	rumor := nostr.Event{
+		Kind:      14,
+		Content:   message,
+		PubKey:    myHex,
+		CreatedAt: nostr.Now(),
+		Tags:      nostr.Tags{{"p", targetHex}},
+		ID:        forRecipient.ID,
+	}
+	_ = cache.LogDMEvent(npub, targetHex, rumor)
+
 	targetNpub, _ := nip19.EncodePublicKey(targetHex)
 	timeout := time.Duration(timeoutFlag) * time.Millisecond
 
@@ -613,6 +624,18 @@ func watchAllDMs(npub string) error {
 						senderPubHex = rumor.PubKey
 						plaintext = rumor.Content
 						protocol = "nip17"
+
+						// Determine counterparty and cache the decrypted rumor
+						counterparty := rumor.PubKey
+						if counterparty == myHex {
+							for _, tag := range rumor.Tags {
+								if len(tag) >= 2 && tag[0] == "p" {
+									counterparty = tag[1]
+									break
+								}
+							}
+						}
+						_ = cache.LogDMEvent(npub, counterparty, rumor)
 					} else {
 						// NIP-04 legacy DM
 						counterparty := ev.PubKey
@@ -920,6 +943,7 @@ func subscribeDMRelay(ctx context.Context, npub, url, skHex, myHex, targetHex st
 				if rumor.PubKey != targetHex && rumor.PubKey != myHex {
 					continue
 				}
+				_ = cache.LogDMEvent(npub, targetHex, rumor)
 				onMessage(ev, rumor.Content)
 			} else {
 				_ = cache.LogDMEvent(npub, targetHex, *ev)

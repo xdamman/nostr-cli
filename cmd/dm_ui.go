@@ -116,6 +116,10 @@ func (f *dmFeedBT) render(myHex, myName, targetName string, dimSent map[string]b
 				senderPubHex = rumor.PubKey
 				f.unwrapped[ev.ID] = unwrappedRumor{plaintext: plaintext, senderPubHex: senderPubHex}
 			}
+		} else if ev.Kind == 14 {
+			// NIP-17 decrypted rumor (from cache) — content is already plaintext
+			plaintext = ev.Content
+			senderPubHex = ev.PubKey
 		} else {
 			// NIP-04 legacy
 			var err error
@@ -345,6 +349,21 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			return m, nil
 		}
+
+		// Cache a synthetic kind 14 rumor with plaintext content
+		rumor := nostr.Event{
+			Kind:      14,
+			Content:   content,
+			PubKey:    m.myHex,
+			CreatedAt: nostr.Now(),
+			Tags:      nostr.Tags{{"p", m.targetHex}},
+			ID:        forRecipient.ID,
+		}
+		_ = cache.LogDMEvent(m.npub, m.targetHex, rumor)
+
+		// Add to feed immediately (dim = unconfirmed)
+		m.dimSent[forRecipient.ID] = true
+		m.feed.addEvents([]nostr.Event{rumor})
 
 		// Publish both events in background
 		return m, m.publishNip17Cmd(forRecipient, forSelf)
@@ -706,6 +725,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 					if rumor.PubKey != targetHex && rumor.PubKey != myHex {
 						continue
 					}
+					_ = cache.LogDMEvent(npub, targetHex, rumor)
 				} else {
 					_ = cache.LogDMEvent(npub, targetHex, *evp)
 				}
@@ -828,6 +848,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 						if rumor.PubKey != targetHex && rumor.PubKey != myHex {
 							continue
 						}
+						_ = cache.LogDMEvent(npub, targetHex, rumor)
 					} else {
 						_ = cache.LogDMEvent(npub, targetHex, *ev)
 					}
