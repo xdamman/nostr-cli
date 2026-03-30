@@ -185,6 +185,7 @@ type dmModel struct {
 	width      int
 	height     int
 	input      textinput.Model
+	draftLines []string // multiline draft: alt+enter adds lines, enter sends all
 	npub       string
 	myHex      string
 	myName     string
@@ -314,13 +315,37 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyCtrlD:
+	switch {
+	case msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD:
 		m.quitting = true
 		return m, tea.Quit
 
-	case tea.KeyEnter:
-		line := strings.TrimSpace(m.input.Value())
+	case msg.Type == tea.KeyEnter && msg.Alt:
+		// Alt+Enter: add current line to draft and continue composing
+		line := m.input.Value()
+		if line != "" || len(m.draftLines) > 0 {
+			m.draftLines = append(m.draftLines, line)
+			m.input.Reset()
+		}
+		return m, nil
+
+	case msg.Type == tea.KeyEscape && len(m.draftLines) > 0:
+		// Esc clears draft
+		m.draftLines = nil
+		return m, nil
+
+	case msg.Type == tea.KeyEnter:
+		// Collect full text from draft lines + current input
+		currentLine := m.input.Value()
+		var fullText string
+		if len(m.draftLines) > 0 {
+			allLines := append(m.draftLines, currentLine)
+			fullText = strings.Join(allLines, "\n")
+			m.draftLines = nil
+		} else {
+			fullText = currentLine
+		}
+		line := strings.TrimSpace(fullText)
 		m.input.Reset()
 		m.mentionActive = false
 		m.mentionResults = nil
@@ -629,7 +654,10 @@ func (m dmModel) View() string {
 	mentionLines := m.renderDMMentionMenu()
 	mentionHeight := len(mentionLines)
 
-	feedHeight := m.height - 2 - mentionHeight // 1 for input, 1 for status
+	// Draft lines above input
+	draftHeight := len(m.draftLines)
+
+	feedHeight := m.height - 2 - mentionHeight - draftHeight // 1 for input, 1 for status
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
@@ -641,6 +669,11 @@ func (m dmModel) View() string {
 
 	var parts []string
 	parts = append(parts, feed)
+	if draftHeight > 0 {
+		for _, dl := range m.draftLines {
+			parts = append(parts, dimStyle.Render("  │ ")+dl)
+		}
+	}
 	parts = append(parts, m.input.View())
 	if mentionHeight > 0 {
 		parts = append(parts, strings.Join(mentionLines, "\n"))

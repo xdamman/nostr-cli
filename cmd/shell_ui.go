@@ -94,9 +94,10 @@ type shellModel struct {
 	height int
 
 	// Input
-	input    textinput.Model
-	showMenu bool
-	menuSel  int
+	input      textinput.Model
+	draftLines []string // multiline draft: alt+enter adds lines, enter sends all
+	showMenu   bool
+	menuSel    int
 
 	// Mention autocomplete
 	mentionCandidates []ui.MentionCandidate
@@ -159,7 +160,7 @@ func newShellModel(npub, myHex, skHex string, relays []string, promptName string
 }
 
 func (m shellModel) Init() tea.Cmd {
-	return textinput.Blink
+	return nil
 }
 
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -232,7 +233,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ti.Prompt = cyanStyle.Render("DM to: ")
 		ti.Width = m.width - 10
 		m.dmSelectInput = ti
-		return m, textinput.Blink
+		return m, nil
 	}
 
 	// Pass through to textinput
@@ -277,13 +278,32 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyCtrlD:
+	switch {
+	case msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD:
 		m.quitting = true
 		return m, tea.Quit
 
-	case tea.KeyEnter:
-		line := strings.TrimSpace(m.input.Value())
+	case msg.Type == tea.KeyEnter && msg.Alt:
+		// Alt+Enter: add current line to draft and continue composing
+		line := m.input.Value()
+		if line != "" || len(m.draftLines) > 0 {
+			m.draftLines = append(m.draftLines, line)
+			m.input.Reset()
+		}
+		return m, nil
+
+	case msg.Type == tea.KeyEnter:
+		// Collect full text from draft lines + current input
+		currentLine := m.input.Value()
+		var fullText string
+		if len(m.draftLines) > 0 {
+			allLines := append(m.draftLines, currentLine)
+			fullText = strings.Join(allLines, "\n")
+			m.draftLines = nil
+		} else {
+			fullText = currentLine
+		}
+		line := strings.TrimSpace(fullText)
 		m.input.Reset()
 		m.mentionActive = false
 		m.mentionResults = nil
@@ -338,7 +358,7 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, publishNoteCmd(m.npub, m.relays, event)
 
-	case tea.KeyTab:
+	case msg.Type == tea.KeyTab:
 		if m.showMenu {
 			val := m.input.Value()
 			cmds := filterCommands([]byte(val))
@@ -350,13 +370,18 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case tea.KeyEscape:
+	case msg.Type == tea.KeyEscape:
 		if m.showMenu {
 			m.showMenu = false
 			return m, nil
 		}
+		// Esc clears draft if present
+		if len(m.draftLines) > 0 {
+			m.draftLines = nil
+			return m, nil
+		}
 
-	case tea.KeyUp:
+	case msg.Type == tea.KeyUp:
 		if m.showMenu {
 			if m.menuSel > 0 {
 				m.menuSel--
@@ -364,7 +389,7 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case tea.KeyDown:
+	case msg.Type == tea.KeyDown:
 		if m.showMenu {
 			cmds := filterCommands([]byte(m.input.Value()))
 			if m.menuSel < len(cmds)-1 {
@@ -491,8 +516,7 @@ func (m shellModel) View() string {
 		return m.renderDMComposeView()
 	}
 
-	// Layout: feed area | status line | input line
-	// If menu is shown, it sits between status and input
+	// Layout: feed area | draft lines | input line | menu | mention | status
 	menuLines := m.renderMenu()
 	menuHeight := len(menuLines)
 
@@ -502,8 +526,11 @@ func (m shellModel) View() string {
 	mentionLines := m.renderMentionMenu()
 	mentionHeight := len(mentionLines)
 
+	// Draft lines above input
+	draftHeight := len(m.draftLines)
+
 	// Calculate feed height
-	feedHeight := m.height - 2 - menuHeight - mentionHeight // 1 for status, 1 for input
+	feedHeight := m.height - 2 - menuHeight - mentionHeight - draftHeight // 1 for status, 1 for input
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
@@ -511,9 +538,14 @@ func (m shellModel) View() string {
 	// Render feed: take last feedHeight lines
 	feed := m.renderFeed(feedHeight)
 
-	// Build the view: feed | input | menu | mention | status bar
+	// Build the view: feed | draft | input | menu | mention | status bar
 	var parts []string
 	parts = append(parts, feed)
+	if draftHeight > 0 {
+		for _, dl := range m.draftLines {
+			parts = append(parts, dimStyle.Render("  │ ")+dl)
+		}
+	}
 	parts = append(parts, m.input.View())
 	if menuHeight > 0 {
 		parts = append(parts, strings.Join(menuLines, "\n"))
@@ -595,7 +627,7 @@ func (m shellModel) renderStatus() string {
 	if m.status != "" {
 		return dimStyle.Render("  " + m.status)
 	}
-	hint := fmt.Sprintf("type / for commands, enter to post to %d relays, ctrl+c to exit", len(m.relays))
+	hint := fmt.Sprintf("type / for commands, alt+enter for newline, enter to post to %d relays", len(m.relays))
 	return dimStyle.Render("  " + hint)
 }
 
@@ -848,7 +880,7 @@ func (m shellModel) handleDMSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ti.Prompt = cyanStyle.Render("DM to "+selected.DisplayName+": ")
 			ti.Width = m.width - len("DM to "+selected.DisplayName+": ") - 3
 			m.dmComposeInput = ti
-			return m, textinput.Blink
+			return m, nil
 		} else if val != "" {
 			// User typed a raw npub or name, try to use it directly
 			// Create a candidate from raw input
@@ -864,7 +896,7 @@ func (m shellModel) handleDMSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ti.Prompt = cyanStyle.Render("DM to "+val+": ")
 			ti.Width = m.width - len("DM to "+val+": ") - 3
 			m.dmComposeInput = ti
-			return m, textinput.Blink
+			return m, nil
 		}
 		return m, nil
 	case tea.KeyEscape, tea.KeyCtrlC:
