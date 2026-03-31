@@ -196,13 +196,8 @@ type dmModel struct {
 	useNip04   bool   // true = NIP-04, false = NIP-17
 	protoLabel string // "NIP-17" or "NIP-04 — peer uses legacy protocol"
 
-	// Mention autocomplete
+	// Mention candidates (used for p-tag extraction at send time)
 	mentionCandidates []ui.MentionCandidate
-	mentionResults    []ui.MentionCandidate
-	mentionActive     bool
-	mentionIdx        int
-	mentionQuery      string
-	selectedMentions  []ui.MentionCandidate
 
 	// Typing indicators
 	lastTypingSent  time.Time // throttle outgoing typing events
@@ -222,6 +217,9 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 
 	// Disable the help bar below the input
 	ed.KeyMap.MoreHelp.SetEnabled(false)
+
+	// Wire @ mention autocomplete (via Tab key)
+	// Candidates are set later in interactiveDMBubbleTea after loading.
 	ed.MaxHeight = 5
 	ed.CharLimit = 0
 	ed.ShowLineNumbers = false
@@ -303,31 +301,6 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Handle mention autocomplete navigation first
-	if m.mentionActive {
-		switch msg.Type {
-		case tea.KeyUp:
-			if m.mentionIdx > 0 {
-				m.mentionIdx--
-			}
-			return m, nil
-		case tea.KeyDown:
-			if m.mentionIdx < len(m.mentionResults)-1 {
-				m.mentionIdx++
-			}
-			return m, nil
-		case tea.KeyTab, tea.KeyEnter:
-			if len(m.mentionResults) > 0 && m.mentionIdx < len(m.mentionResults) {
-				m = m.confirmDMMention()
-			}
-			return m, nil
-		case tea.KeyEscape:
-			m.mentionActive = false
-			m.mentionResults = nil
-			return m, nil
-		}
-	}
-
 	// Ctrl+C: bubbline clears input if non-empty, or sends ErrInterrupted if empty.
 	// We intercept Ctrl+C on empty input to quit.
 	if msg.Type == tea.KeyCtrlC {
@@ -353,14 +326,11 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Forward to editline (handles multiline, history, Enter→InputCompleteMsg)
+	// Forward to editline (handles multiline, history, autocomplete, Enter→InputCompleteMsg)
 	_, cmd := m.input.Update(msg)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-
-	// Check mention trigger
-	m.updateDMMentionState()
 
 	return m, tea.Batch(cmds...)
 }
@@ -375,23 +345,21 @@ func (m dmModel) handleSend() (tea.Model, tea.Cmd) {
 	}
 
 	m.input.Reset()
-	m.mentionActive = false
-	m.mentionResults = nil
 
 	if line == "" {
 		return m, m.input.Focus()
 	}
 
-	// Process mentions
+	// Extract mentions from text (bubbline autocomplete inserts @DisplayName)
 	content := line
 	var extraTags nostr.Tags
-	if len(m.selectedMentions) > 0 {
+	mentions := ui.ExtractMentionsFromText(line, m.mentionCandidates)
+	if len(mentions) > 0 {
 		var mentionTags [][]string
-		content, mentionTags = ui.ReplaceMentionsForEvent(line, m.selectedMentions)
+		content, mentionTags = ui.ReplaceMentionsForEvent(line, mentions)
 		for _, tag := range mentionTags {
 			extraTags = append(extraTags, nostr.Tag(tag))
 		}
-		m.selectedMentions = nil
 	}
 
 	if m.useNip04 {
@@ -499,61 +467,7 @@ func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, use
 	internalRelay.PublishEventQuiet(ctx, wrapped, relays)
 }
 
-func (m dmModel) confirmDMMention() dmModel {
-	selected := m.mentionResults[m.mentionIdx]
-	// Record the selected mention for tag replacement at send time.
-	// The @query text stays in the input as-is since bubbline doesn't
-	// expose SetValue. ReplaceMentionsForEvent will match @DisplayName.
-	m.selectedMentions = append(m.selectedMentions, selected)
-	m.mentionActive = false
-	m.mentionResults = nil
-	return m
-}
 
-func (m *dmModel) updateDMMentionState() {
-	if len(m.mentionCandidates) == 0 {
-		return
-	}
-	val := m.input.Value()
-	if val == "" {
-		m.mentionActive = false
-		return
-	}
-
-	// Assume cursor at end of text
-	textBeforeCursor := val
-
-	atIdx := -1
-	for i := len(textBeforeCursor) - 1; i >= 0; i-- {
-		if textBeforeCursor[i] == ' ' || textBeforeCursor[i] == '\n' {
-			break
-		}
-		if textBeforeCursor[i] == '@' {
-			if i == 0 || textBeforeCursor[i-1] == ' ' || textBeforeCursor[i-1] == '\n' {
-				atIdx = i
-			}
-			break
-		}
-	}
-
-	if atIdx < 0 {
-		m.mentionActive = false
-		m.mentionResults = nil
-		return
-	}
-
-	query := textBeforeCursor[atIdx+1:]
-	m.mentionQuery = query
-	results := ui.FilterCandidates(m.mentionCandidates, query)
-	if len(results) == 0 {
-		m.mentionActive = false
-		m.mentionResults = nil
-		return
-	}
-	m.mentionActive = true
-	m.mentionResults = results
-	m.mentionIdx = 0
-}
 
 func (m dmModel) publishDMCmd(event nostr.Event) tea.Cmd {
 	npub := m.npub
@@ -640,8 +554,6 @@ func (m dmModel) View() string {
 	}
 
 	statusLine := m.renderDMStatus()
-	mentionLines := m.renderDMMentionMenu()
-	mentionHeight := len(mentionLines)
 
 	// Editline renders its own view including prompt and a trailing help line.
 	// Strip the help/search line (last line after the final \n).
@@ -655,7 +567,7 @@ func (m dmModel) View() string {
 	inputView = strings.Replace(inputView, plainPrompt, colorPrompt, 1)
 	inputHeight := strings.Count(inputView, "\n") + 1
 
-	feedHeight := m.height - 1 - inputHeight - mentionHeight // 1 for status
+	feedHeight := m.height - 1 - inputHeight // 1 for status
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
@@ -668,47 +580,8 @@ func (m dmModel) View() string {
 	var parts []string
 	parts = append(parts, feed)
 	parts = append(parts, inputView)
-	if mentionHeight > 0 {
-		parts = append(parts, strings.Join(mentionLines, "\n"))
-	}
 	parts = append(parts, statusLine)
 	return strings.Join(parts, "\n")
-}
-
-func (m dmModel) renderDMMentionMenu() []string {
-	if !m.mentionActive || len(m.mentionResults) == 0 {
-		return nil
-	}
-
-	maxVisible := 7
-	if len(m.mentionResults) < maxVisible {
-		maxVisible = len(m.mentionResults)
-	}
-
-	start := 0
-	if m.mentionIdx >= maxVisible {
-		start = m.mentionIdx - maxVisible + 1
-	}
-	end := start + maxVisible
-	if end > len(m.mentionResults) {
-		end = len(m.mentionResults)
-		start = end - maxVisible
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	var lines []string
-	for i := start; i < end; i++ {
-		c := m.mentionResults[i]
-		entry := c.DisplayName + " (" + ui.TruncateNpub(c.Npub) + ")"
-		if i == m.mentionIdx {
-			lines = append(lines, "  "+cyanStyle.Render("→ "+entry))
-		} else {
-			lines = append(lines, "    "+dimStyle.Render(entry))
-		}
-	}
-	return lines
 }
 
 func (m dmModel) renderDMStatus() string {
@@ -782,8 +655,11 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 
 	m := newDMModel(npub, myHex, myName, skHex, targetHex, targetName, relays, sharedSecret)
 
-	// Load mention candidates for @ autocomplete
+	// Load mention candidates for @ autocomplete (via Tab in bubbline)
 	m.mentionCandidates = ui.LoadMentionCandidates(npub)
+	if len(m.mentionCandidates) > 0 {
+		m.input.AutoComplete = ui.MentionAutoComplete(m.mentionCandidates)
+	}
 
 	// Load cached DM history into model
 	storedEvents, _ := cache.QueryDMEvents(npub, targetHex)

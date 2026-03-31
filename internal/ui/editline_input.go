@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/knz/bubbline/complete"
 	"github.com/knz/bubbline/editline"
 	"golang.org/x/term"
 )
@@ -23,6 +24,97 @@ type EditlineInputResult struct {
 	Cancelled bool
 }
 
+// -- Mention completions for bubbline --
+
+// mentionCompletions implements editline.Completions for @ mentions.
+type mentionCompletions struct {
+	candidates []MentionCandidate
+	start      int // start column of the @word on the line
+	end        int // end column (cursor position)
+	cursor     int // cursor column
+}
+
+func (mc *mentionCompletions) NumCategories() int            { return 1 }
+func (mc *mentionCompletions) CategoryTitle(_ int) string    { return "mentions" }
+func (mc *mentionCompletions) NumEntries(_ int) int          { return len(mc.candidates) }
+func (mc *mentionCompletions) Entry(_, i int) complete.Entry { return mentionEntry{mc, i} }
+func (mc *mentionCompletions) Candidate(e complete.Entry) editline.Candidate {
+	return e.(mentionEntry)
+}
+
+type mentionEntry struct {
+	mc *mentionCompletions
+	i  int
+}
+
+func (e mentionEntry) Title() string       { return "@" + e.mc.candidates[e.i].DisplayName }
+func (e mentionEntry) Description() string { return TruncateNpub(e.mc.candidates[e.i].Npub) }
+func (e mentionEntry) Replacement() string { return "@" + e.mc.candidates[e.i].DisplayName }
+func (e mentionEntry) MoveRight() int      { return e.mc.end - e.mc.cursor }
+func (e mentionEntry) DeleteLeft() int     { return e.mc.end - e.mc.start }
+
+// MentionAutoComplete builds the AutoCompleteFn for bubbline.
+// Exported so DM and other commands can wire it into their own editline models.
+func MentionAutoComplete(candidates []MentionCandidate) editline.AutoCompleteFn {
+	return func(entireInput [][]rune, line, col int) (string, editline.Completions) {
+		if len(candidates) == 0 || line >= len(entireInput) {
+			return "", nil
+		}
+
+		lineRunes := entireInput[line]
+		if col > len(lineRunes) {
+			col = len(lineRunes)
+		}
+
+		// Find @ before cursor on this line
+		atIdx := -1
+		for i := col - 1; i >= 0; i-- {
+			r := lineRunes[i]
+			if r == ' ' || r == '\n' || r == '\t' {
+				break
+			}
+			if r == '@' {
+				// @ must be at start of line or preceded by space
+				if i == 0 || lineRunes[i-1] == ' ' || lineRunes[i-1] == '\n' || lineRunes[i-1] == '\t' {
+					atIdx = i
+				}
+				break
+			}
+		}
+
+		if atIdx < 0 {
+			return "", nil
+		}
+
+		// Extract query (after @, before cursor)
+		query := string(lineRunes[atIdx+1 : col])
+
+		// Find end of the @word (past cursor)
+		endIdx := col
+		for endIdx < len(lineRunes) {
+			r := lineRunes[endIdx]
+			if r == ' ' || r == '\n' || r == '\t' {
+				break
+			}
+			endIdx++
+		}
+
+		results := FilterCandidates(candidates, query)
+		if len(results) == 0 {
+			return "", nil
+		}
+
+		return "", &mentionCompletions{
+			candidates: results,
+			start:      atIdx,
+			end:        endIdx,
+			cursor:     col,
+		}
+	}
+}
+
+// -- Editline input model --
+
 type editlineInputModel struct {
 	editor *editline.Model
 	hint   string
@@ -31,13 +123,9 @@ type editlineInputModel struct {
 	value     string
 	cancelled bool
 
-	// mention tracking
+	// mention tracking (for p-tag generation at send time)
 	mentionCandidates []MentionCandidate
 	selectedMentions  []MentionCandidate
-	mentionResults    []MentionCandidate
-	mentionActive     bool
-	mentionIdx        int
-	mentionQuery      string
 
 	width  int
 	height int
@@ -55,6 +143,11 @@ func newEditlineInputModel(cfg EditlineInputConfig) editlineInputModel {
 		return true // Enter always submits
 	}
 	ed.KeyMap.MoreHelp.SetEnabled(false)
+
+	// Wire @ mention autocomplete via Tab
+	if len(cfg.Candidates) > 0 {
+		ed.AutoComplete = MentionAutoComplete(cfg.Candidates)
+	}
 
 	return editlineInputModel{
 		editor:            ed,
@@ -77,36 +170,11 @@ func (m editlineInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editline.InputCompleteMsg:
 		m.value = strings.TrimSpace(m.editor.Value())
+		// Collect selected mentions from the final text
+		m.selectedMentions = ExtractMentionsFromText(m.value, m.mentionCandidates)
 		return m, tea.Quit
 
 	case tea.KeyMsg:
-		// Handle mention autocomplete navigation first
-		if m.mentionActive {
-			switch msg.Type {
-			case tea.KeyUp:
-				if m.mentionIdx > 0 {
-					m.mentionIdx--
-				}
-				return m, nil
-			case tea.KeyDown:
-				if m.mentionIdx < len(m.mentionResults)-1 {
-					m.mentionIdx++
-				}
-				return m, nil
-			case tea.KeyTab, tea.KeyEnter:
-				if len(m.mentionResults) > 0 && m.mentionIdx < len(m.mentionResults) {
-					m.selectedMentions = append(m.selectedMentions, m.mentionResults[m.mentionIdx])
-					m.mentionActive = false
-					m.mentionResults = nil
-				}
-				return m, nil
-			case tea.KeyEscape:
-				m.mentionActive = false
-				m.mentionResults = nil
-				return m, nil
-			}
-		}
-
 		if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD || msg.Type == tea.KeyEscape {
 			m.cancelled = true
 			return m, tea.Quit
@@ -114,10 +182,6 @@ func (m editlineInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	_, cmd := m.editor.Update(msg)
-
-	// Update mention state
-	m.updateMentionState()
-
 	return m, cmd
 }
 
@@ -132,36 +196,6 @@ func (m editlineInputModel) View() string {
 	b.WriteString(edView)
 	b.WriteString("\n")
 
-	// Mention dropdown
-	if m.mentionActive && len(m.mentionResults) > 0 {
-		maxVisible := 5
-		if len(m.mentionResults) < maxVisible {
-			maxVisible = len(m.mentionResults)
-		}
-		start := 0
-		if m.mentionIdx >= maxVisible {
-			start = m.mentionIdx - maxVisible + 1
-		}
-		end := start + maxVisible
-		if end > len(m.mentionResults) {
-			end = len(m.mentionResults)
-			start = end - maxVisible
-			if start < 0 {
-				start = 0
-			}
-		}
-		for i := start; i < end; i++ {
-			c := m.mentionResults[i]
-			entry := c.DisplayName + " (" + TruncateNpub(c.Npub) + ")"
-			if i == m.mentionIdx {
-				b.WriteString("  " + inlineCyanStyle.Render("→ "+entry))
-			} else {
-				b.WriteString("    " + inlineDimStyle.Render(entry))
-			}
-			b.WriteString("\n")
-		}
-	}
-
 	// Hint line
 	if m.hint != "" {
 		b.WriteString(inlineDimStyle.Render("  " + m.hint))
@@ -171,48 +205,19 @@ func (m editlineInputModel) View() string {
 	return b.String()
 }
 
-func (m *editlineInputModel) updateMentionState() {
-	if len(m.mentionCandidates) == 0 {
-		return
-	}
-	val := m.editor.Value()
-	if val == "" {
-		m.mentionActive = false
-		return
-	}
-
-	textBeforeCursor := val
-
-	atIdx := -1
-	for i := len(textBeforeCursor) - 1; i >= 0; i-- {
-		if textBeforeCursor[i] == ' ' || textBeforeCursor[i] == '\n' {
-			break
-		}
-		if textBeforeCursor[i] == '@' {
-			if i == 0 || textBeforeCursor[i-1] == ' ' || textBeforeCursor[i-1] == '\n' {
-				atIdx = i
-			}
-			break
+// ExtractMentionsFromText scans the final text for @DisplayName patterns
+// and returns matching MentionCandidates for p-tag generation.
+func ExtractMentionsFromText(text string, candidates []MentionCandidate) []MentionCandidate {
+	var found []MentionCandidate
+	seen := make(map[string]bool)
+	for _, c := range candidates {
+		tag := "@" + c.DisplayName
+		if strings.Contains(text, tag) && !seen[c.PubHex] {
+			seen[c.PubHex] = true
+			found = append(found, c)
 		}
 	}
-
-	if atIdx < 0 {
-		m.mentionActive = false
-		m.mentionResults = nil
-		return
-	}
-
-	query := textBeforeCursor[atIdx+1:]
-	m.mentionQuery = query
-	results := FilterCandidates(m.mentionCandidates, query)
-	if len(results) == 0 {
-		m.mentionActive = false
-		m.mentionResults = nil
-		return
-	}
-	m.mentionActive = true
-	m.mentionResults = results
-	m.mentionIdx = 0
+	return found
 }
 
 // RunEditlineInput runs a bubbletea program with editline for multiline input.
