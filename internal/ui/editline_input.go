@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/knz/bubbline/complete"
 	"github.com/knz/bubbline/editline"
@@ -143,6 +144,10 @@ func newEditlineInputModel(cfg EditlineInputConfig) editlineInputModel {
 		return true // Enter always submits
 	}
 	ed.KeyMap.MoreHelp.SetEnabled(false)
+
+	// Shift+Enter (Alt+Enter in terminals) inserts newline; disable Ctrl+O
+	ed.KeyMap.AlwaysNewline = key.NewBinding(key.WithKeys("alt+enter", "alt+\r"))
+	ed.KeyMap.AlwaysComplete.SetEnabled(false)
 
 	// Wire @ mention autocomplete via Tab
 	if len(cfg.Candidates) > 0 {

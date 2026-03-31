@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/knz/bubbline/editline"
 	"github.com/nbd-wtf/go-nostr"
@@ -217,6 +218,10 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 
 	// Disable the help bar below the input
 	ed.KeyMap.MoreHelp.SetEnabled(false)
+
+	// Shift+Enter (Alt+Enter in terminals) inserts newline; disable Ctrl+O
+	ed.KeyMap.AlwaysNewline = key.NewBinding(key.WithKeys("alt+enter", "alt+\r"))
+	ed.KeyMap.AlwaysComplete.SetEnabled(false)
 
 	// Wire @ mention autocomplete (via Tab key)
 	// Candidates are set later in interactiveDMBubbleTea after loading.

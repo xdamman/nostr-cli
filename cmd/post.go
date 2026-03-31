@@ -172,7 +172,7 @@ func runPost(cmd *cobra.Command, args []string) error {
 		message = strings.TrimSpace(string(data))
 	} else {
 		prompt := promptName + "> "
-		hint := fmt.Sprintf("enter to post to %d relays · ctrl+o for newline · ctrl+c to cancel", len(relays))
+		hint := fmt.Sprintf("enter to post to %d relays · shift+enter for newline · ctrl+c to cancel", len(relays))
 		cache.LoadProfileCache(npub)
 		result := ui.RunEditlineInput(ui.EditlineInputConfig{
 			Prompt:     prompt,
