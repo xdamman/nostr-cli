@@ -154,7 +154,7 @@ Typing indicators:
 - Shows "\<name\> is typing..." in the status bar
 
 Multiline input:
-- Use Alt+Enter to insert newlines in interactive DM and shell modes
+- Use Shift+Enter to insert newlines in interactive DM and shell modes
 - Visual line-wrapping textarea for long messages
 
 Watch mode stderr output:

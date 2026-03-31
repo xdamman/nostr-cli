@@ -30,7 +30,7 @@ Interacting with Nostr shouldn't require a GUI. `nostr` gives you a fast, script
 - 📖 Built-in NIP reference viewer
 - 🔄 Sync local events with relays
 - 🐚 Interactive shell with feed, posting, and slash commands
-- ✏️ Multiline input with Alt+Enter in shell and DM modes
+- ✏️ Multiline input with Shift+Enter in shell and DM modes
 - ⌨️ Typing indicators in interactive DM mode (ephemeral kind 10003)
 - 🤖 Bot/agent-friendly output formats (--json, --jsonl, --raw)
 
@@ -132,6 +132,7 @@ nostr                                    # Launch the interactive shell
 | `nostr sync` | Sync local events with relays (interactive) |
 | `nostr alias [name] [npub\|nip05]` | Create an alias for a user |
 | `nostr aliases` | List all aliases |
+| `nostr generate nip05` | Generate a NIP-05 nostr.json file |
 
 ### Reference
 
@@ -312,7 +313,7 @@ me> Can't wait 🎉
 ✓ Sent!
 ```
 
-Use **Alt+Enter** for multiline messages in both shell and DM interactive modes.
+Use **Shift+Enter** for multiline messages in both shell and DM interactive modes.
 
 ## Bot / Agent Integration
 
@@ -413,7 +414,7 @@ See also: [nostrcli.sh/skill/SKILL.md](https://nostrcli.sh/skill/SKILL.md) · [n
 Run `nostr` with no arguments to launch the interactive shell:
 
 - Shows your feed from followed users
-- Type to post a note (Alt+Enter for multiline)
+- Type to post a note (Shift+Enter for multiline)
 - Slash commands: `/follow`, `/unfollow`, `/dm`, `/profile`, `/switch`, `/alias`, `/aliases`
 - Tab/arrow-key autocomplete for slash commands
 - Visual line-wrapping textarea input

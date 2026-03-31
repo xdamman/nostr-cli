@@ -154,7 +154,7 @@ Typing indicators:
 - Shows "\<name\> is typing..." in the status bar
 
 Multiline input:
-- Use Alt+Enter to insert newlines in interactive DM and shell modes
+- Use Shift+Enter to insert newlines in interactive DM and shell modes
 - Visual line-wrapping textarea for long messages
 
 Watch mode stderr output:
@@ -324,6 +324,14 @@ nostr aliases
 nostr sync                 # Interactive relay selection and sync
 nostr sync --relay <url>   # Sync with a specific relay
 nostr sync --json          # Machine-readable sync output
+```
+
+### Generate NIP-05
+```bash
+nostr generate nip05                                    # Interactive mode
+nostr generate nip05 --address user@domain.com          # Use active account
+nostr generate nip05 --address user@domain.com --npub npub1...
+nostr generate nip05 --address user@domain.com --json   # Output JSON to stdout
 ```
 
 ### Account Management

@@ -291,7 +291,7 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case msg.Type == tea.KeyEnter && msg.Alt:
-		// Alt+Enter / Shift+Enter: insert newline
+		// Shift+Enter (Alt+Enter): insert newline
 		m.input.InsertString("\n")
 		return m, nil
 
@@ -627,7 +627,7 @@ func (m shellModel) renderStatus() string {
 	if m.status != "" {
 		return dimStyle.Render("  " + m.status)
 	}
-	hint := fmt.Sprintf("type / for commands, alt+enter for newline, enter to post to %d relays", len(m.relays))
+	hint := fmt.Sprintf("type / for commands, shift+enter for newline, enter to post to %d relays", len(m.relays))
 	return dimStyle.Render("  " + hint)
 }
 

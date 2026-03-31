@@ -101,24 +101,24 @@ func resolveNIP05(input string) (string, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		return "", fmt.Errorf("NIP-05 lookup failed: %w", err)
+		return "", fmt.Errorf("Error: NIP-05 lookup failed for %s\n\n  No .well-known/nostr.json found at %s\n\n  To set up NIP-05 verification, add a nostr.json file at:\n    https://%s/.well-known/nostr.json\n\n  More info: https://nostrcli.sh/nip05", input, domain, domain)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("NIP-05 lookup returned %d", resp.StatusCode)
+	if resp.StatusCode == 404 || resp.StatusCode != 200 {
+		return "", fmt.Errorf("Error: NIP-05 lookup failed for %s\n\n  No .well-known/nostr.json found at %s\n\n  To set up NIP-05 verification, add a nostr.json file at:\n    https://%s/.well-known/nostr.json\n\n  More info: https://nostrcli.sh/nip05", input, domain, domain)
 	}
 
 	var result struct {
 		Names map[string]string `json:"names"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("invalid NIP-05 response: %w", err)
+		return "", fmt.Errorf("Error: NIP-05 lookup failed for %s\n\n  Invalid JSON at %s/.well-known/nostr.json\n\n  More info: https://nostrcli.sh/nip05", input, domain)
 	}
 
 	hex, ok := result.Names[user]
 	if !ok {
-		return "", fmt.Errorf("NIP-05: user %q not found at %s", user, domain)
+		return "", fmt.Errorf("Error: NIP-05 lookup failed for %s\n\n  User %q not found in %s/.well-known/nostr.json\n\n  Add this entry to your nostr.json:\n    %q: \"<your-npub-hex>\"\n\n  Generate with: nostr generate nip05 --address %s\n  More info: https://nostrcli.sh/nip05", input, user, domain, user, input)
 	}
 	return hex, nil
 }

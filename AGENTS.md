@@ -119,6 +119,14 @@ nostr aliases                               # List all aliases
 nostr alias rm alice                        # Remove alias
 ```
 
+### Generate NIP-05
+```bash
+nostr generate nip05                                    # Interactive mode
+nostr generate nip05 --address user@domain.com          # Use active account
+nostr generate nip05 --address user@domain.com --npub npub1...
+nostr generate nip05 --address user@domain.com --json   # Output JSON to stdout
+```
+
 ## Global Flags
 
 | Flag | Description |

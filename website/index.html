@@ -172,32 +172,19 @@
 
     section h2 .accent { color: var(--purple); }
 
-    /* ---- Video ---- */
-    .video-section {
+    /* ---- Demo section ---- */
+    .demo-section {
       max-width: 960px;
       margin: 0 auto;
       padding: 0 24px 60px;
     }
 
-    .video-wrapper {
+    .demo-wrapper {
       position: relative;
       border-radius: 12px;
       overflow: hidden;
       border: 1px solid var(--border);
       box-shadow: 0 20px 80px rgba(124, 58, 237, 0.08);
-    }
-
-    .video-wrapper video {
-      width: 100%;
-      display: block;
-    }
-
-    .video-placeholder {
-      background: var(--bg-card);
-      padding: 120px 24px;
-      text-align: center;
-      color: var(--text-dim);
-      font-size: 1.1rem;
     }
 
     /* ---- Terminal blocks ---- */
@@ -417,8 +404,8 @@
   </div>
 
   <!-- Animated Terminal Demo -->
-  <div class="video-section">
-    <div class="video-wrapper">
+  <div class="demo-section">
+    <div class="demo-wrapper">
       <div class="demo-terminal">
         <div class="terminal-bar">
           <div class="terminal-dot red"></div>
@@ -570,7 +557,7 @@
         <div class="dim">23/03 14:05  me       Yes! See you there</div>
         <div class="dim" style="color: #58a6ff; font-style: italic;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;xavier is typing...</div>
         <div>&nbsp;</div>
-        <div><span class="input">me&gt;</span> Can't wait! <span class="dim">(Alt+Enter for multiline)</span></div>
+        <div><span class="input">me&gt;</span> Can't wait! <span class="dim">(Shift+Enter for multiline)</span></div>
         <div class="success">&#10003; Sent!</div>
       </div>
     </div>
@@ -594,7 +581,7 @@
       </div>
       <div class="feature">
         <h3>Encrypted DMs</h3>
-        <p>NIP-17 gift-wrapped DMs with typing indicators. NIP-04 legacy supported. Interactive chat with Alt+Enter multiline.</p>
+        <p>NIP-17 gift-wrapped DMs with typing indicators. NIP-04 legacy supported. Interactive chat with Shift+Enter multiline.</p>
       </div>
       <div class="feature">
         <h3>Profile &amp; Events</h3>
@@ -602,7 +589,7 @@
       </div>
       <div class="feature">
         <h3>Interactive shell</h3>
-        <p>Live feed, posting, and slash commands. Multiline with Alt+Enter. Like a tiny Nostr client in your terminal.</p>
+        <p>Live feed, posting, and slash commands. Multiline with Shift+Enter. Like a tiny Nostr client in your terminal.</p>
       </div>
       <div class="feature">
         <h3>Built-in NIP viewer</h3>
@@ -648,6 +635,7 @@
       <tr><td>nostr relays</td><td>Manage relays (add, remove, check status)</td></tr>
       <tr><td>nostr sync</td><td>Sync local events with relays</td></tr>
       <tr><td>nostr alias [name] [npub|nip05]</td><td>Create an alias for quick access</td></tr>
+      <tr><td>nostr generate nip05</td><td>Generate a NIP-05 nostr.json file (<a href="/nip05/" style="color:var(--purple-light)">setup guide</a>)</td></tr>
 
       <tr><td colspan="2" class="commands-group">Reference</td></tr>
       <tr><td>nostr nip [number]</td><td>View a NIP specification in the terminal</td></tr>

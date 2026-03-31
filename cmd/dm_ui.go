@@ -328,7 +328,7 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case msg.Type == tea.KeyEnter && msg.Alt:
-		// Alt+Enter: insert newline
+		// Shift+Enter (Alt+Enter): insert newline
 		m.input.InsertString("\n")
 		return m, nil
 

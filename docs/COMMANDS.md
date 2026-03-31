@@ -194,7 +194,7 @@ nostr dm [user] --watch      # Stream DMs with a specific user
 - Shows "\<name\> is typing..." in the status bar
 
 **Multiline input:**
-- Use Alt+Enter to insert newlines in interactive DM mode
+- Use Shift+Enter to insert newlines in interactive DM mode
 - Visual line-wrapping textarea for long messages
 
 **Watch mode:**
@@ -414,12 +414,57 @@ nostr nip44
 
 ---
 
+## `nostr generate nip05`
+
+**Priority:** P1  
+**NIPs:** NIP-05
+
+Generate a `.well-known/nostr.json` file for NIP-05 identity verification.
+
+```
+nostr generate nip05                                    # Interactive mode
+nostr generate nip05 --address user@domain.com          # Use active account's pubkey
+nostr generate nip05 --address user@domain.com --npub npub1...
+nostr generate nip05 --address user@domain.com --json   # Output JSON to stdout
+```
+
+**Interactive mode (no flags):**
+1. Prompt: "NIP-05 address (user@domain): "
+2. Prompt: "npub (leave blank to use active account): "
+3. Fetch existing `https://<domain>/.well-known/nostr.json` (if accessible)
+4. Merge the new entry into existing names (or create new file)
+5. Save as `nostr.json` in current directory
+6. Print setup instructions
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--address <user@domain>` | NIP-05 address |
+| `--npub <npub1...>` | Public key (defaults to active account) |
+| `--json` | Output generated nostr.json to stdout |
+
+**Output file format:**
+```json
+{
+  "names": {
+    "user": "hex-pubkey-here"
+  }
+}
+```
+
+**Behavior:**
+- If the domain has an existing nostr.json, it is fetched, parsed, and merged (preserving other entries)
+- If fetch fails (404, network error), a new file is created from scratch
+- After saving, prints instructions for uploading and configuring CORS headers
+
+---
+
 ## Interactive Shell
 
 Run `nostr` with no arguments to launch the interactive shell:
 
 - Shows your feed from followed users
-- Type to post a note (Alt+Enter for multiline)
+- Type to post a note (Shift+Enter for multiline)
 - Visual line-wrapping textarea input
 - Slash commands: `/follow`, `/unfollow`, `/dm`, `/profile`, `/switch`, `/alias`, `/aliases`
 - Tab/arrow-key autocomplete for slash commands and @ mentions
