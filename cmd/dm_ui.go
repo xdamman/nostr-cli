@@ -215,8 +215,12 @@ var dmProgram *tea.Program
 
 func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays []string, sharedSecret []byte) dmModel {
 	ed := editline.New(0, 0)
-	ed.Prompt = greenStyle.Render(myName) + "> "
-	ed.NextPrompt = strings.Repeat(" ", len(myName)+2)
+	prompt := greenStyle.Render(myName) + "> "
+	ed.Prompt = prompt
+	ed.NextPrompt = " " // minimal continuation indent
+
+	// Disable the help bar below the input
+	ed.KeyMap.MoreHelp.SetEnabled(false)
 	ed.MaxHeight = 5
 	ed.CharLimit = 0
 	ed.ShowLineNumbers = false
@@ -633,8 +637,12 @@ func (m dmModel) View() string {
 	mentionLines := m.renderDMMentionMenu()
 	mentionHeight := len(mentionLines)
 
-	// Editline renders its own view including prompt; count its lines
+	// Editline renders its own view including prompt and a trailing help line.
+	// Strip the help/search line (last line after the final \n).
 	inputView := m.input.View()
+	if idx := strings.LastIndex(inputView, "\n"); idx >= 0 {
+		inputView = inputView[:idx]
+	}
 	inputHeight := strings.Count(inputView, "\n") + 1
 
 	feedHeight := m.height - 1 - inputHeight - mentionHeight // 1 for status
