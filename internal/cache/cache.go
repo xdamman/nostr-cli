@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -341,4 +342,87 @@ func GetEventsByAuthor(npub string, pubkey string) ([]nostr.Event, error) {
 	return QueryEvents(npub, func(ev nostr.Event) bool {
 		return ev.PubKey == pubkey
 	})
+}
+
+// DMConversation represents a cached DM conversation with a counterparty.
+type DMConversation struct {
+	CounterpartyHex  string
+	CounterpartyNpub string
+	LastMessageAt    nostr.Timestamp
+	LastMessageText  string
+	MessageCount     int
+}
+
+// ListDMConversations scans the directmessages directory and returns
+// a list of conversations sorted by most recent message first.
+func ListDMConversations(npub string) ([]DMConversation, error) {
+	dir, err := config.ProfileDir(npub)
+	if err != nil {
+		return nil, err
+	}
+	dmDir := filepath.Join(dir, "directmessages")
+	entries, err := os.ReadDir(dmDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var convos []DMConversation
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		counterpartyNpub := strings.TrimSuffix(e.Name(), ".jsonl")
+
+		// Read the file to get last message and count
+		path := filepath.Join(dmDir, e.Name())
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+
+		var lastEvent nostr.Event
+		count := 0
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			var ev nostr.Event
+			if json.Unmarshal(scanner.Bytes(), &ev) == nil {
+				count++
+				if ev.CreatedAt >= lastEvent.CreatedAt {
+					lastEvent = ev
+				}
+			}
+		}
+		f.Close()
+
+		if count == 0 {
+			continue
+		}
+
+		// Derive hex from npub
+		counterpartyHex := ""
+		if strings.HasPrefix(counterpartyNpub, "npub1") {
+			if _, v, err := nip19.Decode(counterpartyNpub); err == nil {
+				counterpartyHex = v.(string)
+			}
+		}
+
+		convos = append(convos, DMConversation{
+			CounterpartyHex:  counterpartyHex,
+			CounterpartyNpub: counterpartyNpub,
+			LastMessageAt:    lastEvent.CreatedAt,
+			LastMessageText:  lastEvent.Content,
+			MessageCount:     count,
+		})
+	}
+
+	// Sort by most recent first
+	sort.Slice(convos, func(i, j int) bool {
+		return convos[i].LastMessageAt > convos[j].LastMessageAt
+	})
+
+	return convos, nil
 }

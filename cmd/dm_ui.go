@@ -330,6 +330,12 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyEnter && msg.Alt:
 		// Shift+Enter (Alt+Enter): insert newline
 		m.input.InsertString("\n")
+		// Auto-grow textarea
+		lines := strings.Count(m.input.Value(), "\n") + 1
+		if lines > 5 {
+			lines = 5
+		}
+		m.input.SetHeight(lines)
 		return m, nil
 
 	case msg.Type == tea.KeyEnter:
@@ -427,6 +433,16 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+
+	// Auto-grow textarea to match content
+	inputLines := strings.Count(m.input.Value(), "\n") + 1
+	if inputLines > 5 {
+		inputLines = 5
+	}
+	if inputLines < 1 {
+		inputLines = 1
+	}
+	m.input.SetHeight(inputLines)
 
 	// Check mention trigger
 	m.updateDMMentionState()

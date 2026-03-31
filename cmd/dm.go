@@ -104,6 +104,10 @@ func runDM(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) == 0 {
+		// Interactive mode: show conversation picker if terminal
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			return runDMPicker(npub)
+		}
 		return showDMAliases(npub)
 	}
 
