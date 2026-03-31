@@ -328,12 +328,17 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Ctrl+C on empty input or Ctrl+D quits
-	if msg.Type == tea.KeyCtrlD {
-		m.quitting = true
-		return m, tea.Quit
+	// Ctrl+C: bubbline clears input if non-empty, or sends ErrInterrupted if empty.
+	// We intercept Ctrl+C on empty input to quit.
+	if msg.Type == tea.KeyCtrlC {
+		if strings.TrimSpace(m.input.Value()) == "" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// Let bubbline handle clearing
 	}
-	if msg.Type == tea.KeyCtrlC && m.input.Value() == "" {
+	// Ctrl+D quits
+	if msg.Type == tea.KeyCtrlD {
 		m.quitting = true
 		return m, tea.Quit
 	}
@@ -719,10 +724,10 @@ func (m dmModel) renderDMStatus() string {
 	}
 	// Show contextual hint depending on whether input has text
 	if strings.TrimSpace(m.input.Value()) != "" {
-		hint := fmt.Sprintf("enter to send · %s · %d relays · %s · ctrl+c to clear", m.targetName, len(m.relays), proto)
+		hint := fmt.Sprintf("enter to send to %s over %d relays (%s) · ctrl+c to clear", m.targetName, len(m.relays), proto)
 		return dimStyle.Render("  " + hint)
 	}
-	hint := fmt.Sprintf("%s · %d relays · %s · ctrl+d to exit", m.targetName, len(m.relays), proto)
+	hint := fmt.Sprintf("%s · %d relays · %s · ctrl+c to exit", m.targetName, len(m.relays), proto)
 	return dimStyle.Render("  " + hint)
 }
 
