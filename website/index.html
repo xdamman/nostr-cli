@@ -9,9 +9,7 @@
   <meta property="og:description" content="A human and bot-friendly command-line interface for the Nostr protocol.">
   <meta property="og:url" content="https://nostrcli.sh">
   <meta property="og:type" content="website">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
   <style>
     :root {
       --purple: #7c3aed;
@@ -172,21 +170,6 @@
 
     section h2 .accent { color: var(--purple); }
 
-    /* ---- Demo section ---- */
-    .demo-section {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 0 24px 60px;
-    }
-
-    .demo-wrapper {
-      position: relative;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      box-shadow: 0 20px 80px rgba(124, 58, 237, 0.08);
-    }
-
     /* ---- Terminal blocks ---- */
     .terminal {
       background: var(--bg-terminal);
@@ -329,38 +312,6 @@
 
     footer a:hover { text-decoration: underline; }
 
-    /* ---- Demo Terminal ---- */
-    .demo-terminal {
-      background: var(--bg-terminal);
-      min-height: 320px;
-    }
-
-    .demo-terminal-body {
-      padding: 20px 24px;
-      font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 0.9rem;
-      line-height: 1.7;
-      min-height: 280px;
-      position: relative;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    .demo-terminal-body .prompt-char { color: var(--green); }
-    .demo-terminal-body .cmd { color: var(--cyan); }
-    .demo-terminal-body .ok { color: var(--green); }
-    .demo-terminal-body .out { color: var(--text); }
-    .demo-terminal-body .dim { color: #666; }
-
-    .cursor {
-      color: var(--text);
-      animation: blink 1s step-end infinite;
-    }
-
-    @keyframes blink {
-      50% { opacity: 0; }
-    }
-
     /* ---- Responsive ---- */
     @media (max-width: 600px) {
       .hero { padding: 60px 16px 40px; }
@@ -400,23 +351,6 @@
       <a href="#agents">AI Agents</a>
       <a href="https://github.com/xdamman/nostr-cli">GitHub</a>
       <a href="https://github.com/xdamman/nostr-cli/releases/latest">Releases</a>
-    </div>
-  </div>
-
-  <!-- Animated Terminal Demo -->
-  <div class="demo-section">
-    <div class="demo-wrapper">
-      <div class="demo-terminal">
-        <div class="terminal-bar">
-          <div class="terminal-dot red"></div>
-          <div class="terminal-dot yellow"></div>
-          <div class="terminal-dot green"></div>
-          <div class="terminal-title">nostr-cli</div>
-        </div>
-        <div class="demo-terminal-body" id="demo-terminal">
-          <span class="cursor">▌</span>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -786,167 +720,6 @@
     // Auto-detect OS on load
     selectOS(detectOS());
 
-    // ---- Animated terminal demo ----
-    (function() {
-      var scenes = [
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr login' },
-            { type: 'out', text: 'Enter your nsec (leave blank to generate a new one): ' },
-            { type: 'out', text: 'Generating new keypair...' },
-            { type: 'ok',  text: '✓ Account created: npub1x7d...k3qf' },
-            { type: 'ok',  text: '✓ Default relays configured (6 relays)' },
-            { type: 'ok',  text: '✓ Active account set' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr post "Hello Nostr! 🤙 First post from the terminal"' },
-            { type: 'ok',  text: '✓ Published to 4 relays' },
-            { type: 'dim', text: '  nevent1qqs...' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr follow jack@primal.net' },
-            { type: 'ok',  text: '✓ Now following jack (npub1sg6...e2uf)' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr dm jack "Hey, love what you\'re building!"' },
-            { type: 'out', text: '  Protocol: NIP-17 (gift wrap)' },
-            { type: 'ok',  text: '✓ Published to 3/3 relays' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr accounts' },
-            { type: 'out', text: '  1. alice (npub1x7d...k3qf) ← active' },
-            { type: 'out', text: '  2. bot   (npub1m4k...9h2a)' },
-            { type: 'out', text: '' },
-            { type: 'cmd', text: '$ nostr switch bot' },
-            { type: 'ok',  text: '✓ Switched to bot (npub1m4k...9h2a)' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr profile fiatjaf -n 3' },
-            { type: 'out', text: '  Name:    fiatjaf' },
-            { type: 'out', text: '  NIP-05:  fiatjaf@nostr.com ✓' },
-            { type: 'out', text: '' },
-            { type: 'dim', text: '  30/03 10:15  working on a new relay implementation' },
-            { type: 'dim', text: '  30/03 09:42  just shipped NIP-XX support' },
-            { type: 'dim', text: '  29/03 22:10  the protocol is the product' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr events --watch --kinds 4 --me --decrypt --jsonl' },
-            { type: 'out', text: '{"from":"alice","message":"deploy the fix","protocol":"nip17"}' },
-            { type: 'out', text: '{"from":"bob","message":"PR merged ✓","protocol":"nip17"}' },
-          ]
-        },
-        {
-          lines: [
-            { type: 'cmd', text: '$ nostr post -f article.md --title "Building on Nostr"' },
-            { type: 'out', text: '  Publishing article (kind 30023) to 6 relays...' },
-            { type: 'ok',  text: '✓ Published to 5/6 relays' },
-            { type: 'dim', text: '  Slug: building-on-nostr' },
-          ]
-        },
-      ];
-
-      var el = document.getElementById('demo-terminal');
-      var sceneIdx = 0;
-      var running = false;
-
-      function span(cls, text) {
-        var s = document.createElement('span');
-        s.className = cls;
-        s.textContent = text;
-        return s;
-      }
-
-      function sleep(ms) {
-        return new Promise(function(r) { setTimeout(r, ms); });
-      }
-
-      function appendLine() {
-        var br = document.createElement('br');
-        el.insertBefore(br, el.querySelector('.cursor'));
-      }
-
-      function appendSpan(cls, text) {
-        var s = span(cls, text);
-        el.insertBefore(s, el.querySelector('.cursor'));
-        return s;
-      }
-
-      async function typeText(cls, text, speed) {
-        var s = span(cls, '');
-        el.insertBefore(s, el.querySelector('.cursor'));
-        for (var i = 0; i < text.length; i++) {
-          s.textContent += text[i];
-          await sleep(speed || 30);
-        }
-      }
-
-      async function typeCmd(text) {
-        // Split prompt from command
-        var prompt = text.substring(0, 2); // "$ "
-        var cmd = text.substring(2);
-        appendSpan('prompt-char', prompt);
-        await typeText('cmd', cmd, 25);
-        appendLine();
-      }
-
-      async function showLine(cls, text) {
-        appendSpan(cls, text);
-        appendLine();
-      }
-
-      async function playScene(scene) {
-        for (var i = 0; i < scene.lines.length; i++) {
-          var line = scene.lines[i];
-          if (line.type === 'cmd') {
-            await typeCmd(line.text);
-            await sleep(200);
-          } else {
-            await sleep(80);
-            await showLine(line.type, line.text);
-          }
-        }
-      }
-
-      async function run() {
-        if (running) return;
-        running = true;
-        while (true) {
-          // Clear terminal
-          var cursor = el.querySelector('.cursor');
-          el.innerHTML = '';
-          el.appendChild(cursor);
-
-          await playScene(scenes[sceneIdx]);
-          sceneIdx = (sceneIdx + 1) % scenes.length;
-          await sleep(2500);
-        }
-      }
-
-      // Start when visible
-      if ('IntersectionObserver' in window) {
-        var obs = new IntersectionObserver(function(entries) {
-          if (entries[0].isIntersecting) {
-            run();
-            obs.disconnect();
-          }
-        }, { threshold: 0.3 });
-        obs.observe(el);
-      } else {
-        run();
-      }
-    })();
   </script>
 </body>
 </html>

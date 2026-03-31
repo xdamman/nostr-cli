@@ -2,12 +2,17 @@
 
 Priority levels: **P0** = MVP, **P1** = Important, **P2** = Nice to have
 
+Commands are labeled with their mode support:
+- 🤖 **Non-interactive** — works in scripts, piped output, bots
+- 🖥️ **Interactive** — requires TTY, uses bubbletea TUI
+
 ---
 
 ## `nostr login`
 
 **Priority:** P0  
-**NIPs:** NIP-01, NIP-19
+**NIPs:** NIP-01, NIP-19  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive
 
 Create a new account or import an existing one.
 
@@ -30,49 +35,47 @@ nostr login
 - Invalid nsec format → error with hint about expected format (nsec1... or hex)
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `--nsec <key>` | Non-interactive import |
-| `--new` | Skip prompt, generate new keypair |
-| `--generate` | Alias for `--new` |
+| Flag | Mode | Description |
+|------|------|-------------|
+| `--nsec <key>` | 🤖 | Non-interactive import |
+| `--new` | 🤖 | Skip prompt, generate new keypair |
+| `--generate` | 🤖 | Alias for `--new` |
 
 ---
 
 ## `nostr profile`
 
 **Priority:** P0  
-**NIPs:** NIP-01 (kind 0), NIP-05, NIP-19
+**NIPs:** NIP-01 (kind 0), NIP-05, NIP-19  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive (update only)
 
 View or update profile metadata.
 
 ```
 nostr profile                         # Show your profile
 nostr profile [npub|username|alias]   # Show someone else's
-nostr profile update                  # Interactive edit
+nostr profile update                  # 🖥️ Interactive edit
 ```
 
-**`profile` (view):**
+**`profile` (view) — 🤖 Non-interactive:**
 - Display: name, username, npub, nip-05, about, picture URL
 - Fast profile: cache-first with NIP-05 cache, fetch fresh kind 0 in background
 - Use `--refresh` to force relay fetch
 
-**`profile update` (edit):**
+**`profile update` (edit) — 🖥️ Interactive only:**
 - Interactive prompts for each field (show current value, enter to keep)
 - Fields: `name`, `username` (`display_name`), `about`, `picture`, `nip05`
 - Build and sign new kind 0 event
 - Publish to all configured relays
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `-n, --events <n>` | Number of past events to show |
-| `--kinds <n,n,...>` | Filter events by kind (comma-separated) |
-| `--watch` | Live-stream new events from this user |
-| `--refresh` | Force fetch from relays (bypass cache) |
-| `--json` / `--jsonl` / `--raw` | Structured output |
-
-**Event viewing:**
-When `-n` is specified, the profile is shown followed by the user's most recent events. Combine with `--kinds` to filter by event type and `--watch` to live-stream. Works with `--json`/`--jsonl`/`--raw` for machine-readable output.
+| Flag | Mode | Description |
+|------|------|-------------|
+| `-n, --events <n>` | 🤖 | Number of past events to show |
+| `--kinds <n,n,...>` | 🤖 | Filter events by kind (comma-separated) |
+| `--watch` | 🤖 | Live-stream new events from this user |
+| `--refresh` | 🤖 | Force fetch from relays (bypass cache) |
+| `--json` / `--jsonl` / `--raw` | 🤖 | Structured output |
 
 **Edge cases:**
 - Unknown npub with no relay data → "Profile not found. Try adding relays."
@@ -83,59 +86,59 @@ When `-n` is specified, the profile is shown followed by the user's most recent 
 ## `nostr post`
 
 **Priority:** P0  
-**NIPs:** NIP-01 (kind 1), NIP-23 (kind 30023/30024)
+**NIPs:** NIP-01 (kind 1), NIP-23 (kind 30023/30024)  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive (editor only)
 
 Publish a text note or long-form article.
 
 ```
-nostr post "Hello Nostr!"
-nostr post                    # Interactive mode
-nostr post -f article.md      # Long-form content
-nostr post --long             # Long-form editor
+nostr post "Hello Nostr!"              # 🤖 Non-interactive
+echo "Hello" | nostr post              # 🤖 From stdin
+nostr post                             # 🖥️ Interactive prompt
+nostr post -f article.md               # 🤖 Long-form from file
+nostr post --long                      # 🖥️ Long-form editor
 ```
 
-**Short-form (kind 1):**
+**Short-form (kind 1) — 🤖 Non-interactive:**
 1. If message argument given → use it
 2. If stdin piped → read from stdin
-3. If no argument → open interactive prompt
-4. Build kind 1 event with content
-5. Sign and publish to configured relays
+3. Build kind 1 event with content
+4. Sign and publish to configured relays
+
+**Short-form — 🖥️ Interactive:**
+- If no argument and no stdin → open interactive prompt
 
 **Long-form (kind 30023/30024):**
 Activated by `--file`, `--long`, `--title`, or `--slug` flags.
-1. Read content from file or built-in editor
+1. Read content from file (🤖) or built-in editor (🖥️ `--long`)
 2. Parse YAML frontmatter if present (title, summary, image, slug, hashtags, draft)
 3. CLI flags override frontmatter values
 4. Build kind 30023 (or 30024 if `--draft`) event
 5. Sign and publish to configured relays
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `-f, --file <path>` | Read content from a markdown file |
-| `--long` | Open built-in multi-line editor |
-| `--title <string>` | Article title |
-| `--summary <string>` | Article summary |
-| `--image <url>` | Header image URL |
-| `--slug <string>` | Article identifier / d tag (for updates) |
-| `--draft` | Publish as draft (kind 30024) |
-| `--hashtag <string>` | Hashtag topics (repeatable, t tags) |
-| `--tag key=value` | Add extra tags (repeatable) |
-| `--tags '<json>'` | Add extra tags as JSON array |
-| `--dry-run` | Sign but don't publish |
-| `--json` / `--jsonl` / `--raw` | Machine-readable output |
-
-**Edge cases:**
-- Empty message → error
-- No relays configured → error with hint to run `nostr relays add`
-- Same `--slug` replaces previous article (addressable event)
+| Flag | Mode | Description |
+|------|------|-------------|
+| `-f, --file <path>` | 🤖 | Read content from a markdown file |
+| `--long` | 🖥️ | Open built-in multi-line editor |
+| `--title <string>` | 🤖 | Article title |
+| `--summary <string>` | 🤖 | Article summary |
+| `--image <url>` | 🤖 | Header image URL |
+| `--slug <string>` | 🤖 | Article identifier / d tag (for updates) |
+| `--draft` | 🤖 | Publish as draft (kind 30024) |
+| `--hashtag <string>` | 🤖 | Hashtag topics (repeatable, t tags) |
+| `--tag key=value` | 🤖 | Add extra tags (repeatable) |
+| `--tags '<json>'` | 🤖 | Add extra tags as JSON array |
+| `--dry-run` | 🤖 | Sign but don't publish |
+| `--json` / `--jsonl` / `--raw` | 🤖 | Machine-readable output |
 
 ---
 
 ## `nostr reply`
 
-**Priority:** P1
-**NIPs:** NIP-01 (kind 1), NIP-10
+**Priority:** P1  
+**NIPs:** NIP-01 (kind 1), NIP-10  
+**Mode:** 🤖 Non-interactive
 
 Reply to an existing event with NIP-10 compliant threading.
 
@@ -146,27 +149,29 @@ nostr reply <eventId> [message]
 The event ID can be hex, note1..., or nevent1... format. The referenced event is fetched from relays to determine thread structure (root vs reply markers).
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `--tag key=value` | Add extra tags (repeatable) |
-| `--tags '<json>'` | Add extra tags as JSON array |
-| `--dry-run` | Sign but don't publish |
-| `--json` / `--jsonl` / `--raw` | Machine-readable output |
+| Flag | Mode | Description |
+|------|------|-------------|
+| `--tag key=value` | 🤖 | Add extra tags (repeatable) |
+| `--tags '<json>'` | 🤖 | Add extra tags as JSON array |
+| `--dry-run` | 🤖 | Sign but don't publish |
+| `--json` / `--jsonl` / `--raw` | 🤖 | Machine-readable output |
 
 ---
 
 ## `nostr dm`
 
 **Priority:** P1  
-**NIPs:** NIP-04 (legacy), NIP-44, NIP-17
+**NIPs:** NIP-04 (legacy), NIP-44, NIP-17  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive
 
 Send or receive encrypted direct messages.
 
 ```
-nostr dm [user] [message]    # Send a message (NIP-17 by default)
-nostr dm [user]              # Interactive chat mode
-nostr dm --watch             # Stream all incoming DMs
-nostr dm [user] --watch      # Stream DMs with a specific user
+nostr dm [user] [message]    # 🤖 Send a message (NIP-17 by default)
+echo "msg" | nostr dm [user] # 🤖 Send from stdin
+nostr dm --watch --jsonl     # 🤖 Stream all incoming DMs
+nostr dm [user] --watch      # 🤖 Stream DMs with a specific user
+nostr dm [user]              # 🖥️ Interactive chat mode
 ```
 
 **Protocol:**
@@ -174,30 +179,26 @@ nostr dm [user] --watch      # Stream DMs with a specific user
 - **Both NIP-04 and NIP-17** messages are received and decrypted
 - Use `--nip04` to force legacy NIP-04 encryption
 - JSON/JSONL output includes a `protocol` field (`"nip04"` or `"nip17"`)
-- In interactive mode, DM protocol is auto-detected per conversation
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `--nip04` | Force NIP-04 encryption (legacy) |
-| `--watch` | Stream incoming DMs |
-| `--since <time>` | Start time for --watch (duration, timestamp, or ISO date) |
-| `--no-decrypt` | Don't decrypt messages (decrypt is default for kind 4) |
-| `--tag key=value` | Add extra tags (repeatable) |
-| `--tags '<json>'` | Add extra tags as JSON array |
-| `--json` / `--jsonl` / `--raw` | Machine-readable output |
+| Flag | Mode | Description |
+|------|------|-------------|
+| `--nip04` | 🤖 | Force NIP-04 encryption (legacy) |
+| `--watch` | 🤖 | Stream incoming DMs |
+| `--since <time>` | 🤖 | Start time for --watch (duration, timestamp, or ISO date) |
+| `--no-decrypt` | 🤖 | Don't decrypt messages |
+| `--tag key=value` | 🤖 | Add extra tags (repeatable) |
+| `--tags '<json>'` | 🤖 | Add extra tags as JSON array |
+| `--json` / `--jsonl` / `--raw` | 🤖 | Machine-readable output |
 
-**Typing indicators:**
-- In interactive DM mode, ephemeral kind 10003 events signal typing activity
-- In NIP-17 mode, typing indicators are gift-wrapped for metadata privacy
-- In NIP-04 mode, typing indicators are sent as plain ephemeral events
-- Shows "\<name\> is typing..." in the status bar
+**🖥️ Interactive-only features:**
+- Typing indicators (ephemeral kind 10003, gift-wrapped in NIP-17)
+- Shift+Enter for multiline messages
+- Visual line-wrapping textarea
+- DM protocol auto-detected per conversation
+- Shows "\<name\> is typing..." in status bar
 
-**Multiline input:**
-- Use Shift+Enter to insert newlines in interactive DM mode
-- Visual line-wrapping textarea for long messages
-
-**Watch mode:**
+**Watch mode notes:**
 - Connection errors and subscription failures logged to stderr
 - A "ready" line printed to stderr when relay connections are established
 - Use `--since` with `--watch` to catch up on missed events then continue streaming
@@ -206,8 +207,9 @@ nostr dm [user] --watch      # Stream DMs with a specific user
 
 ## `nostr events`
 
-**Priority:** P1
-**NIPs:** NIP-01
+**Priority:** P1  
+**NIPs:** NIP-01  
+**Mode:** 🤖 Non-interactive
 
 Query events from relays with flexible filters.
 
@@ -234,8 +236,9 @@ nostr events --kinds <kinds> [flags]
 
 ## `nostr event new`
 
-**Priority:** P1
-**NIPs:** NIP-01
+**Priority:** P1  
+**NIPs:** NIP-01  
+**Mode:** 🤖 Non-interactive
 
 Create, sign, and publish a raw Nostr event of any kind.
 
@@ -259,7 +262,8 @@ nostr event new --kind <n> --content <text> [flags]
 ## `nostr relays`
 
 **Priority:** P0  
-**NIPs:** NIP-01
+**NIPs:** NIP-01  
+**Mode:** 🤖 Non-interactive
 
 Manage the relay list for the active account.
 
@@ -280,29 +284,31 @@ nostr relays rm [url|number]     # Remove a relay
 
 ## `nostr sync`
 
-**Priority:** P1
-**NIPs:** NIP-01
+**Priority:** P1  
+**NIPs:** NIP-01  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive
 
 Sync locally stored events with configured relays.
 
 ```
-nostr sync                           # Interactive relay selection
-nostr sync --relay nos.lol           # Sync with a specific relay
-nostr sync --json                    # Machine-readable output
+nostr sync                           # 🖥️ Interactive relay selection
+nostr sync --relay nos.lol           # 🤖 Sync with a specific relay
+nostr sync --json                    # 🤖 Machine-readable output
 ```
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `--relay <url\|domain>` | Sync with a specific relay |
-| `--json` | Output results as JSON without interactive UI |
+| Flag | Mode | Description |
+|------|------|-------------|
+| `--relay <url\|domain>` | 🤖 | Sync with a specific relay |
+| `--json` | 🤖 | Output results as JSON without interactive UI |
 
 ---
 
 ## `nostr follow`
 
 **Priority:** P1  
-**NIPs:** NIP-01 (kind 3), NIP-02
+**NIPs:** NIP-01 (kind 3), NIP-02  
+**Mode:** 🤖 Non-interactive
 
 Follow or unfollow a user.
 
@@ -333,22 +339,24 @@ nostr following
 ## `nostr switch`
 
 **Priority:** P1  
-**NIPs:** NIP-19
+**NIPs:** NIP-19  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive
 
 Switch between accounts.
 
 ```
-nostr switch                          # Interactive picker (arrow keys)
-nostr switch [alias|username|npub]    # Switch directly
+nostr switch [alias|username|npub]    # 🤖 Switch directly
+nostr switch                          # 🖥️ Interactive picker (arrow keys)
 ```
 
-In the interactive shell, use `/switch` for an arrow-key account picker.
+In the interactive shell, use `/switch` for an arrow-key account picker (🖥️).
 
 ---
 
 ## `nostr accounts`
 
-**Priority:** P1
+**Priority:** P1  
+**Mode:** 🤖 Non-interactive
 
 List all local accounts.
 
@@ -367,7 +375,7 @@ nostr accounts rm [name]
 ## `nostr alias`
 
 **Priority:** P1  
-**NIPs:** —
+**Mode:** 🤖 Non-interactive
 
 Create local aliases for npubs.
 
@@ -382,7 +390,8 @@ nostr alias rm [name]
 ## `nostr [user]`
 
 **Priority:** P1  
-**NIPs:** NIP-01
+**NIPs:** NIP-01  
+**Mode:** 🤖 Non-interactive
 
 View a user's profile and recent notes.
 
@@ -403,7 +412,7 @@ nostr [user] --watch
 ## `nostr nip[N]`
 
 **Priority:** P2  
-**NIPs:** —
+**Mode:** 🤖 Non-interactive
 
 View a NIP specification in the terminal.
 
@@ -417,49 +426,33 @@ nostr nip44
 ## `nostr generate nip05`
 
 **Priority:** P1  
-**NIPs:** NIP-05
+**NIPs:** NIP-05  
+**Mode:** 🤖 Non-interactive / 🖥️ Interactive
 
 Generate a `.well-known/nostr.json` file for NIP-05 identity verification.
 
 ```
-nostr generate nip05                                    # Interactive mode
-nostr generate nip05 --address user@domain.com          # Use active account's pubkey
+nostr generate nip05                                    # 🖥️ Interactive mode
+nostr generate nip05 --address user@domain.com          # 🤖 Use active account
 nostr generate nip05 --address user@domain.com --npub npub1...
-nostr generate nip05 --address user@domain.com --json   # Output JSON to stdout
+nostr generate nip05 --address user@domain.com --json   # 🤖 Output JSON to stdout
 ```
 
-**Interactive mode (no flags):**
+**🖥️ Interactive mode (no flags):**
 1. Prompt: "NIP-05 address (user@domain): "
 2. Prompt: "npub (leave blank to use active account): "
-3. Fetch existing `https://<domain>/.well-known/nostr.json` (if accessible)
-4. Merge the new entry into existing names (or create new file)
-5. Save as `nostr.json` in current directory
-6. Print setup instructions
+3. Fetch existing nostr.json, merge, save
 
 **Flags:**
-| Flag | Description |
-|------|-------------|
-| `--address <user@domain>` | NIP-05 address |
-| `--npub <npub1...>` | Public key (defaults to active account) |
-| `--json` | Output generated nostr.json to stdout |
-
-**Output file format:**
-```json
-{
-  "names": {
-    "user": "hex-pubkey-here"
-  }
-}
-```
-
-**Behavior:**
-- If the domain has an existing nostr.json, it is fetched, parsed, and merged (preserving other entries)
-- If fetch fails (404, network error), a new file is created from scratch
-- After saving, prints instructions for uploading and configuring CORS headers
+| Flag | Mode | Description |
+|------|------|-------------|
+| `--address <user@domain>` | 🤖 | NIP-05 address |
+| `--npub <npub1...>` | 🤖 | Public key (defaults to active account) |
+| `--json` | 🤖 | Output generated nostr.json to stdout |
 
 ---
 
-## Interactive Shell
+## Interactive Shell 🖥️
 
 Run `nostr` with no arguments to launch the interactive shell:
 
@@ -479,12 +472,21 @@ Run `nostr` with no arguments to launch the interactive shell:
 
 | Flag | Description |
 |------|-------------|
-| `--account <npub\|alias\|username>` | Use a specific account (replaces deprecated `--profile`) |
+| `--account <npub\|alias\|username>` | Use a specific account |
 | `--timeout <ms>` | Relay timeout in milliseconds (default: 2000) |
 | `--no-color` | Disable colored output |
 | `--json` | Enriched JSON output (pretty-printed on TTY) |
 | `--jsonl` | One JSON object per line (for bots/piping) |
 | `--raw` | Raw Nostr event JSON (wire format) |
+
+---
+
+## Auto-Detection
+
+- **stdout is a TTY** → Colors enabled, interactive prompts shown
+- **stdout is piped** → Colors disabled, no interactive prompts
+- **stdin is piped** → Content read as input
+- `NO_COLOR` env var respected
 
 ---
 
