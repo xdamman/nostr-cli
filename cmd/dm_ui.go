@@ -337,6 +337,13 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// Auto-trigger autocomplete when typing inside an @mention
+	if (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) && len(m.mentionCandidates) > 0 {
+		if isInMentionContext(m.input.Value()) {
+			cmds = append(cmds, autoTriggerTab())
+		}
+	}
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -422,6 +429,31 @@ func (m dmModel) handleSend() (tea.Model, tea.Cmd) {
 
 	// Publish both events in background
 	return m, tea.Batch(m.publishNip17Cmd(forRecipient, forSelf), m.input.Focus())
+}
+
+// isInMentionContext checks if the cursor (assumed at end) is inside an @word.
+func isInMentionContext(text string) bool {
+	if text == "" {
+		return false
+	}
+	// Walk backwards from end to find @ preceded by space/newline/start
+	for i := len(text) - 1; i >= 0; i-- {
+		c := text[i]
+		if c == ' ' || c == '\n' || c == '\t' {
+			return false
+		}
+		if c == '@' {
+			return i == 0 || text[i-1] == ' ' || text[i-1] == '\n' || text[i-1] == '\t'
+		}
+	}
+	return false
+}
+
+// autoTriggerTab sends a synthetic Tab key to trigger bubbline's autocomplete.
+func autoTriggerTab() tea.Cmd {
+	return func() tea.Msg {
+		return tea.KeyMsg{Type: tea.KeyTab}
+	}
 }
 
 // sendTypingCmd publishes an ephemeral typing indicator event.

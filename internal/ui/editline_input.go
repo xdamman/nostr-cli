@@ -187,6 +187,16 @@ func (m editlineInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	_, cmd := m.editor.Update(msg)
+
+	// Auto-trigger autocomplete when typing inside an @mention
+	if kmsg, ok := msg.(tea.KeyMsg); ok {
+		if (kmsg.Type == tea.KeyRunes || kmsg.Type == tea.KeySpace) && len(m.mentionCandidates) > 0 {
+			if isInMentionContext(m.editor.Value()) {
+				return m, tea.Batch(cmd, autoTriggerTab())
+			}
+		}
+	}
+
 	return m, cmd
 }
 
@@ -223,6 +233,30 @@ func ExtractMentionsFromText(text string, candidates []MentionCandidate) []Menti
 		}
 	}
 	return found
+}
+
+// isInMentionContext checks if the cursor (assumed at end) is inside an @word.
+func isInMentionContext(text string) bool {
+	if text == "" {
+		return false
+	}
+	for i := len(text) - 1; i >= 0; i-- {
+		c := text[i]
+		if c == ' ' || c == '\n' || c == '\t' {
+			return false
+		}
+		if c == '@' {
+			return i == 0 || text[i-1] == ' ' || text[i-1] == '\n' || text[i-1] == '\t'
+		}
+	}
+	return false
+}
+
+// autoTriggerTab sends a synthetic Tab key to trigger bubbline's autocomplete.
+func autoTriggerTab() tea.Cmd {
+	return func() tea.Msg {
+		return tea.KeyMsg{Type: tea.KeyTab}
+	}
 }
 
 // RunEditlineInput runs a bubbletea program with editline for multiline input.
