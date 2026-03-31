@@ -131,8 +131,11 @@ func runShell() error {
 	// Create the Bubble Tea model
 	m := newShellModel(npub, myHex, skHex, relays, shellPromptName)
 
-	// Load mention candidates for @ autocomplete
+	// Load mention candidates for @ autocomplete (Tab in bubbline)
 	m.mentionCandidates = ui.LoadMentionCandidates(npub)
+	if len(m.mentionCandidates) > 0 {
+		m.input.AutoComplete = ui.MentionAutoComplete(m.mentionCandidates)
+	}
 
 	// Load cached feed into model
 	cachedEvents, _ := cache.LoadFeed(npub, 20)

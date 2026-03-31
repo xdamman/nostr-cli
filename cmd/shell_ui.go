@@ -8,13 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
+	"github.com/knz/bubbline/editline"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/xdamman/nostr-cli/internal/cache"
 	"github.com/xdamman/nostr-cli/internal/config"
@@ -97,17 +96,12 @@ type shellModel struct {
 	height int
 
 	// Input
-	input    textarea.Model
+	input    *editline.Model
 	showMenu bool
 	menuSel  int
 
-	// Mention autocomplete
+	// Mention candidates (for autocomplete and p-tag extraction)
 	mentionCandidates []ui.MentionCandidate
-	mentionResults    []ui.MentionCandidate
-	mentionActive     bool
-	mentionIdx        int
-	mentionQuery      string
-	selectedMentions  []ui.MentionCandidate
 
 	// Shell state
 	npub       string
@@ -143,19 +137,24 @@ type shellModel struct {
 }
 
 func newShellModel(npub, myHex, skHex string, relays []string, promptName string) shellModel {
-	ta := textarea.New()
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.ShowLineNumbers = false
-	ta.SetHeight(1)
-	ta.MaxHeight = 5
-	ta.Prompt = ""
-	ta.KeyMap.InsertNewline = key.NewBinding() // disable Enter as newline
-	ta.Cursor.SetMode(cursor.CursorHide)
+	ed := editline.New(0, 0)
+	ed.Prompt = promptName + "> "
+	ed.NextPrompt = strings.Repeat(" ", len(promptName)+2)
+	ed.MaxHeight = 5
+	ed.CharLimit = 0
+	ed.ShowLineNumbers = false
+	ed.Placeholder = ""
+	ed.CheckInputComplete = func(entireInput [][]rune, line, col int) bool {
+		return true // Enter always submits
+	}
+	ed.KeyMap.MoreHelp.SetEnabled(false)
+	// Shift+Enter (Alt+Enter in terminals) inserts newline
+	ed.KeyMap.AlwaysNewline = key.NewBinding(key.WithKeys("alt+enter", "alt+\r"))
+	ed.KeyMap.AlwaysComplete.SetEnabled(false)
 
 	return shellModel{
 		feed:        newFeed(maxFeedLines),
-		input:       ta,
+		input:       ed,
 		npub:        npub,
 		myHex:       myHex,
 		skHex:       skHex,
@@ -166,7 +165,7 @@ func newShellModel(npub, myHex, skHex string, relays []string, promptName string
 }
 
 func (m shellModel) Init() tea.Cmd {
-	return nil
+	return m.input.Focus()
 }
 
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -175,9 +174,11 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		promptLen := len(m.promptName) + 2 // "name> "
-		m.input.SetWidth(msg.Width - promptLen)
+		m.input.SetSize(msg.Width, msg.Height)
 		return m, nil
+
+	case editline.InputCompleteMsg:
+		return m.handleSubmit()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -243,9 +244,8 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Pass through to textinput
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	// Pass through to editline
+	_, cmd := m.input.Update(msg)
 	return m, cmd
 }
 
@@ -260,143 +260,41 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDMComposeKey(msg)
 	}
 
-	// Handle mention autocomplete navigation first
-	if m.mentionActive {
-		switch msg.Type {
-		case tea.KeyUp:
-			if m.mentionIdx > 0 {
-				m.mentionIdx--
-			}
-			return m, nil
-		case tea.KeyDown:
-			if m.mentionIdx < len(m.mentionResults)-1 {
-				m.mentionIdx++
-			}
-			return m, nil
-		case tea.KeyTab, tea.KeyEnter:
-			if len(m.mentionResults) > 0 && m.mentionIdx < len(m.mentionResults) {
-				m = m.confirmShellMention()
-			}
-			return m, nil
-		case tea.KeyEscape:
-			m.mentionActive = false
-			m.mentionResults = nil
-			return m, nil
+	// Ctrl+C on empty input or Ctrl+D quits
+	if msg.Type == tea.KeyCtrlC {
+		if strings.TrimSpace(m.input.Value()) == "" {
+			m.quitting = true
+			return m, tea.Quit
 		}
+		// Let bubbline handle clearing
 	}
-
-	switch {
-	case msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD:
+	if msg.Type == tea.KeyCtrlD {
 		m.quitting = true
 		return m, tea.Quit
+	}
 
-	case msg.Type == tea.KeyEnter && msg.Alt:
-		// Shift+Enter (Alt+Enter): insert newline
-		m.input.InsertString("\n")
-		return m, nil
-
-	case msg.Type == tea.KeyEnter:
-		line := strings.TrimSpace(m.input.Value())
-		m.input.Reset()
-		m.input.SetHeight(1)
-		m.mentionActive = false
-		m.mentionResults = nil
-
-		if line == "" {
-			return m, nil
-		}
-
-		if m.showMenu {
-			cmds := filterCommands([]byte(line))
-			if m.menuSel >= 0 && m.menuSel < len(cmds) {
-				m.input.SetValue("/" + cmds[m.menuSel].name + " ")
-				m.input.CursorEnd()
-				m.showMenu = false
-				return m, nil
-			}
-		}
-		m.showMenu = false
-
-		if strings.HasPrefix(line, "/") {
-			m.selectedMentions = nil
-			return m, m.makeSlashCmd(m.npub, m.myHex, m.relays, line)
-		}
-
-		// Process mentions in the message
-		content := line
-		var tags nostr.Tags
-		if len(m.selectedMentions) > 0 {
-			var mentionTags [][]string
-			content, mentionTags = ui.ReplaceMentionsForEvent(line, m.selectedMentions)
-			for _, tag := range mentionTags {
-				tags = append(tags, nostr.Tag(tag))
-			}
-			m.selectedMentions = nil
-		}
-
-		// Post a note: sign, show in feed, publish async
-		event := nostr.Event{
-			PubKey:    m.myHex,
-			CreatedAt: nostr.Now(),
-			Kind:      nostr.KindTextNote,
-			Tags:      tags,
-			Content:   content,
-		}
-		if err := event.Sign(m.skHex); err != nil {
-			m.feed.AddInfo(redStyle.Render("✗ sign failed: " + err.Error()))
-			return m, nil
-		}
-		m.feed.AddEvent(event)
-		_ = cache.LogFeedEvent(m.npub, event)
-		_ = cache.LogSentEvent(m.npub, event)
-
-		return m, publishNoteCmd(m.npub, m.relays, event)
-
-	case msg.Type == tea.KeyTab:
-		if m.showMenu {
-			val := m.input.Value()
-			cmds := filterCommands([]byte(val))
-			if m.menuSel >= 0 && m.menuSel < len(cmds) {
-				m.input.SetValue("/" + cmds[m.menuSel].name + " ")
-				m.input.CursorEnd()
-				m.showMenu = false
-			}
-			return m, nil
-		}
-
-	case msg.Type == tea.KeyEscape:
-		if m.showMenu {
-			m.showMenu = false
-			return m, nil
-		}
-		// Esc clears multiline input
-		if strings.Contains(m.input.Value(), "\n") {
-			m.input.Reset()
-			m.input.SetHeight(1)
-			return m, nil
-		}
-
-	case msg.Type == tea.KeyUp:
-		if m.showMenu {
+	// Slash menu navigation
+	if m.showMenu {
+		switch msg.Type {
+		case tea.KeyUp:
 			if m.menuSel > 0 {
 				m.menuSel--
 			}
 			return m, nil
-		}
-
-	case msg.Type == tea.KeyDown:
-		if m.showMenu {
+		case tea.KeyDown:
 			cmds := filterCommands([]byte(m.input.Value()))
 			if m.menuSel < len(cmds)-1 {
 				m.menuSel++
 			}
 			return m, nil
+		case tea.KeyEscape:
+			m.showMenu = false
+			return m, nil
 		}
 	}
 
-	// Let textinput handle the key
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	// Forward to editline
+	_, cmd := m.input.Update(msg)
 
 	// Check if we should show/hide slash menu
 	val := m.input.Value()
@@ -410,85 +308,75 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showMenu = false
 	}
 
-	// Check mention trigger
-	m.updateShellMentionState()
+	// Auto-trigger @ mention autocomplete
+	if (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) && len(m.mentionCandidates) > 0 {
+		if isInMentionContext(m.input.Value()) {
+			return m, tea.Batch(cmd, autoTriggerTab())
+		}
+	}
 
 	return m, cmd
 }
 
-func (m shellModel) confirmShellMention() shellModel {
-	selected := m.mentionResults[m.mentionIdx]
-	val := m.input.Value()
+// handleSubmit is called when editline signals InputCompleteMsg (Enter pressed).
+func (m shellModel) handleSubmit() (tea.Model, tea.Cmd) {
+	line := strings.TrimSpace(m.input.Value())
 
-	// Find the last '@' that started this mention
-	atIdx := strings.LastIndex(val, "@"+m.mentionQuery)
-	if atIdx < 0 {
-		atIdx = strings.LastIndex(val, "@")
-	}
-	if atIdx < 0 {
-		m.mentionActive = false
-		return m
+	// Add to history before resetting
+	if line != "" {
+		m.input.AddHistoryEntry(line)
 	}
 
-	// Replace @query with @DisplayName
-	before := val[:atIdx]
-	after := val[atIdx+1+len(m.mentionQuery):]
-	newVal := before + "@" + selected.DisplayName + after
-	m.input.SetValue(newVal)
+	m.input.Reset()
 
-	m.selectedMentions = append(m.selectedMentions, selected)
-	m.mentionActive = false
-	m.mentionResults = nil
-	return m
-}
-
-func (m *shellModel) updateShellMentionState() {
-	if len(m.mentionCandidates) == 0 {
-		return
-	}
-	val := m.input.Value()
-	if val == "" {
-		m.mentionActive = false
-		return
+	if line == "" {
+		return m, m.input.Focus()
 	}
 
-	// Find the last '@' not followed by a space
-	// Assume cursor at end of text (textarea doesn't expose position)
-	textBeforeCursor := val
-
-	atIdx := -1
-	for i := len(textBeforeCursor) - 1; i >= 0; i-- {
-		if textBeforeCursor[i] == ' ' || textBeforeCursor[i] == '\n' {
-			break
+	// Slash menu selection
+	if m.showMenu {
+		cmds := filterCommands([]byte(line))
+		if m.menuSel >= 0 && m.menuSel < len(cmds) {
+			// Can't SetValue on editline — just execute the selected command
+			line = "/" + cmds[m.menuSel].name
 		}
-		if textBeforeCursor[i] == '@' {
-			// Valid if at start or preceded by space/newline
-			if i == 0 || textBeforeCursor[i-1] == ' ' || textBeforeCursor[i-1] == '\n' {
-				atIdx = i
-			}
-			break
+	}
+	m.showMenu = false
+
+	if strings.HasPrefix(line, "/") {
+		return m, tea.Batch(m.makeSlashCmd(m.npub, m.myHex, m.relays, line), m.input.Focus())
+	}
+
+	// Extract mentions from text
+	content := line
+	var tags nostr.Tags
+	mentions := ui.ExtractMentionsFromText(line, m.mentionCandidates)
+	if len(mentions) > 0 {
+		var mentionTags [][]string
+		content, mentionTags = ui.ReplaceMentionsForEvent(line, mentions)
+		for _, tag := range mentionTags {
+			tags = append(tags, nostr.Tag(tag))
 		}
 	}
 
-	if atIdx < 0 {
-		m.mentionActive = false
-		m.mentionResults = nil
-		return
+	// Post a note: sign, show in feed, publish async
+	event := nostr.Event{
+		PubKey:    m.myHex,
+		CreatedAt: nostr.Now(),
+		Kind:      nostr.KindTextNote,
+		Tags:      tags,
+		Content:   content,
 	}
+	if err := event.Sign(m.skHex); err != nil {
+		m.feed.AddInfo(redStyle.Render("✗ sign failed: " + err.Error()))
+		return m, m.input.Focus()
+	}
+	m.feed.AddEvent(event)
+	_ = cache.LogFeedEvent(m.npub, event)
+	_ = cache.LogSentEvent(m.npub, event)
 
-	query := textBeforeCursor[atIdx+1:]
-	m.mentionQuery = query
-	results := ui.FilterCandidates(m.mentionCandidates, query)
-	if len(results) == 0 {
-		m.mentionActive = false
-		m.mentionResults = nil
-		return
-	}
-	m.mentionActive = true
-	m.mentionResults = results
-	m.mentionIdx = 0
+	return m, tea.Batch(publishNoteCmd(m.npub, m.relays, event), m.input.Focus())
 }
-
 
 func (m shellModel) View() string {
 	if m.quitting {
@@ -507,25 +395,25 @@ func (m shellModel) View() string {
 		return m.renderDMComposeView()
 	}
 
-	// Layout: feed area | input line | menu | mention | status
+	// Layout: feed area | input | menu | status
 	menuLines := m.renderMenu()
 	menuHeight := len(menuLines)
 
 	statusLine := m.renderStatus()
 
-	// Mention dropdown
-	mentionLines := m.renderMentionMenu()
-	mentionHeight := len(mentionLines)
-
-	// Input height (textarea auto-grows)
-	inputLines := strings.Count(m.input.Value(), "\n") + 1
-	if inputLines > 5 {
-		inputLines = 5
+	// Editline renders its own view; strip trailing help line
+	inputView := m.input.View()
+	if idx := strings.LastIndex(inputView, "\n"); idx >= 0 {
+		inputView = inputView[:idx]
 	}
-	inputHeight := inputLines
+	// Colorize the plain-text prompt
+	plainPrompt := m.promptName + "> "
+	colorPrompt := greenStyle.Render(m.promptName) + "> "
+	inputView = strings.Replace(inputView, plainPrompt, colorPrompt, 1)
+	inputHeight := strings.Count(inputView, "\n") + 1
 
 	// Calculate feed height
-	feedHeight := m.height - 1 - inputHeight - menuHeight - mentionHeight // 1 for status
+	feedHeight := m.height - 1 - inputHeight - menuHeight // 1 for status
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
@@ -533,25 +421,11 @@ func (m shellModel) View() string {
 	// Render feed: take last feedHeight lines
 	feed := m.renderFeed(feedHeight)
 
-	// Build the view: feed | prompt+input | menu | mention | status bar
-	prompt := greenStyle.Render(m.promptName) + "> "
-	inputView := m.input.View()
-	// Prepend prompt to first line of textarea
-	inputViewLines := strings.SplitN(inputView, "\n", 2)
-	if len(inputViewLines) > 1 {
-		inputView = prompt + inputViewLines[0] + "\n" + inputViewLines[1]
-	} else {
-		inputView = prompt + inputView
-	}
-
 	var parts []string
 	parts = append(parts, feed)
 	parts = append(parts, inputView)
 	if menuHeight > 0 {
 		parts = append(parts, strings.Join(menuLines, "\n"))
-	}
-	if mentionHeight > 0 {
-		parts = append(parts, strings.Join(mentionLines, "\n"))
 	}
 	parts = append(parts, statusLine)
 
@@ -649,42 +523,6 @@ func (m shellModel) renderMenu() []string {
 		} else {
 			line := "    " + dimStyle.Render(cmd.name+"  "+cmd.desc)
 			lines = append(lines, line)
-		}
-	}
-	return lines
-}
-
-func (m shellModel) renderMentionMenu() []string {
-	if !m.mentionActive || len(m.mentionResults) == 0 {
-		return nil
-	}
-
-	maxVisible := 7
-	if len(m.mentionResults) < maxVisible {
-		maxVisible = len(m.mentionResults)
-	}
-
-	start := 0
-	if m.mentionIdx >= maxVisible {
-		start = m.mentionIdx - maxVisible + 1
-	}
-	end := start + maxVisible
-	if end > len(m.mentionResults) {
-		end = len(m.mentionResults)
-		start = end - maxVisible
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	var lines []string
-	for i := start; i < end; i++ {
-		c := m.mentionResults[i]
-		entry := c.DisplayName + " (" + ui.TruncateNpub(c.Npub) + ")"
-		if i == m.mentionIdx {
-			lines = append(lines, "  "+cyanStyle.Render("→ "+entry))
-		} else {
-			lines = append(lines, "    "+dimStyle.Render(entry))
 		}
 	}
 	return lines
@@ -797,8 +635,15 @@ func (m shellModel) handleSwitchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.relays = relays
 			}
 
-			// Reload mention candidates
+			// Reload mention candidates and autocomplete
 			m.mentionCandidates = ui.LoadMentionCandidates(newNpub)
+			if len(m.mentionCandidates) > 0 {
+				m.input.AutoComplete = ui.MentionAutoComplete(m.mentionCandidates)
+			}
+
+			// Update editline prompt for new account
+			m.input.Prompt = newName + "> "
+			m.input.NextPrompt = strings.Repeat(" ", len(newName)+2)
 
 			m.feed.AddInfo(greenStyle.Render("✓ Switched to " + newName))
 		}
