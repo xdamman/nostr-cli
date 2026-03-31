@@ -8,10 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/knz/bubbline/editline"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip04"
 	"github.com/nbd-wtf/go-nostr/nip19"
@@ -186,7 +184,7 @@ type dmModel struct {
 	status  string
 	width      int
 	height     int
-	input      textarea.Model
+	input      *editline.Model
 	npub       string
 	myHex      string
 	myName     string
@@ -216,20 +214,22 @@ type dmModel struct {
 var dmProgram *tea.Program
 
 func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays []string, sharedSecret []byte) dmModel {
-	ta := textarea.New()
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.ShowLineNumbers = false
-	ta.SetHeight(1)
-	ta.MaxHeight = 5
-	ta.Prompt = ""
-	ta.KeyMap.InsertNewline = key.NewBinding() // disable Enter as newline
-	ta.Cursor.SetMode(cursor.CursorHide)
+	ed := editline.New(0, 0)
+	ed.Prompt = greenStyle.Render(myName) + "> "
+	ed.NextPrompt = strings.Repeat(" ", len(myName)+2)
+	ed.MaxHeight = 5
+	ed.CharLimit = 0
+	ed.ShowLineNumbers = false
+	ed.Placeholder = ""
+	// Enter always sends (single-line default); Ctrl+O for newline
+	ed.CheckInputComplete = func(entireInput [][]rune, line, col int) bool {
+		return true // Enter always submits
+	}
 
 	return dmModel{
 		feed:       newDMFeedBT(sharedSecret, skHex, 200),
 		dimSent:    make(map[string]bool),
-		input:      ta,
+		input:      ed,
 		npub:       npub,
 		myHex:      myHex,
 		myName:     myName,
@@ -241,7 +241,7 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 }
 
 func (m dmModel) Init() tea.Cmd {
-	return typingTickCmd()
+	return tea.Batch(typingTickCmd(), m.input.Focus())
 }
 
 // typingTickCmd sends a typingTickMsg every second.
@@ -256,9 +256,11 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		promptLen := len(m.myName) + 2 // "name> "
-		m.input.SetWidth(msg.Width - promptLen)
+		m.input.SetSize(msg.Width, msg.Height)
 		return m, nil
+
+	case editline.InputCompleteMsg:
+		return m.handleSend()
 
 	case tea.KeyMsg:
 		return m.handleDMKey(msg)
@@ -291,8 +293,7 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	_, cmd := m.input.Update(msg)
 	return m, cmd
 }
 
@@ -322,100 +323,14 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch {
-	case msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD:
+	// Ctrl+C on empty input or Ctrl+D quits
+	if msg.Type == tea.KeyCtrlD {
 		m.quitting = true
 		return m, tea.Quit
-
-	case msg.Type == tea.KeyEnter && msg.Alt:
-		// Shift+Enter (Alt+Enter): insert newline
-		m.input.InsertString("\n")
-		// Auto-grow textarea
-		lines := strings.Count(m.input.Value(), "\n") + 1
-		if lines > 5 {
-			lines = 5
-		}
-		m.input.SetHeight(lines)
-		return m, nil
-
-	case msg.Type == tea.KeyEnter:
-		line := strings.TrimSpace(m.input.Value())
-		m.input.Reset()
-		m.input.SetHeight(1)
-		m.mentionActive = false
-		m.mentionResults = nil
-
-		if line == "" {
-			return m, nil
-		}
-
-		// Process mentions
-		content := line
-		var extraTags nostr.Tags
-		if len(m.selectedMentions) > 0 {
-			var mentionTags [][]string
-			content, mentionTags = ui.ReplaceMentionsForEvent(line, m.selectedMentions)
-			for _, tag := range mentionTags {
-				extraTags = append(extraTags, nostr.Tag(tag))
-			}
-			m.selectedMentions = nil
-		}
-
-		if m.useNip04 {
-			// Legacy NIP-04 encrypt + kind 4
-			sharedSecret := generateSharedSecret(m.skHex, m.targetHex)
-			ciphertext, err := nip04.Encrypt(content, sharedSecret)
-			if err != nil {
-				return m, nil
-			}
-
-			tags := nostr.Tags{nostr.Tag{"p", m.targetHex}}
-			tags = append(tags, extraTags...)
-
-			event := nostr.Event{
-				PubKey:    m.myHex,
-				CreatedAt: nostr.Now(),
-				Kind:      nostr.KindEncryptedDirectMessage,
-				Tags:      tags,
-				Content:   ciphertext,
-			}
-			if err := event.Sign(m.skHex); err != nil {
-				return m, nil
-			}
-
-			// Add to feed immediately (dim = unconfirmed)
-			m.dimSent[event.ID] = true
-			m.feed.addEvents([]nostr.Event{event})
-			_ = cache.LogDMEvent(m.npub, m.targetHex, event)
-			_ = cache.LogSentEvent(m.npub, event)
-
-			// Publish in background
-			return m, m.publishDMCmd(event)
-		}
-
-		// NIP-17 gift wrap (default)
-		forRecipient, forSelf, err := crypto.CreateGiftWrapDM(content, m.skHex, m.myHex, m.targetHex)
-		if err != nil {
-			return m, nil
-		}
-
-		// Cache a synthetic kind 14 rumor with plaintext content
-		rumor := nostr.Event{
-			Kind:      14,
-			Content:   content,
-			PubKey:    m.myHex,
-			CreatedAt: nostr.Now(),
-			Tags:      nostr.Tags{{"p", m.targetHex}},
-			ID:        forRecipient.ID,
-		}
-		_ = cache.LogDMEvent(m.npub, m.targetHex, rumor)
-
-		// Add to feed immediately (dim = unconfirmed)
-		m.dimSent[forRecipient.ID] = true
-		m.feed.addEvents([]nostr.Event{rumor})
-
-		// Publish both events in background
-		return m, m.publishNip17Cmd(forRecipient, forSelf)
+	}
+	if msg.Type == tea.KeyCtrlC && m.input.Value() == "" {
+		m.quitting = true
+		return m, tea.Quit
 	}
 
 	var cmds []tea.Cmd
@@ -428,26 +343,102 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	// Forward to editline (handles multiline, history, Enter→InputCompleteMsg)
+	_, cmd := m.input.Update(msg)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-
-	// Auto-grow textarea to match content
-	inputLines := strings.Count(m.input.Value(), "\n") + 1
-	if inputLines > 5 {
-		inputLines = 5
-	}
-	if inputLines < 1 {
-		inputLines = 1
-	}
-	m.input.SetHeight(inputLines)
 
 	// Check mention trigger
 	m.updateDMMentionState()
 
 	return m, tea.Batch(cmds...)
+}
+
+// handleSend is called when editline signals InputCompleteMsg (Enter pressed).
+func (m dmModel) handleSend() (tea.Model, tea.Cmd) {
+	line := strings.TrimSpace(m.input.Value())
+
+	// Add to history before resetting
+	if line != "" {
+		m.input.AddHistoryEntry(line)
+	}
+
+	m.input.Reset()
+	m.mentionActive = false
+	m.mentionResults = nil
+
+	if line == "" {
+		return m, m.input.Focus()
+	}
+
+	// Process mentions
+	content := line
+	var extraTags nostr.Tags
+	if len(m.selectedMentions) > 0 {
+		var mentionTags [][]string
+		content, mentionTags = ui.ReplaceMentionsForEvent(line, m.selectedMentions)
+		for _, tag := range mentionTags {
+			extraTags = append(extraTags, nostr.Tag(tag))
+		}
+		m.selectedMentions = nil
+	}
+
+	if m.useNip04 {
+		// Legacy NIP-04 encrypt + kind 4
+		sharedSecret := generateSharedSecret(m.skHex, m.targetHex)
+		ciphertext, err := nip04.Encrypt(content, sharedSecret)
+		if err != nil {
+			return m, m.input.Focus()
+		}
+
+		tags := nostr.Tags{nostr.Tag{"p", m.targetHex}}
+		tags = append(tags, extraTags...)
+
+		event := nostr.Event{
+			PubKey:    m.myHex,
+			CreatedAt: nostr.Now(),
+			Kind:      nostr.KindEncryptedDirectMessage,
+			Tags:      tags,
+			Content:   ciphertext,
+		}
+		if err := event.Sign(m.skHex); err != nil {
+			return m, m.input.Focus()
+		}
+
+		// Add to feed immediately (dim = unconfirmed)
+		m.dimSent[event.ID] = true
+		m.feed.addEvents([]nostr.Event{event})
+		_ = cache.LogDMEvent(m.npub, m.targetHex, event)
+		_ = cache.LogSentEvent(m.npub, event)
+
+		// Publish in background
+		return m, tea.Batch(m.publishDMCmd(event), m.input.Focus())
+	}
+
+	// NIP-17 gift wrap (default)
+	forRecipient, forSelf, err := crypto.CreateGiftWrapDM(content, m.skHex, m.myHex, m.targetHex)
+	if err != nil {
+		return m, m.input.Focus()
+	}
+
+	// Cache a synthetic kind 14 rumor with plaintext content
+	rumor := nostr.Event{
+		Kind:      14,
+		Content:   content,
+		PubKey:    m.myHex,
+		CreatedAt: nostr.Now(),
+		Tags:      nostr.Tags{{"p", m.targetHex}},
+		ID:        forRecipient.ID,
+	}
+	_ = cache.LogDMEvent(m.npub, m.targetHex, rumor)
+
+	// Add to feed immediately (dim = unconfirmed)
+	m.dimSent[forRecipient.ID] = true
+	m.feed.addEvents([]nostr.Event{rumor})
+
+	// Publish both events in background
+	return m, tea.Batch(m.publishNip17Cmd(forRecipient, forSelf), m.input.Focus())
 }
 
 // sendTypingCmd publishes an ephemeral typing indicator event.
@@ -500,21 +491,9 @@ func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, use
 
 func (m dmModel) confirmDMMention() dmModel {
 	selected := m.mentionResults[m.mentionIdx]
-	val := m.input.Value()
-
-	atIdx := strings.LastIndex(val, "@"+m.mentionQuery)
-	if atIdx < 0 {
-		atIdx = strings.LastIndex(val, "@")
-	}
-	if atIdx < 0 {
-		m.mentionActive = false
-		return m
-	}
-
-	before := val[:atIdx]
-	after := val[atIdx+1+len(m.mentionQuery):]
-	newVal := before + "@" + selected.DisplayName + after
-	m.input.SetValue(newVal)
+	// Record the selected mention for tag replacement at send time.
+	// The @query text stays in the input as-is since bubbline doesn't
+	// expose SetValue. ReplaceMentionsForEvent will match @DisplayName.
 	m.selectedMentions = append(m.selectedMentions, selected)
 	m.mentionActive = false
 	m.mentionResults = nil
@@ -654,12 +633,9 @@ func (m dmModel) View() string {
 	mentionLines := m.renderDMMentionMenu()
 	mentionHeight := len(mentionLines)
 
-	// Input height (textarea auto-grows)
-	inputLines := strings.Count(m.input.Value(), "\n") + 1
-	if inputLines > 5 {
-		inputLines = 5
-	}
-	inputHeight := inputLines
+	// Editline renders its own view including prompt; count its lines
+	inputView := m.input.View()
+	inputHeight := strings.Count(inputView, "\n") + 1
 
 	feedHeight := m.height - 1 - inputHeight - mentionHeight // 1 for status
 	if feedHeight < 1 {
@@ -670,16 +646,6 @@ func (m dmModel) View() string {
 
 	// Take last feedHeight lines
 	feed := padFeed(rendered, feedHeight)
-
-	// Prepend prompt to textarea
-	prompt := greenStyle.Render(m.myName) + "> "
-	inputView := m.input.View()
-	inputViewLines := strings.SplitN(inputView, "\n", 2)
-	if len(inputViewLines) > 1 {
-		inputView = prompt + inputViewLines[0] + "\n" + inputViewLines[1]
-	} else {
-		inputView = prompt + inputView
-	}
 
 	var parts []string
 	parts = append(parts, feed)
