@@ -323,9 +323,9 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 
-	// Send typing indicator on keystroke (throttled)
+	// Send typing indicator on keystroke (throttled every 5s)
 	if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-		if time.Since(m.lastTypingSent) > 3*time.Second {
+		if time.Since(m.lastTypingSent) > 5*time.Second {
 			m.lastTypingSent = time.Now()
 			cmds = append(cmds, m.sendTypingCmd())
 		}
@@ -469,16 +469,18 @@ func (m dmModel) sendTypingCmd() tea.Cmd {
 	}
 }
 
-// publishTypingIndicator sends a typing indicator event.
-// In NIP-04 mode it publishes a plain ephemeral kind 10003.
-// In NIP-17 mode it gift-wraps the kind 10003 rumor so the relay
+// publishTypingIndicator sends an ephemeral typing indicator event (kind 20003).
+// Kind 20003 is in the ephemeral range (20000-29999) per NIP-01, so relays
+// MUST NOT store it — they only forward it to connected subscribers.
+// In NIP-04 mode it publishes a plain ephemeral event.
+// In NIP-17 mode it gift-wraps the kind 20003 rumor so the relay
 // only sees random pubkey + recipient — no sender leak.
 func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, useNip04 bool) {
 	ctx := context.Background()
 
 	if useNip04 {
 		event := nostr.Event{
-			Kind:      10003,
+			Kind:      20003,
 			Content:   "",
 			Tags:      nostr.Tags{{"p", targetHex}},
 			CreatedAt: nostr.Now(),
@@ -491,7 +493,7 @@ func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, use
 
 	// NIP-17: gift-wrap the typing indicator
 	rumor := nostr.Event{
-		Kind:      10003,
+		Kind:      20003,
 		Content:   "",
 		Tags:      nostr.Tags{{"p", targetHex}},
 		CreatedAt: nostr.Now(),
@@ -767,7 +769,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 						continue
 					}
 					// Skip typing indicators from history
-					if rumor.Kind == 10003 {
+					if rumor.Kind == 20003 {
 						continue
 					}
 					if rumor.Kind != 14 {
@@ -877,9 +879,9 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 				}()
 			}
 
-			// Typing indicators from target (ephemeral kind 10003)
+			// Typing indicators from target (ephemeral kind 20003)
 			typingSub, err := relay.Subscribe(ctx, nostr.Filters{{
-				Kinds:   []int{10003},
+				Kinds:   []int{20003},
 				Authors: []string{targetHex},
 				Tags:    nostr.TagMap{"p": []string{myHex}},
 				Since:   &since,
@@ -925,7 +927,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 							continue
 						}
 						// Gift-wrapped typing indicator
-						if rumor.Kind == 10003 && rumor.PubKey == targetHex {
+						if rumor.Kind == 20003 && rumor.PubKey == targetHex {
 							p.Send(typingMsg{})
 							continue
 						}
