@@ -215,9 +215,10 @@ var dmProgram *tea.Program
 
 func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays []string, sharedSecret []byte) dmModel {
 	ed := editline.New(0, 0)
-	prompt := greenStyle.Render(myName) + "> "
-	ed.Prompt = prompt
-	ed.NextPrompt = " " // minimal continuation indent
+	// Use plain-text prompt so bubbline calculates correct padding.
+	// Colorize in View() post-processing.
+	ed.Prompt = myName + "> "
+	ed.NextPrompt = strings.Repeat(" ", len(myName)+2)
 
 	// Disable the help bar below the input
 	ed.KeyMap.MoreHelp.SetEnabled(false)
@@ -643,6 +644,10 @@ func (m dmModel) View() string {
 	if idx := strings.LastIndex(inputView, "\n"); idx >= 0 {
 		inputView = inputView[:idx]
 	}
+	// Colorize the plain-text prompt (first occurrence on first line)
+	plainPrompt := m.myName + "> "
+	colorPrompt := greenStyle.Render(m.myName) + "> "
+	inputView = strings.Replace(inputView, plainPrompt, colorPrompt, 1)
 	inputHeight := strings.Count(inputView, "\n") + 1
 
 	feedHeight := m.height - 1 - inputHeight - mentionHeight // 1 for status
@@ -712,7 +717,12 @@ func (m dmModel) renderDMStatus() string {
 	if proto == "" {
 		proto = "NIP-17"
 	}
-	hint := fmt.Sprintf("Connected to %s (%s) · %d relays · ctrl+c to exit", m.targetName, proto, len(m.relays))
+	// Show contextual hint depending on whether input has text
+	if strings.TrimSpace(m.input.Value()) != "" {
+		hint := fmt.Sprintf("enter to send · %s · %d relays · %s · ctrl+c to clear", m.targetName, len(m.relays), proto)
+		return dimStyle.Render("  " + hint)
+	}
+	hint := fmt.Sprintf("%s · %d relays · %s · ctrl+d to exit", m.targetName, len(m.relays), proto)
 	return dimStyle.Render("  " + hint)
 }
 
