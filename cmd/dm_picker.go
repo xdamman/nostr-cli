@@ -114,26 +114,27 @@ func (m *dmPickerModel) applyFilter() {
 }
 
 var (
-	pickerDimStyle    = lipgloss.NewStyle().Faint(true)
-	pickerCyanStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	pickerGreenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	pickerYellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	pickerDimStyle      = lipgloss.NewStyle().Faint(true)
+	pickerCyanStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	pickerCyanBoldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	pickerGreenStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	pickerYellowStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 )
 
 func (m dmPickerModel) View() string {
 	var b strings.Builder
 
-	b.WriteString("  Direct Messages\n\n")
+	b.WriteString("Direct Messages\n\n")
 
 	if m.filter != "" {
-		b.WriteString("  " + pickerDimStyle.Render("Filter: ") + pickerYellowStyle.Render(m.filter) + "\n\n")
+		b.WriteString(pickerDimStyle.Render("Filter: ") + pickerYellowStyle.Render(m.filter) + "\n\n")
 	}
 
 	if len(m.filtered) == 0 {
 		if m.filter != "" {
-			b.WriteString("  " + pickerDimStyle.Render("No matches for \""+m.filter+"\"") + "\n")
+			b.WriteString(pickerDimStyle.Render("No matches for \""+m.filter+"\"") + "\n")
 		} else {
-			b.WriteString("  " + pickerDimStyle.Render("No conversations yet. Start one with: nostr dm <npub|alias>") + "\n")
+			b.WriteString(pickerDimStyle.Render("No conversations yet. Start one with: nostr dm <npub|alias>") + "\n")
 		}
 	} else {
 		// How many items can we show
@@ -163,39 +164,47 @@ func (m dmPickerModel) View() string {
 			idx := m.filtered[vi]
 			e := m.entries[idx]
 
-			cursor := "   "
+			cursor := "  "
 			if vi == m.cursor {
-				cursor = " → "
+				cursor = "→ "
 			}
 
-			// Format: name  (time ago)
-			//           last message preview
 			timeAgo := formatTimeAgo(e.LastMessageAt)
+			preview := truncateString(e.LastMessageText, 50)
 
-			var line1, line2 string
+			// One account per line with cursor, name, and timestamp
+			var nameStyle lipgloss.Style
 			if vi == m.cursor {
-				line1 = pickerCyanStyle.Render(e.Label) + "  " + pickerDimStyle.Render(timeAgo)
-				preview := truncateString(e.LastMessageText, 60)
-				if preview != "" {
-					line2 = "      " + pickerDimStyle.Render(preview)
-				}
+				nameStyle = pickerCyanBoldStyle
 			} else {
-				line1 = pickerDimStyle.Render(e.Label) + "  " + pickerDimStyle.Render(timeAgo)
-				preview := truncateString(e.LastMessageText, 60)
-				if preview != "" {
-					line2 = "      " + pickerDimStyle.Render(preview)
+				nameStyle = pickerDimStyle
+			}
+
+			// Format: cursor + name + spaces + timestamp
+			nameWithCursor := cursor + nameStyle.Render(e.Label)
+			if timeAgo != "" {
+				timeStr := pickerDimStyle.Render(timeAgo)
+				// Calculate spacing to right-align timestamp (approximate)
+				nameLength := len(e.Label) + 2 // cursor + name
+				if m.width > 0 && nameLength < m.width-15 {
+					spaces := strings.Repeat(" ", m.width-nameLength-len(timeAgo))
+					nameWithCursor += spaces + timeStr
+				} else {
+					nameWithCursor += "  " + timeStr
 				}
 			}
 
-			b.WriteString(cursor + line1 + "\n")
-			if line2 != "" {
-				b.WriteString(line2 + "\n")
+			b.WriteString(nameWithCursor + "\n")
+
+			// Show last message preview below, indented
+			if preview != "" {
+				b.WriteString("  " + pickerDimStyle.Render(preview) + "\n")
 			}
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString("  " + pickerDimStyle.Render("↑/↓ navigate · type to filter · enter select · esc quit") + "\n")
+	b.WriteString(pickerDimStyle.Render("↑/↓ navigate · type to filter · enter select · esc quit") + "\n")
 
 	return b.String()
 }
@@ -287,7 +296,7 @@ func runDMPicker(npub string) error {
 		preview := c.LastMessageText
 		// For NIP-04 encrypted content, it will look like ciphertext — skip
 		if strings.Contains(preview, "?iv=") {
-			preview = "(encrypted)"
+			preview = ""
 		}
 
 		entries = append(entries, dmPickerEntry{
@@ -322,7 +331,7 @@ func runDMPicker(npub string) error {
 	}
 
 	m := newDMPickerModel(entries)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
 		return err

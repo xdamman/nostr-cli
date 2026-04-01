@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -12,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip04"
@@ -34,6 +38,92 @@ var (
 	dmSinceFlag  string
 	dmNip04Flag  bool
 )
+
+// domainUserEntry represents a user in a domain's nostr.json
+type domainUserEntry struct {
+	Label string // name@domain
+	Name  string // just the name part
+	Hex   string // hex pubkey
+}
+
+// domainUserPickerModel is a simple picker for domain users
+type domainUserPickerModel struct {
+	entries   []domainUserEntry
+	cursor    int
+	cancelled bool
+	width     int
+	height    int
+}
+
+func newDomainUserPickerModel(entries []domainUserEntry) domainUserPickerModel {
+	return domainUserPickerModel{entries: entries}
+}
+
+func (m domainUserPickerModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m domainUserPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEscape:
+			m.cancelled = true
+			return m, tea.Quit
+		case tea.KeyEnter:
+			if len(m.entries) > 0 {
+				return m, tea.Quit
+			}
+			return m, nil
+		case tea.KeyUp:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.cursor < len(m.entries)-1 {
+				m.cursor++
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m domainUserPickerModel) View() string {
+	var b strings.Builder
+
+	b.WriteString("Select a user:\n\n")
+
+	if len(m.entries) == 0 {
+		b.WriteString(pickerDimStyle.Render("No users found in domain's nostr.json") + "\n")
+	} else {
+		for i, e := range m.entries {
+			cursor := "  "
+			if i == m.cursor {
+				cursor = "→ "
+			}
+
+			var nameStyle lipgloss.Style
+			if i == m.cursor {
+				nameStyle = pickerCyanBoldStyle
+			} else {
+				nameStyle = pickerDimStyle
+			}
+
+			b.WriteString(cursor + nameStyle.Render(e.Label) + "\n")
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(pickerDimStyle.Render("↑/↓ navigate · enter select · esc quit") + "\n")
+
+	return b.String()
+}
 
 var dmCmd = &cobra.Command{
 	Use:     "dm [account] [message]",
@@ -92,6 +182,93 @@ func init() {
 	rootCmd.AddCommand(dmCmd)
 }
 
+// isDomainArg checks if the argument looks like a bare domain
+func isDomainArg(arg string) bool {
+	// Must contain a dot, no @ symbol, and not be an npub
+	return strings.Contains(arg, ".") && !strings.Contains(arg, "@") && !strings.HasPrefix(arg, "npub1")
+}
+
+// fetchDomainNostrJSON fetches and parses .well-known/nostr.json from a domain
+func fetchDomainNostrJSON(domain string) (map[string]string, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	url := fmt.Sprintf("https://%s/.well-known/nostr.json", domain)
+	
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+
+	var result struct {
+		Names map[string]string `json:"names"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("invalid JSON from %s: %w", url, err)
+	}
+
+	return result.Names, nil
+}
+
+// showDomainError shows a helpful error message when domain resolution fails
+func showDomainError(domain string) error {
+	return fmt.Errorf(`Error: No .well-known/nostr.json found at %s
+
+To set up NIP-05 verification for your domain, see:
+  https://nostrcli.sh/nip05
+
+You can generate a nostr.json with:
+  nostr generate nip05`, domain)
+}
+
+// runDomainUserPicker shows a picker for users in a domain's nostr.json
+func runDomainUserPicker(domain string, names map[string]string) (string, error) {
+	if len(names) == 0 {
+		return "", fmt.Errorf("domain %s has a nostr.json but no users in 'names'", domain)
+	}
+
+	// If only one user, return directly
+	if len(names) == 1 {
+		for name, hex := range names {
+			fmt.Printf("Found user: %s@%s\n", name, domain)
+			return hex, nil
+		}
+	}
+
+	// Multiple users - show picker
+	var entries []domainUserEntry
+	for name, hex := range names {
+		entries = append(entries, domainUserEntry{
+			Label: fmt.Sprintf("%s@%s", name, domain),
+			Name:  name,
+			Hex:   hex,
+		})
+	}
+
+	// Sort entries for consistent ordering
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name < entries[j].Name
+	})
+
+	m := newDomainUserPickerModel(entries)
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return "", err
+	}
+
+	result := finalModel.(domainUserPickerModel)
+	if result.cancelled || len(result.entries) == 0 {
+		return "", nil // User cancelled
+	}
+
+	selected := result.entries[result.cursor]
+	return selected.Hex, nil
+}
+
 func runDM(cmd *cobra.Command, args []string) error {
 	npub, err := loadAccount()
 	if err != nil {
@@ -111,9 +288,42 @@ func runDM(cmd *cobra.Command, args []string) error {
 		return showDMAliases(npub)
 	}
 
-	targetHex, err := resolve.Resolve(npub, args[0])
-	if err != nil {
-		return err
+	// Handle domain arguments (e.g., "example.com")
+	var targetHex string
+	if isDomainArg(args[0]) {
+		domain := args[0]
+		names, err := fetchDomainNostrJSON(domain)
+		if err != nil {
+			// Show our custom error for domain fetch failures
+			return showDomainError(domain)
+		}
+		
+		// Domain nostr.json found - handle based on number of users
+		if len(names) == 0 {
+			return fmt.Errorf("domain %s has a nostr.json but no users in 'names'", domain)
+		} else if len(names) == 1 {
+			// Single user - resolve directly
+			for _, hex := range names {
+				targetHex = hex
+				break
+			}
+		} else {
+			// Multiple users - show picker
+			targetHex, err = runDomainUserPicker(domain, names)
+			if err != nil {
+				return err
+			}
+			if targetHex == "" {
+				return nil // User cancelled
+			}
+		}
+	} else {
+		// Regular resolution (npub, alias, NIP-05)
+		var err error
+		targetHex, err = resolve.Resolve(npub, args[0])
+		if err != nil {
+			return err
+		}
 	}
 
 	nsec, err := config.LoadNsec(npub)
