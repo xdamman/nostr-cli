@@ -213,8 +213,8 @@ func newDMModel(npub, myHex, myName, skHex, targetHex, targetName string, relays
 	ed := editline.New(0, 0)
 	// Use plain-text prompt so bubbline calculates correct padding.
 	// Colorize in View() post-processing.
-	ed.Prompt = myName + "> "
-	ed.NextPrompt = strings.Repeat(" ", len(myName)+2)
+	ed.Prompt = myName + ">" + targetName + "> "
+	ed.NextPrompt = strings.Repeat(" ", len(myName)+1+len(targetName)+2)
 
 	// Disable the help bar below the input
 	ed.KeyMap.MoreHelp.SetEnabled(false)
@@ -601,8 +601,8 @@ func (m dmModel) View() string {
 		inputView = inputView[:idx]
 	}
 	// Colorize the plain-text prompt (first occurrence on first line)
-	plainPrompt := m.myName + "> "
-	colorPrompt := greenStyle.Render(m.myName) + "> "
+	plainPrompt := m.myName + ">" + m.targetName + "> "
+	colorPrompt := greenStyle.Render(m.myName) + ">" + pickerCyanStyle.Render(m.targetName) + "> "
 	inputView = strings.Replace(inputView, plainPrompt, colorPrompt, 1)
 	inputHeight := strings.Count(inputView, "\n") + 1
 

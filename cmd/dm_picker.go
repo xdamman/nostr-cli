@@ -196,9 +196,14 @@ func (m dmPickerModel) View() string {
 
 			b.WriteString(nameWithCursor + "\n")
 
-			// Show last message preview below, indented
+			// Show last message preview below, indented, with timestamp
 			if preview != "" {
-				b.WriteString("  " + pickerDimStyle.Render(preview) + "\n")
+				ts := ""
+				if e.LastMessageAt > 0 {
+					t := time.Unix(int64(e.LastMessageAt), 0)
+					ts = pickerDimStyle.Render(t.Format("15:04")) + " "
+				}
+				b.WriteString("    " + ts + pickerDimStyle.Render(preview) + "\n")
 			}
 		}
 	}
