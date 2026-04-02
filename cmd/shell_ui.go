@@ -63,6 +63,12 @@ type switchStartMsg struct{}
 // dmSelectMsg signals the user wants to interactively pick a DM target.
 type dmSelectMsg struct{}
 
+// cmdOutputMsg carries multiline output from a slash command to display in the feed area.
+// Dismissed on any keystroke.
+type cmdOutputMsg struct {
+	Text string
+}
+
 // -- Styles --
 
 var (
@@ -96,9 +102,10 @@ type shellModel struct {
 	height int
 
 	// Input
-	input    *editline.Model
-	showMenu bool
-	menuSel  int
+	input     *editline.Model
+	showMenu  bool
+	menuSel   int
+	cmdOutput string // multiline output from a slash command (shown in feed area, dismissed on keystroke)
 
 	// Mention candidates (for autocomplete and p-tag extraction)
 	mentionCandidates []ui.MentionCandidate
@@ -205,6 +212,30 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case cmdOutputMsg:
+		m.cmdOutput = msg.Text
+		m.status = "press any key to dismiss"
+		return m, nil
+
+	case typeStringMsg:
+		// Type each character as a synthetic key press
+		s := string(msg)
+		if len(s) == 0 {
+			return m, nil
+		}
+		// Send first rune to editline, then queue the rest
+		r := []rune(s)
+		keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: r[:1]}
+		_, cmd := m.input.Update(keyMsg)
+		var cmds []tea.Cmd
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if len(r) > 1 {
+			cmds = append(cmds, typeString(string(r[1:])))
+		}
+		return m, tea.Batch(cmds...)
+
 	case followReadyMsg:
 		return m, nil
 
@@ -250,6 +281,13 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Dismiss command output on any keystroke
+	if m.cmdOutput != "" {
+		m.cmdOutput = ""
+		m.status = ""
+		return m, nil
+	}
+
 	// Dispatch to mode-specific handlers
 	switch m.mode {
 	case modeSwitch:
@@ -282,9 +320,19 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.KeyDown:
-			cmds := filterCommands([]byte(m.input.Value()))
+			cmds := filterCommands([]byte(m.input.Value()), nil)
 			if m.menuSel < len(cmds)-1 {
 				m.menuSel++
+			}
+			return m, nil
+		case tea.KeyTab:
+			// Autocomplete with selected command
+			cmds := filterCommands([]byte(m.input.Value()), nil)
+			if m.menuSel >= 0 && m.menuSel < len(cmds) {
+				replacement := "/" + cmds[m.menuSel].name + " "
+				m.input.Reset()
+				m.showMenu = false
+				return m, typeString(replacement)
 			}
 			return m, nil
 		case tea.KeyEscape:
@@ -299,7 +347,7 @@ func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Check if we should show/hide slash menu
 	val := m.input.Value()
 	if len(val) > 0 && val[0] == '/' && !strings.Contains(val, " ") {
-		cmds := filterCommands([]byte(val))
+		cmds := filterCommands([]byte(val), nil)
 		m.showMenu = len(cmds) > 0
 		if m.menuSel >= len(cmds) {
 			m.menuSel = 0
@@ -335,7 +383,7 @@ func (m shellModel) handleSubmit() (tea.Model, tea.Cmd) {
 
 	// Slash menu selection
 	if m.showMenu {
-		cmds := filterCommands([]byte(line))
+		cmds := filterCommands([]byte(line), nil)
 		if m.menuSel >= 0 && m.menuSel < len(cmds) {
 			// Can't SetValue on editline — just execute the selected command
 			line = "/" + cmds[m.menuSel].name
@@ -418,8 +466,14 @@ func (m shellModel) View() string {
 		feedHeight = 1
 	}
 
-	// Render feed: take last feedHeight lines
-	feed := m.renderFeed(feedHeight)
+	// Render feed: take last feedHeight lines, or show command output
+	var feed string
+	if m.cmdOutput != "" {
+		outputLines := strings.Split(m.cmdOutput, "\n")
+		feed = padFeed(outputLines, feedHeight)
+	} else {
+		feed = m.renderFeed(feedHeight)
+	}
 
 	var parts []string
 	parts = append(parts, feed)
@@ -510,7 +564,7 @@ func (m shellModel) renderMenu() []string {
 		return nil
 	}
 	val := m.input.Value()
-	cmds := filterCommands([]byte(val))
+	cmds := filterCommands([]byte(val), nil)
 	if len(cmds) == 0 {
 		return nil
 	}
@@ -577,7 +631,7 @@ func (m shellModel) makeSlashCmd(npub, myHex string, relays []string, line strin
 			if output == "__DM_SELECT__" {
 				return dmSelectMsg{}
 			}
-			return infoMsg{Text: strings.TrimRight(output, "\n")}
+			return cmdOutputMsg{Text: strings.TrimRight(output, "\n")}
 		}
 		return nil
 	}

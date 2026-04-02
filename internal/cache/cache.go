@@ -351,11 +351,13 @@ type DMConversation struct {
 	LastMessageAt    nostr.Timestamp
 	LastMessageText  string
 	MessageCount     int
+	HasSentMessage   bool // true if we've sent at least one message in this conversation
 }
 
 // ListDMConversations scans the directmessages directory and returns
 // a list of conversations sorted by most recent message first.
-func ListDMConversations(npub string) ([]DMConversation, error) {
+// myHex is the current user's hex pubkey, used to determine if we've sent messages.
+func ListDMConversations(npub string, myHex string) ([]DMConversation, error) {
 	dir, err := config.ProfileDir(npub)
 	if err != nil {
 		return nil, err
@@ -385,6 +387,7 @@ func ListDMConversations(npub string) ([]DMConversation, error) {
 
 		var lastEvent nostr.Event
 		count := 0
+		hasSent := false
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 		for scanner.Scan() {
@@ -393,6 +396,9 @@ func ListDMConversations(npub string) ([]DMConversation, error) {
 				count++
 				if ev.CreatedAt >= lastEvent.CreatedAt {
 					lastEvent = ev
+				}
+				if myHex != "" && ev.PubKey == myHex {
+					hasSent = true
 				}
 			}
 		}
@@ -416,6 +422,7 @@ func ListDMConversations(npub string) ([]DMConversation, error) {
 			LastMessageAt:    lastEvent.CreatedAt,
 			LastMessageText:  lastEvent.Content,
 			MessageCount:     count,
+			HasSentMessage:   hasSent,
 		})
 	}
 

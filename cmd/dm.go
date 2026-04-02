@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -283,7 +284,7 @@ func runDM(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		// Interactive mode: show conversation picker if terminal
 		if term.IsTerminal(int(os.Stdin.Fd())) {
-			return runDMPicker(npub)
+			return runDMPicker(npub, "")
 		}
 		return showDMAliases(npub)
 	}
@@ -292,29 +293,38 @@ func runDM(cmd *cobra.Command, args []string) error {
 	var targetHex string
 	if isDomainArg(args[0]) {
 		domain := args[0]
+		// If no further args, show picker with domain users merged in
+		if len(args) == 1 && !dmWatchFlag && term.IsTerminal(int(os.Stdin.Fd())) {
+			return runDMPicker(npub, domain)
+		}
+		// One-shot or watch mode with domain: resolve to a single user
 		names, err := fetchDomainNostrJSON(domain)
 		if err != nil {
-			// Show our custom error for domain fetch failures
 			return showDomainError(domain)
 		}
-		
-		// Domain nostr.json found - handle based on number of users
 		if len(names) == 0 {
 			return fmt.Errorf("domain %s has a nostr.json but no users in 'names'", domain)
 		} else if len(names) == 1 {
-			// Single user - resolve directly
-			for _, hex := range names {
+			for name, hex := range names {
 				targetHex = hex
+				// Replace bare domain arg with full NIP-05 for display
+				args[0] = fmt.Sprintf("%s@%s", name, domain)
 				break
 			}
 		} else {
-			// Multiple users - show picker
 			targetHex, err = runDomainUserPicker(domain, names)
 			if err != nil {
 				return err
 			}
 			if targetHex == "" {
-				return nil // User cancelled
+				return nil
+			}
+			// Find the selected user's name for display
+			for name, hex := range names {
+				if hex == targetHex {
+					args[0] = fmt.Sprintf("%s@%s", name, domain)
+					break
+				}
 			}
 		}
 	} else {
@@ -369,7 +379,11 @@ func runDM(cmd *cobra.Command, args []string) error {
 	}
 
 	// Interactive mode
-	return interactiveDM(npub, skHex, myHex, targetHex, args[0], relays)
+	err = interactiveDM(npub, skHex, myHex, targetHex, args[0], relays)
+	if errors.Is(err, errBackToPicker) {
+		return nil // no picker to return to in direct mode
+	}
+	return err
 }
 
 func sendDM(npub, skHex, myHex, targetHex, message string, relays []string) error {

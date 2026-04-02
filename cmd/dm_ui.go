@@ -15,11 +15,20 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip04"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/xdamman/nostr-cli/internal/cache"
+	"github.com/xdamman/nostr-cli/internal/config"
 	"github.com/xdamman/nostr-cli/internal/crypto"
 	"github.com/xdamman/nostr-cli/internal/profile"
 	internalRelay "github.com/xdamman/nostr-cli/internal/relay"
 	"github.com/xdamman/nostr-cli/internal/ui"
 )
+
+// KindTypingIndicator is the event kind for typing indicators in DMs.
+// It uses the ephemeral range (20000-29999) per NIP-01, meaning relays
+// MUST NOT store these events — they only forward them to connected subscribers.
+// In NIP-04 mode, sent as a plain ephemeral event with a "p" tag.
+// In NIP-17 mode, the kind 20003 rumor is gift-wrapped so the relay only sees
+// a random outer pubkey + recipient — no sender leak.
+const KindTypingIndicator = 20003
 
 // -- DM-specific Bubble Tea messages --
 
@@ -28,6 +37,11 @@ type dmEventMsg struct {
 }
 
 type dmStatusMsg struct {
+	Text string
+}
+
+// dmCmdOutputMsg carries multiline output from a slash command to display in the feed area.
+type dmCmdOutputMsg struct {
 	Text string
 }
 
@@ -192,13 +206,19 @@ type dmModel struct {
 	skHex      string
 	targetHex  string
 	targetName string
-	relays     []string
-	quitting   bool
-	useNip04   bool   // true = NIP-04, false = NIP-17
-	protoLabel string // "NIP-17" or "NIP-04 — peer uses legacy protocol"
+	relays       []string
+	quitting     bool
+	backToPicker bool   // true when user pressed backspace on empty input to go back
+	useNip04     bool   // true = NIP-04, false = NIP-17
+	protoLabel   string // "NIP-17" or "NIP-04 — peer uses legacy protocol"
 
 	// Mention candidates (used for p-tag extraction at send time)
 	mentionCandidates []ui.MentionCandidate
+
+	// Slash command menu
+	showMenu  bool
+	menuSel   int
+	cmdOutput string // multiline output from a slash command (shown in feed area, dismissed on keystroke)
 
 	// Typing indicators
 	lastTypingSent  time.Time // throttle outgoing typing events
@@ -281,6 +301,28 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.Text
 		return m, nil
 
+	case dmCmdOutputMsg:
+		m.cmdOutput = msg.Text
+		m.status = "press any key to dismiss"
+		return m, nil
+
+	case typeStringMsg:
+		s := string(msg)
+		if len(s) == 0 {
+			return m, nil
+		}
+		r := []rune(s)
+		keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: r[:1]}
+		_, cmd := m.input.Update(keyMsg)
+		var cmds []tea.Cmd
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if len(r) > 1 {
+			cmds = append(cmds, typeString(string(r[1:])))
+		}
+		return m, tea.Batch(cmds...)
+
 	case dmTargetNameMsg:
 		m.targetName = msg.Name
 		return m, nil
@@ -306,6 +348,13 @@ func (m dmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Dismiss command output on any keystroke
+	if m.cmdOutput != "" {
+		m.cmdOutput = ""
+		m.status = ""
+		return m, nil
+	}
+
 	// Ctrl+C: bubbline clears input if non-empty, or sends ErrInterrupted if empty.
 	// We intercept Ctrl+C on empty input to quit.
 	if msg.Type == tea.KeyCtrlC {
@@ -319,6 +368,42 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyCtrlD {
 		m.quitting = true
 		return m, tea.Quit
+	}
+
+	// Backspace on empty input → go back to picker
+	if (msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete) && strings.TrimSpace(m.input.Value()) == "" {
+		m.backToPicker = true
+		return m, tea.Quit
+	}
+
+	// Slash menu navigation
+	if m.showMenu {
+		switch msg.Type {
+		case tea.KeyUp:
+			if m.menuSel > 0 {
+				m.menuSel--
+			}
+			return m, nil
+		case tea.KeyDown:
+			cmds := filterCommands([]byte(m.input.Value()), dmSlashCommands)
+			if m.menuSel < len(cmds)-1 {
+				m.menuSel++
+			}
+			return m, nil
+		case tea.KeyTab:
+			// Autocomplete with selected command
+			cmds := filterCommands([]byte(m.input.Value()), dmSlashCommands)
+			if m.menuSel >= 0 && m.menuSel < len(cmds) {
+				replacement := "/" + cmds[m.menuSel].name + " "
+				m.input.Reset()
+				m.showMenu = false
+				return m, typeString(replacement)
+			}
+			return m, nil
+		case tea.KeyEscape:
+			m.showMenu = false
+			return m, nil
+		}
 	}
 
 	var cmds []tea.Cmd
@@ -337,6 +422,18 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// Check if we should show/hide slash menu
+	val := m.input.Value()
+	if len(val) > 0 && val[0] == '/' && !strings.Contains(val, " ") {
+		filtered := filterCommands([]byte(val), dmSlashCommands)
+		m.showMenu = len(filtered) > 0
+		if m.menuSel >= len(filtered) {
+			m.menuSel = 0
+		}
+	} else {
+		m.showMenu = false
+	}
+
 	// Auto-trigger autocomplete when typing inside an @mention
 	if (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) && len(m.mentionCandidates) > 0 {
 		if isInMentionContext(m.input.Value()) {
@@ -351,6 +448,15 @@ func (m dmModel) handleDMKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m dmModel) handleSend() (tea.Model, tea.Cmd) {
 	line := strings.TrimSpace(m.input.Value())
 
+	// Slash menu selection: if menu is visible, use selected command
+	if m.showMenu {
+		cmds := filterCommands([]byte(line), dmSlashCommands)
+		if m.menuSel >= 0 && m.menuSel < len(cmds) {
+			line = "/" + cmds[m.menuSel].name
+		}
+	}
+	m.showMenu = false
+
 	// Add to history before resetting
 	if line != "" {
 		m.input.AddHistoryEntry(line)
@@ -360,6 +466,45 @@ func (m dmModel) handleSend() (tea.Model, tea.Cmd) {
 
 	if line == "" {
 		return m, m.input.Focus()
+	}
+
+	// Handle /protocol command to toggle between NIP-04 and NIP-17
+	if line == "/protocol" {
+		m.useNip04 = !m.useNip04
+		if m.useNip04 {
+			m.protoLabel = "NIP-04"
+		} else {
+			m.protoLabel = "NIP-17"
+		}
+		return m, m.input.Focus()
+	}
+
+	// Handle /alias <name> — create alias for current conversation partner
+	if line == "/alias" || strings.HasPrefix(line, "/alias ") {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			aliasName := parts[1]
+			targetNpub, _ := nip19.EncodePublicKey(m.targetHex)
+			if err := config.SetAlias(m.npub, aliasName, targetNpub); err != nil {
+				m.status = fmt.Sprintf("alias error: %v", err)
+			} else {
+				m.status = fmt.Sprintf("alias '%s' created for %s", aliasName, m.targetName)
+			}
+		} else {
+			m.status = "usage: /alias <name>"
+		}
+		return m, m.input.Focus()
+	}
+
+	// Handle /dm — go back to conversation picker
+	if line == "/dm" || strings.HasPrefix(line, "/dm ") {
+		m.backToPicker = true
+		return m, tea.Quit
+	}
+
+	// Delegate other slash commands to the shared command executor
+	if strings.HasPrefix(line, "/") {
+		return m, tea.Batch(m.makeDMSlashCmd(line), m.input.Focus())
 	}
 
 	// Extract mentions from text (bubbline autocomplete inserts @DisplayName)
@@ -456,6 +601,16 @@ func autoTriggerTab() tea.Cmd {
 	}
 }
 
+// typeString sends a sequence of synthetic key presses to type a string into editline.
+func typeString(s string) tea.Cmd {
+	return func() tea.Msg {
+		return typeStringMsg(s)
+	}
+}
+
+// typeStringMsg is processed one character at a time by Update.
+type typeStringMsg string
+
 // sendTypingCmd publishes an ephemeral typing indicator event.
 func (m dmModel) sendTypingCmd() tea.Cmd {
 	skHex := m.skHex
@@ -480,7 +635,7 @@ func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, use
 
 	if useNip04 {
 		event := nostr.Event{
-			Kind:      20003,
+			Kind:      KindTypingIndicator,
 			Content:   "",
 			Tags:      nostr.Tags{{"p", targetHex}},
 			CreatedAt: nostr.Now(),
@@ -493,7 +648,7 @@ func publishTypingIndicator(skHex, myHex, targetHex string, relays []string, use
 
 	// NIP-17: gift-wrap the typing indicator
 	rumor := nostr.Event{
-		Kind:      20003,
+		Kind:      KindTypingIndicator,
 		Content:   "",
 		Tags:      nostr.Tags{{"p", targetHex}},
 		CreatedAt: nostr.Now(),
@@ -593,6 +748,8 @@ func (m dmModel) View() string {
 	}
 
 	statusLine := m.renderDMStatus()
+	menuLines := m.renderDMMenu()
+	menuHeight := len(menuLines)
 
 	// Editline renders its own view including prompt and a trailing help line.
 	// Strip the help/search line (last line after the final \n).
@@ -606,21 +763,78 @@ func (m dmModel) View() string {
 	inputView = strings.Replace(inputView, plainPrompt, colorPrompt, 1)
 	inputHeight := strings.Count(inputView, "\n") + 1
 
-	feedHeight := m.height - 1 - inputHeight // 1 for status
+	feedHeight := m.height - 1 - inputHeight - menuHeight // 1 for status
 	if feedHeight < 1 {
 		feedHeight = 1
 	}
 
-	rendered := m.feed.render(m.myHex, m.myName, m.targetName, m.dimSent, m.width)
-
-	// Take last feedHeight lines
-	feed := padFeed(rendered, feedHeight)
+	var feed string
+	if m.cmdOutput != "" {
+		// Show command output in the feed area
+		outputLines := strings.Split(m.cmdOutput, "\n")
+		feed = padFeed(outputLines, feedHeight)
+	} else {
+		rendered := m.feed.render(m.myHex, m.myName, m.targetName, m.dimSent, m.width)
+		feed = padFeed(rendered, feedHeight)
+	}
 
 	var parts []string
 	parts = append(parts, feed)
 	parts = append(parts, inputView)
+	parts = append(parts, menuLines...)
 	parts = append(parts, statusLine)
 	return strings.Join(parts, "\n")
+}
+
+// renderDMMenu renders the slash command autocomplete menu for DMs.
+func (m dmModel) renderDMMenu() []string {
+	if !m.showMenu {
+		return nil
+	}
+	val := m.input.Value()
+	cmds := filterCommands([]byte(val), dmSlashCommands)
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	var lines []string
+	for i, cmd := range cmds {
+		if i == m.menuSel {
+			line := "  " + cyanStyle.Render("> "+cmd.name) + "  " + dimStyle.Render(cmd.desc)
+			lines = append(lines, line)
+		} else {
+			line := "    " + dimStyle.Render(cmd.name+"  "+cmd.desc)
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// makeDMSlashCmd runs a slash command (shared with the shell) in the background
+// and sends the output as a dmCmdOutputMsg (shown in feed area, dismissed on keystroke).
+func (m dmModel) makeDMSlashCmd(line string) tea.Cmd {
+	npub := m.npub
+	myHex := m.myHex
+	relays := m.relays
+	return func() tea.Msg {
+		output := captureOutput(func() {
+			statusCh := make(chan string, 16)
+			go func() {
+				for s := range statusCh {
+					if dmProgram != nil {
+						dmProgram.Send(dmStatusMsg{Text: s})
+					}
+				}
+			}()
+			executeSlashCommand(npub, myHex, line, relays, statusCh)
+			close(statusCh)
+		})
+		output = strings.TrimRight(output, "\n")
+		if output != "" {
+			return dmCmdOutputMsg{Text: output}
+		}
+		return dmStatusMsg{Text: ""}
+	}
 }
 
 func (m dmModel) renderDMStatus() string {
@@ -639,7 +853,7 @@ func (m dmModel) renderDMStatus() string {
 		hint := fmt.Sprintf("enter to send to %s over %d relays (%s) · ctrl+c to clear", m.targetName, len(m.relays), proto)
 		return dimStyle.Render("  " + hint)
 	}
-	hint := fmt.Sprintf("%s · %d relays · %s · ctrl+c to exit", m.targetName, len(m.relays), proto)
+	hint := fmt.Sprintf("%s · %d relays · %s · type / for commands · backspace to go back", m.targetName, len(m.relays), proto)
 	return dimStyle.Render("  " + hint)
 }
 
@@ -769,7 +983,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 						continue
 					}
 					// Skip typing indicators from history
-					if rumor.Kind == 20003 {
+					if rumor.Kind == KindTypingIndicator {
 						continue
 					}
 					if rumor.Kind != 14 {
@@ -881,7 +1095,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 
 			// Typing indicators from target (ephemeral kind 20003)
 			typingSub, err := relay.Subscribe(ctx, nostr.Filters{{
-				Kinds:   []int{20003},
+				Kinds:   []int{KindTypingIndicator},
 				Authors: []string{targetHex},
 				Tags:    nostr.TagMap{"p": []string{myHex}},
 				Since:   &since,
@@ -927,7 +1141,7 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 							continue
 						}
 						// Gift-wrapped typing indicator
-						if rumor.Kind == 20003 && rumor.PubKey == targetHex {
+						if rumor.Kind == KindTypingIndicator && rumor.PubKey == targetHex {
 							p.Send(typingMsg{})
 							continue
 						}
@@ -956,11 +1170,15 @@ func interactiveDMBubbleTea(npub, skHex, myHex, targetHex, inputName string, rel
 		}(url)
 	}
 
-	if _, err := p.Run(); err != nil {
-		return err
-	}
+	finalModel, err := p.Run()
 	cancel()
 	dmProgram = nil
+	if err != nil {
+		return err
+	}
+	if result, ok := finalModel.(dmModel); ok && result.backToPicker {
+		return errBackToPicker
+	}
 	return nil
 }
 

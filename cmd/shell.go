@@ -29,8 +29,9 @@ type slashCmd struct {
 	desc  string
 }
 
+// slashCommands for the public feed shell.
 var slashCommands = []slashCmd{
-	{"dm", "/dm [user] [message]", "Start a DM conversation or send a message"},
+	{"dm", "/dm [user]", "Open a DM conversation"},
 	{"post", "/post <message>", "Post a note"},
 	{"follow", "/follow <user>", "Follow a user"},
 	{"following", "/following", "List accounts you follow"},
@@ -38,7 +39,7 @@ var slashCommands = []slashCmd{
 	{"profile", "/profile [user]", "View a profile"},
 	{"edit-profile", "/edit-profile", "Edit your profile metadata"},
 	{"switch", "/switch [user]", "Switch active account"},
-	{"relays", "/relays", "List relays"},
+	{"relays", "/relays [user]", "List relays"},
 	{"alias", "/alias <name> <npub>", "Create an alias"},
 	{"aliases", "/aliases", "List aliases"},
 	{"nip", "/nip <number>", "View a NIP specification"},
@@ -46,6 +47,18 @@ var slashCommands = []slashCmd{
 	{"welcome", "/welcome", "Show welcome message"},
 	{"version", "/version", "Show version info"},
 	{"update", "/update", "Check for updates"},
+}
+
+// dmSlashCommands for DM conversations.
+var dmSlashCommands = []slashCmd{
+	{"protocol", "/protocol", "Switch between NIP-04 and NIP-17 (gift wrap)"},
+	{"alias", "/alias <name>", "Create an alias for this contact"},
+	{"dm", "/dm [user]", "Open a DM conversation"},
+	{"profile", "/profile [user]", "View a profile"},
+	{"edit-profile", "/edit-profile", "Edit your profile metadata"},
+	{"switch", "/switch [user]", "Switch active account"},
+	{"relays", "/relays [user]", "List relays"},
+	{"welcome", "/welcome", "Show welcome message"},
 }
 
 // shellPromptName is the current user's display name for the prompt.
@@ -417,7 +430,9 @@ func wrapNoteWithSep(content string, prefixLen int, newline string) string {
 	content = strings.ReplaceAll(content, "\r", "")
 	content = strings.TrimSpace(content)
 
-	// Apply mention and markdown rendering
+	// Apply image URL rendering first (before markdown could mangle URLs),
+	// then mentions and markdown.
+	content = renderImageURLs(content)
 	content = renderMentions(content)
 	content = renderInlineMarkdown(content)
 
@@ -510,45 +525,99 @@ func applyInlineStyle(s, marker, ansiOn, ansiOff string) string {
 	return sb.String()
 }
 
-// visibleLen returns the length of a string excluding ANSI escape sequences.
+// visibleLen returns the length of a string excluding ANSI escape sequences
+// (CSI sequences like \033[...m and OSC sequences like \033]...ST).
 func visibleLen(s string) int {
 	n := 0
-	inEsc := false
-	for _, r := range s {
-		if r == '\033' {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEsc = false
+	i := 0
+	runes := []rune(s)
+	for i < len(runes) {
+		if runes[i] == '\033' {
+			i++
+			if i < len(runes) && runes[i] == '[' {
+				// CSI sequence: skip until letter
+				i++
+				for i < len(runes) {
+					r := runes[i]
+					i++
+					if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+						break
+					}
+				}
+			} else if i < len(runes) && runes[i] == ']' {
+				// OSC sequence: skip until ST (\033\\) or BEL (\007)
+				i++
+				for i < len(runes) {
+					if runes[i] == '\007' {
+						i++
+						break
+					}
+					if runes[i] == '\033' && i+1 < len(runes) && runes[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+			} else {
+				// Other escape, skip one char
+				if i < len(runes) {
+					i++
+				}
 			}
 			continue
 		}
 		n++
+		i++
 	}
 	return n
 }
 
 // visibleIndex returns the byte index in s where the visible character count reaches n.
+// Handles both CSI (\033[...m) and OSC (\033]...ST) escape sequences.
 func visibleIndex(s string, n int) int {
 	vis := 0
-	inEsc := false
-	for i, r := range s {
+	runes := []rune(s)
+	i := 0
+	for i < len(runes) {
 		if vis >= n {
-			return i
+			// Convert rune index to byte index
+			return len(string(runes[:i]))
 		}
-		if r == '\033' {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEsc = false
+		if runes[i] == '\033' {
+			i++
+			if i < len(runes) && runes[i] == '[' {
+				// CSI sequence
+				i++
+				for i < len(runes) {
+					r := runes[i]
+					i++
+					if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+						break
+					}
+				}
+			} else if i < len(runes) && runes[i] == ']' {
+				// OSC sequence
+				i++
+				for i < len(runes) {
+					if runes[i] == '\007' {
+						i++
+						break
+					}
+					if runes[i] == '\033' && i+1 < len(runes) && runes[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+			} else {
+				if i < len(runes) {
+					i++
+				}
 			}
 			continue
 		}
 		vis++
+		i++
 	}
 	return len(s)
 }
@@ -1082,7 +1151,8 @@ func collectFeedAuthors(npub string) []string {
 }
 
 // filterCommands returns slash commands matching the current input prefix.
-func filterCommands(buf []byte) []slashCmd {
+// If cmdList is nil, it defaults to slashCommands (public feed).
+func filterCommands(buf []byte, cmdList []slashCmd) []slashCmd {
 	if len(buf) == 0 || buf[0] != '/' {
 		return nil
 	}
@@ -1090,8 +1160,11 @@ func filterCommands(buf []byte) []slashCmd {
 	if strings.Contains(prefix, " ") {
 		return nil
 	}
+	if cmdList == nil {
+		cmdList = slashCommands
+	}
 	var result []slashCmd
-	for _, cmd := range slashCommands {
+	for _, cmd := range cmdList {
 		if strings.HasPrefix(cmd.name, prefix) {
 			result = append(result, cmd)
 		}

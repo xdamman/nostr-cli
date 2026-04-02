@@ -171,7 +171,7 @@ func TestUpdateFeedNameWidth(t *testing.T) {
 }
 
 func TestFilterCommands(t *testing.T) {
-	cmds := filterCommands([]byte("/f"))
+	cmds := filterCommands([]byte("/f"), nil)
 	names := make([]string, len(cmds))
 	for i, c := range cmds {
 		names[i] = c.name
@@ -180,17 +180,17 @@ func TestFilterCommands(t *testing.T) {
 		t.Errorf("expected /f to match follow and following, got %v", names)
 	}
 
-	cmds = filterCommands([]byte("/dm"))
+	cmds = filterCommands([]byte("/dm"), nil)
 	if len(cmds) != 1 || cmds[0].name != "dm" {
 		t.Errorf("expected /dm to match dm, got %v", cmds)
 	}
 
-	cmds = filterCommands([]byte("/dm message"))
+	cmds = filterCommands([]byte("/dm message"), nil)
 	if cmds != nil {
 		t.Error("expected nil for command with space")
 	}
 
-	cmds = filterCommands([]byte("hello"))
+	cmds = filterCommands([]byte("hello"), nil)
 	if cmds != nil {
 		t.Error("expected nil for non-slash input")
 	}

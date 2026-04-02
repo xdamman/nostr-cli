@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -191,4 +192,54 @@ func formatQuotedEvent(ev *nostr.Event, bech32ID string, dimStyle *color.Color) 
 	line2 := "\n  " + border + " " + dimStyle.Sprintf("📝 %s", short)
 
 	return line1 + line2
+}
+
+// imageURLRe matches URLs ending in common image extensions (case-insensitive).
+var imageURLRe = regexp.MustCompile(`(?i)https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?[^\s]*)?`)
+
+// renderImageURLs replaces image URLs with a clickable 🖼 icon and shortened URL.
+// Uses OSC 8 terminal hyperlinks so the shortened text links to the full URL.
+func renderImageURLs(content string) string {
+	return imageURLRe.ReplaceAllStringFunc(content, func(rawURL string) string {
+		short := shortenURL(rawURL)
+		// OSC 8 hyperlink: \033]8;;URL\033\\ DISPLAY \033]8;;\033\\
+		return fmt.Sprintf("\033]8;;%s\033\\🖼  %s\033]8;;\033\\", rawURL, short)
+	})
+}
+
+// shortenURL shortens a URL for display: host + last path segment.
+func shortenURL(rawURL string) string {
+	// Strip scheme
+	display := rawURL
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(display, prefix) {
+			display = display[len(prefix):]
+			break
+		}
+	}
+
+	// Split into host and path
+	slashIdx := strings.Index(display, "/")
+	if slashIdx < 0 {
+		return display
+	}
+	host := display[:slashIdx]
+	path := display[slashIdx:]
+
+	// Strip query params for display
+	if qIdx := strings.Index(path, "?"); qIdx >= 0 {
+		path = path[:qIdx]
+	}
+
+	// Take last path segment (the filename)
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash >= 0 && lastSlash < len(path)-1 {
+		filename := path[lastSlash+1:]
+		if len(filename) > 30 {
+			filename = filename[:27] + "..."
+		}
+		return host + "/.../" + filename
+	}
+
+	return display
 }

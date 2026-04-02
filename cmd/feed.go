@@ -126,57 +126,11 @@ func renderFeedEvent(ev nostr.Event, myHex, promptName string, termW int) []stri
 	nw := updateFeedNameWidth(name)
 	prefixLen := 14 + 2 + nw + 2
 
-	content := ev.Content
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "")
-	content = strings.TrimSpace(content)
-	content = renderMentions(content)
-	content = renderInlineMarkdown(content)
-
-	avail := termW - prefixLen
-	if avail < 20 {
-		avail = 20
-	}
-	if termW <= 0 {
-		avail = 60
-	}
-
-	indent := strings.Repeat(" ", prefixLen)
-	var sb strings.Builder
-	paragraphs := strings.Split(content, "\n")
-	for pi, para := range paragraphs {
-		if pi > 0 {
-			sb.WriteString("\n")
-			sb.WriteString(indent)
-		}
-		for len(para) > 0 {
-			vis := visibleLen(para)
-			if vis <= avail {
-				sb.WriteString(para)
-				break
-			}
-			lineLen := visibleIndex(para, avail)
-			if lineLen <= 0 {
-				lineLen = len(para)
-			}
-			if lineLen < len(para) {
-				cutoff := visibleIndex(para, avail/3)
-				if idx := strings.LastIndex(para[:lineLen], " "); idx > cutoff {
-					lineLen = idx + 1
-				}
-			}
-			sb.WriteString(strings.TrimRight(para[:lineLen], " "))
-			para = para[lineLen:]
-			if len(para) > 0 {
-				sb.WriteString("\n")
-				sb.WriteString(indent)
-			}
-		}
-	}
+	content := wrapNote(ev.Content, prefixLen)
 
 	tsStr := dimStyle.Render(ts + "  ")
 	nameStr := cyanStyle.Render(fmt.Sprintf("%-*s", nw, name)) + ": "
-	full := tsStr + nameStr + sb.String()
+	full := tsStr + nameStr + content
 
 	return strings.Split(full, "\n")
 }
