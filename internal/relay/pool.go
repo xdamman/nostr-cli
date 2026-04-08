@@ -121,6 +121,74 @@ func PublishEventWithProgress(ctx context.Context, event nostr.Event, relayURLs 
 	return ch
 }
 
+// MultiRelayResult holds the outcome of publishing multiple events to a single relay.
+type MultiRelayResult struct {
+	URL      string
+	OK       bool // true only if ALL events published successfully
+	Duration time.Duration
+	Err      error
+}
+
+// PublishEventsWithProgress publishes multiple events to each relay concurrently.
+// Each relay gets ALL events published in parallel. A relay is "OK" only if every
+// event was published successfully. The channel is closed when all relays are done.
+func PublishEventsWithProgress(ctx context.Context, events []nostr.Event, relayURLs []string, timeout time.Duration) <-chan MultiRelayResult {
+	if timeout <= 0 {
+		timeout = PublishTimeout
+	}
+	ch := make(chan MultiRelayResult, len(relayURLs))
+	var wg sync.WaitGroup
+
+	for _, u := range relayURLs {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			start := time.Now()
+
+			relayCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			r, err := nostr.RelayConnect(relayCtx, u)
+			if err != nil {
+				ch <- MultiRelayResult{URL: u, Err: fmt.Errorf("connect: %w", err), Duration: time.Since(start)}
+				return
+			}
+			defer r.Close()
+
+			// Publish all events to this relay concurrently
+			var pubWg sync.WaitGroup
+			var mu sync.Mutex
+			var firstErr error
+			allOK := true
+
+			for _, ev := range events {
+				pubWg.Add(1)
+				go func(ev nostr.Event) {
+					defer pubWg.Done()
+					if err := r.Publish(relayCtx, ev); err != nil {
+						mu.Lock()
+						allOK = false
+						if firstErr == nil {
+							firstErr = fmt.Errorf("publish: %w", err)
+						}
+						mu.Unlock()
+					}
+				}(ev)
+			}
+			pubWg.Wait()
+
+			ch <- MultiRelayResult{URL: u, OK: allOK, Err: firstErr, Duration: time.Since(start)}
+		}(u)
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	return ch
+}
+
 // PublishEventQuiet publishes an event to the given relays in a fire-and-forget
 // fashion with no output or error reporting. Used for ephemeral events like
 // typing indicators.

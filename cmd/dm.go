@@ -687,14 +687,15 @@ func sendDMAsyncLegacy(npub, skHex, myHex, targetHex, message string, relays []s
 	}
 
 	ctx := context.Background()
-	if _, err := internalRelay.PublishEvent(ctx, event, relays); err != nil {
+	successURLs, err := internalRelay.PublishEvent(ctx, event, relays)
+	if err != nil {
 		statusCh <- fmt.Sprintf("✗ %v", err)
 		return
 	}
 
 	_ = cache.LogDMEvent(npub, targetHex, event)
 	_ = cache.LogSentEvent(npub, event)
-	statusCh <- "✓ NIP-04 DM sent"
+	statusCh <- fmt.Sprintf("✓ Published to %d/%d relays (NIP-04)", len(successURLs), len(relays))
 }
 
 
