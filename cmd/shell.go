@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -311,6 +312,15 @@ func runShell() error {
 	shellCancel()
 
 	// Check if the user wants to enter DM mode
+	if sm, ok := finalModel.(shellModel); ok && sm.createAccount {
+		if err := runInteractiveAccountCreation(); err != nil {
+			if errors.Is(err, errInterrupted) {
+				return runShell()
+			}
+			return err
+		}
+		return runShell()
+	}
 	if sm, ok := finalModel.(shellModel); ok && sm.dmTarget != "" {
 		targetHex, err := resolve.Resolve(npub, sm.dmTarget)
 		if err != nil {
@@ -322,7 +332,21 @@ func runShell() error {
 	return nil
 }
 
+func runInteractiveAccountCreation() error {
+	origNsec := loginNsec
+	origGenerate := loginGenerate
+	origNew := loginNew
+	defer func() {
+		loginNsec = origNsec
+		loginGenerate = origGenerate
+		loginNew = origNew
+	}()
 
+	loginNsec = ""
+	loginGenerate = false
+	loginNew = false
+	return runLogin(loginCmd, nil)
+}
 
 func resolveAuthorName(pubHex string) string {
 	// Fast path: in-memory profile cache
@@ -487,10 +511,10 @@ func wrapNoteWithSep(content string, prefixLen int, newline string) string {
 // Supports: **bold**, *italic*, __underline__, ~~strikethrough~~
 func renderInlineMarkdown(s string) string {
 	// Process in order: bold before italic to avoid conflicts
-	s = applyInlineStyle(s, "**", "\033[1m", "\033[22m")       // bold
-	s = applyInlineStyle(s, "__", "\033[4m", "\033[24m")        // underline
-	s = applyInlineStyle(s, "~~", "\033[9m", "\033[29m")        // strikethrough
-	s = applyInlineStyle(s, "*", "\033[3m", "\033[23m")         // italic
+	s = applyInlineStyle(s, "**", "\033[1m", "\033[22m") // bold
+	s = applyInlineStyle(s, "__", "\033[4m", "\033[24m") // underline
+	s = applyInlineStyle(s, "~~", "\033[9m", "\033[29m") // strikethrough
+	s = applyInlineStyle(s, "*", "\033[3m", "\033[23m")  // italic
 	return s
 }
 

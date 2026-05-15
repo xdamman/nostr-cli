@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -25,9 +26,23 @@ var (
 	loginNew      bool
 )
 
+var errInterrupted = errors.New("interrupted")
+
+var readLoginMaskedInput = readMaskedInput
+var readMissingProfileUsername = func() (string, error) {
+	result := ui.RunInlineInput(ui.InlineInputConfig{
+		Prompt: "Username: ",
+		Hint:   "No profile found. Enter a username for this account, ESC to cancel",
+	})
+	if result.Cancelled {
+		return "", errInterrupted
+	}
+	return strings.TrimSpace(result.Text), nil
+}
+
 var loginCmd = &cobra.Command{
-	Use:     "login",
-	Short:   "Create a new account or import an existing one",
+	Use:   "login",
+	Short: "Create a new account or import an existing one",
 	Long: `Login with an existing nsec or generate a new keypair.
 
 Creates an account directory in ~/.nostr/accounts/<npub>/ with keys, relays,
@@ -80,8 +95,11 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	default:
 		interactive = true
 		fmt.Print("Enter your nsec (leave blank to generate a new keypair): ")
-		input, _ := readMaskedInput()
+		input, err := readLoginMaskedInput()
 		fmt.Println()
+		if err != nil {
+			return err
+		}
 		if input == "" {
 			nsec, npub, _, err = crypto.GenerateKeyPair()
 			if err != nil {
@@ -127,7 +145,10 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		if isTTY {
 			fmt.Println()
 			fmt.Println("Default relays:")
-			relays = relayChecklist(relays)
+			relays, err = relayChecklist(relays)
+			if err != nil {
+				return err
+			}
 		}
 
 		if err := config.SaveRelays(npub, relays); err != nil {
@@ -152,13 +173,14 @@ func runLogin(cmd *cobra.Command, args []string) error {
 					{Label: "Website", Key: "website", Placeholder: "https://..."},
 				},
 			})
-			if !result.Cancelled {
-				meta.Name = result.Values["name"]
-				meta.DisplayName = result.Values["display_name"]
-				meta.About = result.Values["about"]
-				meta.Picture = result.Values["picture"]
-				meta.Website = result.Values["website"]
+			if result.Cancelled {
+				return errInterrupted
 			}
+			meta.Name = result.Values["name"]
+			meta.DisplayName = result.Values["display_name"]
+			meta.About = result.Values["about"]
+			meta.Picture = result.Values["picture"]
+			meta.Website = result.Values["website"]
 
 			if err := profile.SaveCached(npub, meta); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not save profile: %v\n", err)
@@ -207,6 +229,16 @@ func runLogin(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+		if interactive && isTTY && meta == nil {
+			username, inputErr := readMissingProfileUsername()
+			if inputErr != nil {
+				return inputErr
+			}
+			meta, err = createMissingProfileMetadata(npub, username, green)
+			if err != nil {
+				return err
+			}
+		}
 
 		// Fetch relay list (NIP-65 kind 10002) from default relays
 		pubHex, _ := crypto.NpubToHex(npub)
@@ -235,7 +267,10 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			} else {
 				fmt.Println("Default relays:")
 			}
-			allRelays = relayChecklist(allRelays)
+			allRelays, err = relayChecklist(allRelays)
+			if err != nil {
+				return err
+			}
 		}
 
 		if err := config.SaveRelays(npub, allRelays); err != nil {
@@ -265,6 +300,22 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	dim.Println("  Manage relays:          nostr relays")
 
 	return nil
+}
+
+func createMissingProfileMetadata(npub, username string, green *color.Color) (*profile.Metadata, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, nil
+	}
+	if _, err := config.EnsureProfileDir(npub); err != nil {
+		return nil, err
+	}
+	meta := &profile.Metadata{Name: username}
+	if err := profile.SaveCached(npub, meta); err != nil {
+		return nil, fmt.Errorf("failed to save profile: %w", err)
+	}
+	setAliasFromUsername(npub, username, green)
+	return meta, nil
 }
 
 // setAliasFromUsername automatically sets an alias from the username.
@@ -307,7 +358,7 @@ func fetchRelayList(ctx context.Context, pubHex string, relayURLs []string) []st
 
 // relayChecklist shows an interactive checkbox list for relays using bubbletea.
 // Returns the selected relays. All relays are checked by default.
-func relayChecklist(relays []string) []string {
+func relayChecklist(relays []string) ([]string, error) {
 	loginRelayHost := func(r string) string {
 		if u, err := url.Parse(r); err == nil && u.Host != "" {
 			return u.Host
@@ -335,7 +386,7 @@ func relayChecklist(relays []string) []string {
 		})
 
 		if result.Cancelled {
-			return relays // return all on cancel
+			return nil, errInterrupted
 		}
 
 		// Check if "Add relay..." was selected
@@ -353,7 +404,10 @@ func relayChecklist(relays []string) []string {
 				Prompt: "  Relay URL: ",
 				Hint:   "Enter a relay URL (wss://...), ESC to cancel",
 			})
-			if !inputResult.Cancelled && inputResult.Text != "" {
+			if inputResult.Cancelled {
+				return nil, errInterrupted
+			}
+			if inputResult.Text != "" {
 				newRelay := inputResult.Text
 				if strings.HasPrefix(newRelay, "wss://") || strings.HasPrefix(newRelay, "ws://") {
 					relays = append(relays, newRelay)
@@ -370,9 +424,9 @@ func relayChecklist(relays []string) []string {
 			}
 		}
 		if len(selected) == 0 {
-			return relays // fallback: return all
+			return relays, nil // fallback: return all
 		}
-		return selected
+		return selected, nil
 	}
 }
 
@@ -382,7 +436,7 @@ func readMaskedInput() (string, error) {
 		Prompt: "Enter your nsec (leave blank to generate a new keypair): ",
 	})
 	if result.Cancelled {
-		return "", fmt.Errorf("interrupted")
+		return "", errInterrupted
 	}
 	return result.Value, nil
 }

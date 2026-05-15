@@ -129,6 +129,7 @@ type shellModel struct {
 	// Switch mode state
 	switchEntries []profileEntry
 	switchIdx     int
+	createAccount bool
 
 	// DM select mode state
 	dmSelectInput      textinput.Model
@@ -245,10 +246,11 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case switchStartMsg:
 		entries, err := listSwitchableProfiles()
-		if err != nil || len(entries) == 0 {
-			m.feed.AddInfo(redStyle.Render("No other accounts found. Run 'nostr login' to add one."))
+		if err != nil {
+			m.feed.AddInfo(redStyle.Render("Could not list accounts: " + err.Error()))
 			return m, nil
 		}
+		entries = append(entries, newAccountSwitchEntry())
 		m.mode = modeSwitch
 		m.switchEntries = entries
 		// Start cursor on active account
@@ -637,7 +639,6 @@ func (m shellModel) makeSlashCmd(npub, myHex string, relays []string, line strin
 	}
 }
 
-
 // -- Switch mode key handling --
 
 func (m shellModel) handleSwitchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -655,6 +656,11 @@ func (m shellModel) handleSwitchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.switchIdx >= 0 && m.switchIdx < len(m.switchEntries) {
 			entry := m.switchEntries[m.switchIdx]
+			if isNewAccountSwitchEntry(entry) {
+				m.createAccount = true
+				m.quitting = true
+				return m, tea.Quit
+			}
 			if entry.npub == m.npub {
 				// Already active, just exit switch mode
 				m.mode = modeNormal
@@ -726,11 +732,13 @@ func (m shellModel) renderSwitchView() string {
 	var pickerLines []string
 	pickerLines = append(pickerLines, cyanStyle.Render("Switch account:"))
 	for i, e := range m.switchEntries {
-		name := e.name
-		if name == "" {
+		var name string
+		if isNewAccountSwitchEntry(e) {
+			name = e.name
+		} else if e.name == "" {
 			name = ui.TruncateNpub(e.npub)
 		} else {
-			name = name + " (" + ui.TruncateNpub(e.npub) + ")"
+			name = e.name + " (" + ui.TruncateNpub(e.npub) + ")"
 		}
 		active := ""
 		if e.npub == m.npub {
@@ -743,7 +751,7 @@ func (m shellModel) renderSwitchView() string {
 		}
 	}
 
-	statusLine := dimStyle.Render("  ↑/↓ navigate, enter to switch, esc to cancel")
+	statusLine := dimStyle.Render("  ↑/↓ navigate, enter to switch/create, esc to cancel")
 
 	var parts []string
 	parts = append(parts, feed)
@@ -776,7 +784,7 @@ func (m shellModel) handleDMSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ti := textinput.New()
 			ti.Focus()
 			ti.CharLimit = 0
-			ti.Prompt = cyanStyle.Render("DM to "+selected.DisplayName+": ")
+			ti.Prompt = cyanStyle.Render("DM to " + selected.DisplayName + ": ")
 			ti.Width = m.width - len("DM to "+selected.DisplayName+": ") - 3
 			m.dmComposeInput = ti
 			return m, nil
@@ -792,7 +800,7 @@ func (m shellModel) handleDMSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ti := textinput.New()
 			ti.Focus()
 			ti.CharLimit = 0
-			ti.Prompt = cyanStyle.Render("DM to "+val+": ")
+			ti.Prompt = cyanStyle.Render("DM to " + val + ": ")
 			ti.Width = m.width - len("DM to "+val+": ") - 3
 			m.dmComposeInput = ti
 			return m, nil

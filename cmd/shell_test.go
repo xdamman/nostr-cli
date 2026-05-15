@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -193,6 +194,26 @@ func TestFilterCommands(t *testing.T) {
 	cmds = filterCommands([]byte("hello"), nil)
 	if cmds != nil {
 		t.Error("expected nil for non-slash input")
+	}
+}
+
+func TestSwitchCreateAccountEntryQuitsForAccountSetup(t *testing.T) {
+	m := newShellModel("npub1active", "hex", "sk", nil, "me")
+	m.mode = modeSwitch
+	m.switchEntries = []profileEntry{
+		{npub: "npub1active", name: "me"},
+		newAccountSwitchEntry(),
+	}
+	m.switchIdx = 1
+
+	next, cmd := m.handleSwitchKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(shellModel)
+
+	if !got.createAccount {
+		t.Fatal("create account entry should request account setup")
+	}
+	if cmd == nil {
+		t.Fatal("create account entry should quit the shell program")
 	}
 }
 

@@ -19,8 +19,8 @@ import (
 )
 
 var switchCmd = &cobra.Command{
-	Use:     "switch [account]",
-	Short:   "Switch active account",
+	Use:   "switch [account]",
+	Short: "Switch active account",
 	Long: `Switch to a different account. Without arguments, shows an interactive picker.
 
 An <account> can be an npub, alias, or NIP-05 address.
@@ -46,6 +46,20 @@ type profileEntry struct {
 	name      string
 	alias     string
 	relayInfo string
+}
+
+const newAccountSwitchNpub = "__new_account__"
+
+func newAccountSwitchEntry() profileEntry {
+	return profileEntry{
+		npub:      newAccountSwitchNpub,
+		name:      "+ Create new account",
+		relayInfo: "paste nsec or press enter to generate",
+	}
+}
+
+func isNewAccountSwitchEntry(e profileEntry) bool {
+	return e.npub == newAccountSwitchNpub
 }
 
 func runSwitch(cmd *cobra.Command, args []string) error {
