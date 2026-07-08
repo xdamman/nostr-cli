@@ -41,6 +41,7 @@ nostr post -f article.md --draft                         # Publish as draft (kin
 nostr post -f updated.md --slug my-article               # Update existing article
 nostr post -f article.md --hashtag nostr --hashtag bitcoin  # With hashtags
 nostr post -f article.md --title "T" --summary "S" --image https://img.url/h.jpg
+nostr post -f article.md --published-at 2024-01-15        # Custom published date (also reads published_at/date frontmatter)
 
 nostr reply note1abc... "Great post!"       # Reply with NIP-10 threading
 nostr reply <eventId> "I agree" --tag t=nostr  # Reply with extra tags
@@ -54,6 +55,15 @@ nostr dm --watch --jsonl                    # Stream ALL incoming DMs (NIP-04 + 
 nostr dm --watch --since 1h --jsonl         # Catch up and stream DMs
 nostr dm alice --watch --jsonl              # Stream DMs with alice
 ```
+
+### Feedback
+
+```bash
+nostr feedback "Love the --jsonl output"    # Send feedback to the nostr-cli team
+nostr feedback                              # Interactive prompt
+```
+
+Feedback is published as a **PUBLIC kind 1 note** from your active account, mentioning `@nostrcli` (`npub1rxavy4r7n4y4h3gr97teeqnpj7627gxna8kq4439myqwwkt09yhqyuj3mn`), to your configured relays. Anyone can read it.
 
 ### Query Events
 

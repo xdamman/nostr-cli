@@ -63,9 +63,9 @@ nostr post -f <file> [flags]
 
 Publish articles (kind 30023) or drafts (kind 30024).
 
-**Flags:** `-f, --file <path>`, `--title`, `--summary`, `--image <url>`, `--slug`, `--draft`, `--hashtag` (repeatable), `--dry-run`, `--json` / `--jsonl` / `--raw`
+**Flags:** `-f, --file <path>`, `--title`, `--summary`, `--image <url>`, `--slug`, `--draft`, `--hashtag` (repeatable), `--published-at <date>`, `--dry-run`, `--json` / `--jsonl` / `--raw`
 
-YAML frontmatter auto-parsed. CLI flags override frontmatter.
+YAML frontmatter auto-parsed (including `published_at` / `date`). CLI flags override frontmatter.
 
 **Examples:**
 ```bash
@@ -73,6 +73,7 @@ nostr post -f article.md --title "My Article"
 nostr post -f article.md --slug my-article --draft
 nostr post -f updated.md --slug my-article    # Update existing
 nostr post -f article.md --hashtag nostr --hashtag bitcoin
+nostr post -f article.md --published-at 2024-01-15   # Custom published date
 ```
 
 ### Reply
@@ -90,6 +91,22 @@ Reply with NIP-10 threading. Event ID: hex, note1..., or nevent1...
 nostr reply note1abc... "Great post!"
 nostr reply note1abc... "Tagged" --tag t=nostr
 echo "Nice work" | nostr reply note1abc...
+```
+
+### Feedback
+
+```bash
+nostr feedback [message]
+```
+
+Send feedback to the nostr-cli team. Publishes a **PUBLIC** kind 1 note from the active account mentioning `@nostrcli` to the configured relays — anyone can read it. Prompts interactively if no message is given (or reads piped stdin).
+
+**Flags:** `--dry-run`, `--json` / `--jsonl` / `--raw`
+
+**Examples:**
+```bash
+nostr feedback "The --jsonl output is great for bots"
+echo "Feature request: ..." | nostr feedback --jsonl
 ```
 
 ### Direct Messages

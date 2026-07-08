@@ -16,12 +16,13 @@ import (
 
 // articleFrontmatter holds parsed YAML frontmatter from a markdown file.
 type articleFrontmatter struct {
-	Title    string
-	Summary  string
-	Image    string
-	Slug     string
-	Hashtags []string
-	Draft    bool
+	Title       string
+	Summary     string
+	Image       string
+	Slug        string
+	Hashtags    []string
+	Draft       bool
+	PublishedAt string
 }
 
 // parseFrontmatter extracts YAML frontmatter from markdown content.
@@ -74,6 +75,8 @@ func parseFrontmatter(content string) (*articleFrontmatter, string) {
 			fm.Draft = val == "true"
 		case "hashtags":
 			fm.Hashtags = parseYAMLArray(val)
+		case "published_at", "date":
+			fm.PublishedAt = unquote(val)
 		}
 	}
 
@@ -185,7 +188,20 @@ func publishLongForm(npub, pubHex, content string, fm *articleFrontmatter, relay
 		event.Tags = append(event.Tags, nostr.Tag{"image", image})
 	}
 
-	event.Tags = append(event.Tags, nostr.Tag{"published_at", fmt.Sprintf("%d", time.Now().Unix())})
+	// Resolve published_at: --published-at flag > frontmatter (published_at/date) > now
+	publishedAt := time.Now().Unix()
+	publishedAtSrc := postPublishedAt
+	if publishedAtSrc == "" && fm != nil {
+		publishedAtSrc = fm.PublishedAt
+	}
+	if publishedAtSrc != "" {
+		ts, err := parseTimeArg(publishedAtSrc)
+		if err != nil {
+			return fmt.Errorf("invalid published date: %w", err)
+		}
+		publishedAt = int64(ts)
+	}
+	event.Tags = append(event.Tags, nostr.Tag{"published_at", fmt.Sprintf("%d", publishedAt)})
 
 	for _, ht := range hashtags {
 		event.Tags = append(event.Tags, nostr.Tag{"t", ht})
@@ -282,6 +298,9 @@ func publishLongForm(npub, pubHex, content string, fm *articleFrontmatter, relay
 		fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "Title:")), title)
 	}
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "Slug:")), slug)
+	if publishedAtSrc != "" {
+		fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "Published:")), time.Unix(publishedAt, 0).Format("2006-01-02 15:04"))
+	}
 	fmt.Printf("  %s %d\n", cyan(fmt.Sprintf("%-10s", "Kind:")), kind)
 	fmt.Printf("  %s %s\n", cyan(fmt.Sprintf("%-10s", "Event ID:")), event.ID)
 	fmt.Println()

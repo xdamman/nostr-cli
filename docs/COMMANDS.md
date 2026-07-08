@@ -111,7 +111,7 @@ nostr post --long                      # 🖥️ Long-form editor
 **Long-form (kind 30023/30024):**
 Activated by `--file`, `--long`, `--title`, or `--slug` flags.
 1. Read content from file (🤖) or built-in editor (🖥️ `--long`)
-2. Parse YAML frontmatter if present (title, summary, image, slug, hashtags, draft)
+2. Parse YAML frontmatter if present (title, summary, image, slug, hashtags, draft, published_at/date)
 3. CLI flags override frontmatter values
 4. Build kind 30023 (or 30024 if `--draft`) event
 5. Sign and publish to configured relays
@@ -127,8 +127,31 @@ Activated by `--file`, `--long`, `--title`, or `--slug` flags.
 | `--slug <string>` | 🤖 | Article identifier / d tag (for updates) |
 | `--draft` | 🤖 | Publish as draft (kind 30024) |
 | `--hashtag <string>` | 🤖 | Hashtag topics (repeatable, t tags) |
+| `--published-at <date>` | 🤖 | Custom published date (unix timestamp or ISO date; frontmatter `published_at`/`date` also recognized) |
 | `--tag key=value` | 🤖 | Add extra tags (repeatable) |
 | `--tags '<json>'` | 🤖 | Add extra tags as JSON array |
+| `--dry-run` | 🤖 | Sign but don't publish |
+| `--json` / `--jsonl` / `--raw` | 🤖 | Machine-readable output |
+
+---
+
+## `nostr feedback`
+
+Send feedback about nostr-cli to the team.
+
+```
+nostr feedback "Love the --jsonl output"   # 🤖 Non-interactive
+echo "Found a bug" | nostr feedback        # 🤖 From stdin
+nostr feedback                             # 🖥️ Interactive prompt
+```
+
+Publishes a **PUBLIC kind 1 note** from the active account mentioning `@nostrcli`
+(`npub1rxavy4r7n4y4h3gr97teeqnpj7627gxna8kq4439myqwwkt09yhqyuj3mn`) to the
+configured relays, with a `p` tag and a `t=nostrcli` tag. Anyone can read it.
+
+**Flags:**
+| Flag | Mode | Description |
+|------|------|-------------|
 | `--dry-run` | 🤖 | Sign but don't publish |
 | `--json` / `--jsonl` / `--raw` | 🤖 | Machine-readable output |
 

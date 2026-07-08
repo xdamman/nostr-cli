@@ -125,7 +125,7 @@ func TestParseFrontmatter_QuotedValues(t *testing.T) {
 
 func TestLLM_Post_LongFormFlags(t *testing.T) {
 	cmd := requireCmd(t, "post")
-	flags := []string{"file", "long", "title", "summary", "image", "slug", "draft", "hashtag"}
+	flags := []string{"file", "long", "title", "summary", "image", "slug", "draft", "hashtag", "published-at"}
 	for _, f := range flags {
 		t.Run("--"+f, func(t *testing.T) {
 			requireFlag(t, cmd, f)
@@ -141,5 +141,43 @@ func TestLLM_Post_FileHasShortFlag(t *testing.T) {
 	}
 	if f.Shorthand != "f" {
 		t.Errorf("--file shorthand = %q, want %q", f.Shorthand, "f")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// published_at frontmatter
+// ---------------------------------------------------------------------------
+
+func TestParseFrontmatter_PublishedAt(t *testing.T) {
+	input := `---
+title: Old Post
+published_at: 2024-01-15
+---
+
+Content
+`
+	fm, _ := parseFrontmatter(input)
+	if fm == nil {
+		t.Fatal("expected frontmatter, got nil")
+	}
+	if fm.PublishedAt != "2024-01-15" {
+		t.Errorf("published_at = %q, want %q", fm.PublishedAt, "2024-01-15")
+	}
+}
+
+func TestParseFrontmatter_DateAlias(t *testing.T) {
+	input := `---
+title: Old Post
+date: "2023-06-01T10:00:00Z"
+---
+
+Content
+`
+	fm, _ := parseFrontmatter(input)
+	if fm == nil {
+		t.Fatal("expected frontmatter, got nil")
+	}
+	if fm.PublishedAt != "2023-06-01T10:00:00Z" {
+		t.Errorf("published_at from date key = %q", fm.PublishedAt)
 	}
 }

@@ -34,6 +34,7 @@ var (
 	postSlugFlag    string   // --slug (d tag)
 	postDraftFlag   bool     // --draft (kind 30024)
 	postHashtags    []string // --hashtag (repeatable, t tags)
+	postPublishedAt string   // --published-at (custom published_at tag)
 )
 
 var postCmd = &cobra.Command{
@@ -63,6 +64,10 @@ Long-form content (NIP-23):
   --slug <string>      Article identifier for updates (d tag)
   --draft              Publish as draft (kind 30024 instead of 30023)
   --hashtag <string>   Hashtag topics (repeatable, t tags)
+  --published-at <t>   Custom published date (unix timestamp, ISO date like
+                       2024-01-01, or duration ago like 7d). Sets the NIP-23
+                       published_at tag. Defaults to now. Frontmatter keys
+                       published_at or date are also recognized.
 
   Using --file, --long, --title, or --slug activates long-form mode (kind 30023).
   Files with YAML frontmatter (---) auto-extract title, summary, image, slug, hashtags.
@@ -90,7 +95,8 @@ Long-form content (NIP-23):
   nostr post -f article.md --slug my-article --title "My Article" --summary "Great read"
   nostr post --long --title "Quick Thoughts"
   nostr post -f article.md --draft
-  nostr post -f updated.md --slug my-article    # Updates existing article`,
+  nostr post -f updated.md --slug my-article    # Updates existing article
+  nostr post -f article.md --published-at 2024-01-15   # Custom published date`,
 	RunE: runPost,
 }
 
@@ -109,6 +115,7 @@ func init() {
 	postCmd.Flags().StringVar(&postSlugFlag, "slug", "", "Article identifier for updates (d tag, NIP-23)")
 	postCmd.Flags().BoolVar(&postDraftFlag, "draft", false, "Publish as draft (kind 30024)")
 	postCmd.Flags().StringArrayVar(&postHashtags, "hashtag", nil, "Hashtag topics (repeatable, NIP-23 t tags)")
+	postCmd.Flags().StringVar(&postPublishedAt, "published-at", "", "Custom published date (unix timestamp or ISO date, NIP-23)")
 
 	rootCmd.AddCommand(postCmd)
 }
@@ -139,6 +146,10 @@ func runPost(cmd *cobra.Command, args []string) error {
 
 	// Detect long-form mode
 	isLongForm := postFileFlag != "" || postLongFlag || postTitleFlag != "" || postSlugFlag != ""
+
+	if postPublishedAt != "" && !isLongForm {
+		return fmt.Errorf("--published-at only applies to long-form posts (use with --file, --long, --title, or --slug)")
+	}
 
 	// Get message: from file, editor, args, piped stdin, or interactive prompt
 	var message string

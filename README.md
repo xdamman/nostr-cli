@@ -76,6 +76,7 @@ nostr post "Hello Nostr!"                                  # Post a note
 echo "Hello from a script" | nostr post                    # Post from stdin
 nostr post -f article.md --title "My Article"              # Long-form article (NIP-23)
 nostr post -f article.md --slug my-article --draft         # Publish as draft
+nostr post -f article.md --published-at 2024-01-15         # Custom published date
 nostr post "Tagged" --tag t=nostr --tag t=bitcoin          # Post with tags
 nostr post "Test" --dry-run --json                         # Sign but don't publish
 EVENT_ID=$(nostr post "Hello" --jsonl | jq -r '.id')       # Capture event ID
@@ -88,6 +89,15 @@ nostr reply note1abc... "Great post!"                      # Reply with NIP-10 t
 nostr reply note1abc... "Tagged" --tag t=nostr             # Reply with extra tags
 echo "Nice work" | nostr reply note1abc...                 # Reply from stdin
 ```
+
+### Feedback
+
+```bash
+nostr feedback "Love the --jsonl output"                   # Send feedback to the nostr-cli team
+nostr feedback                                             # Interactive prompt
+```
+
+Feedback is published as a **public** kind 1 note from your active account, mentioning `@nostrcli`, to your configured relays. Anyone can read it.
 
 ### DM
 
